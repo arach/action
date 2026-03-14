@@ -74,6 +74,7 @@ export class GuidedCaptureSession {
   private stepCurrent?: number;
   private stepTotal?: number;
   private stepLabel?: string;
+  private stopRequested = false;
 
   constructor(
     private readonly engine: CaptureEngine,
@@ -196,13 +197,22 @@ export class GuidedCaptureSession {
     this.stepTotal = timeline.steps.length;
     this.stepCurrent = undefined;
     this.stepLabel = undefined;
+    this.stopRequested = false;
 
     for (let remaining = this.countdownSeconds; remaining > 0; remaining -= 1) {
+      if (this.stopRequested) {
+        break;
+      }
       this.emit("countdown.tick", `Recording in ${remaining}`, {
         remaining,
         total: this.countdownSeconds,
       });
       await sleep(1000);
+    }
+
+    if (this.stopRequested) {
+      this.setPhase("staging", "Run aborted before capture");
+      return this.snapshot();
     }
 
     const capturePath = `${this.outputDir}/capture.mov`;
@@ -304,8 +314,10 @@ export class GuidedCaptureSession {
     await this.persistSessionFiles();
     if (this.stageHoldMsAfterComplete > 0) {
       await sleep(this.stageHoldMsAfterComplete);
+      await this.engine.clearStage();
+    } else if (this.stageHoldMsAfterComplete === 0) {
+      await this.engine.clearStage();
     }
-    await this.engine.clearStage();
 
     return this.snapshot();
   }
@@ -321,12 +333,24 @@ export class GuidedCaptureSession {
     await this.engine.replayArtifact(this.latestCapture.path);
   }
 
+  requestStop(): void {
+    this.stopRequested = true;
+    this.addLog("warning", "run.stop_requested", "Stop requested from stage controls");
+  }
+
   async clearStage(): Promise<void> {
     await this.engine.clearStage();
   }
 
+  async consumeStageControls(): Promise<string[]> {
+    return this.engine.consumeStageControls();
+  }
+
   private async executeTimeline(timeline: CompiledTimeline): Promise<void> {
     for (const [index, step] of timeline.steps.entries()) {
+      if (this.stopRequested) {
+        break;
+      }
       this.stepCurrent = index + 1;
       this.stepLabel = step.action.description;
       this.session.recordAction(step.action, "planned");
@@ -468,6 +492,7 @@ export class GuidedCaptureSession {
       stepCurrent: this.stepCurrent,
       stepTotal: this.stepTotal,
       stepLabel: this.stepLabel,
+      recentLogs: this.logEntries.slice(-3).map((entry) => entry.message),
     };
   }
 
@@ -561,6 +586,10 @@ export class MockCaptureEngine implements CaptureEngine {
 
   async captureFullScreenshot(path: string): Promise<RuntimeArtifact> {
     return this.captureScreenshot(path);
+  }
+
+  async consumeStageControls(): Promise<string[]> {
+    return [];
   }
 
   async resolveTarget(query: TargetQuery): Promise<ResolvedTarget> {

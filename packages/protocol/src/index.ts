@@ -177,6 +177,7 @@ export interface StagePresentation {
   stepCurrent?: number;
   stepTotal?: number;
   stepLabel?: string;
+  recentLogs?: string[];
 }
 
 export type HudControl =
@@ -327,6 +328,7 @@ export interface CaptureEngine {
   stopCapture(): Promise<RuntimeArtifact>;
   captureScreenshot(path: string): Promise<RuntimeArtifact>;
   captureFullScreenshot(path: string): Promise<RuntimeArtifact>;
+  consumeStageControls(): Promise<string[]>;
   resolveTarget(query: TargetQuery): Promise<ResolvedTarget>;
   performAction(action: RuntimeAction, target?: ResolvedTarget): Promise<void>;
   replayArtifact(path: string): Promise<void>;

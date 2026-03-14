@@ -795,16 +795,27 @@ struct StageOverlayState: Decodable {
     let stepCurrent: Int?
     let stepTotal: Int?
     let stepLabel: String?
+    let recentLogs: [String]?
 }
 
 final class StageOverlayView: NSView {
+    struct ControlButton {
+        let id: String
+        let title: String
+        let rect: CGRect
+        let enabled: Bool
+    }
+
     var state: StageOverlayState? {
         didSet {
             needsDisplay = true
         }
     }
 
+    var onCommand: ((String) -> Void)?
+
     let screenFrame: CGRect
+    private var buttons: [ControlButton] = []
 
     init(frame frameRect: NSRect, screenFrame: CGRect) {
         self.screenFrame = screenFrame
@@ -831,6 +842,7 @@ final class StageOverlayView: NSView {
         drawBackdrop(state: state, viewport: viewport)
         drawViewportFrame(state: state, viewport: viewport)
         drawHudPill(state: state, viewport: viewport)
+        drawControlDock(state: state, viewport: viewport)
 
         if state.phase == "countdown", let countdown = state.countdownRemaining {
             drawCountdown(String(countdown), viewport: viewport)
@@ -996,6 +1008,16 @@ final class StageOverlayView: NSView {
             font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
             color: NSColor(calibratedWhite: 1, alpha: 0.62)
         )
+
+        let logs = state.recentLogs ?? []
+        if !logs.isEmpty {
+            drawText(
+                text: logs[logs.count - 1],
+                in: CGRect(x: rect.minX + 16, y: rect.minY - 18, width: rect.width, height: 14),
+                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                color: NSColor(calibratedWhite: 1, alpha: 0.55)
+            )
+        }
     }
 
     private func phaseDetail(for state: StageOverlayState) -> String {
@@ -1048,6 +1070,82 @@ final class StageOverlayView: NSView {
         ]
         text.draw(in: rect, withAttributes: attrs)
     }
+
+    private func drawControlDock(state: StageOverlayState, viewport: CGRect) {
+        let buttonSize = CGSize(width: 68, height: 24)
+        let spacing: CGFloat = 8
+        let labels: [(id: String, title: String)] = [
+            ("start", "Start"),
+            ("stop", "Stop"),
+            ("replay", "Replay"),
+            ("clear", "Clear"),
+            ("quit", "Quit"),
+        ]
+        let dockWidth = CGFloat(labels.count) * buttonSize.width + CGFloat(labels.count - 1) * spacing + 20
+        let dockHeight: CGFloat = 42
+        let dockX = min(bounds.width - dockWidth - 24, max(24, viewport.midX - dockWidth / 2))
+        let dockY = max(24, viewport.minY - 148)
+        let dockRect = CGRect(x: dockX, y: dockY, width: dockWidth, height: dockHeight)
+        let dockPath = NSBezierPath(roundedRect: dockRect, xRadius: 14, yRadius: 14)
+        NSColor(calibratedWhite: 0.05, alpha: 0.78).setFill()
+        dockPath.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.1).setStroke()
+        dockPath.lineWidth = 1
+        dockPath.stroke()
+
+        buttons = []
+        for (index, label) in labels.enumerated() {
+            let x = dockRect.minX + 10 + CGFloat(index) * (buttonSize.width + spacing)
+            let buttonRect = CGRect(x: x, y: dockRect.minY + 9, width: buttonSize.width, height: buttonSize.height)
+            let enabled = isButtonEnabled(id: label.id, phase: state.phase)
+            drawButton(label: label.title, rect: buttonRect, enabled: enabled)
+            buttons.append(ControlButton(id: label.id, title: label.title, rect: buttonRect, enabled: enabled))
+        }
+    }
+
+    private func isButtonEnabled(id: String, phase: String) -> Bool {
+        switch id {
+        case "start":
+            return phase == "staging" || phase == "completed" || phase == "failed" || phase == "paused"
+        case "stop":
+            return phase == "countdown" || phase == "recording" || phase == "paused"
+        case "replay":
+            return phase == "completed"
+        default:
+            return true
+        }
+    }
+
+    private func drawButton(label: String, rect: CGRect, enabled: Bool) {
+        let buttonPath = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
+        let fill = enabled
+            ? NSColor(calibratedWhite: 1, alpha: 0.12)
+            : NSColor(calibratedWhite: 1, alpha: 0.04)
+        let stroke = enabled
+            ? NSColor(calibratedWhite: 1, alpha: 0.2)
+            : NSColor(calibratedWhite: 1, alpha: 0.08)
+        fill.setFill()
+        buttonPath.fill()
+        stroke.setStroke()
+        buttonPath.lineWidth = 1
+        buttonPath.stroke()
+
+        drawText(
+            text: label,
+            in: CGRect(x: rect.minX, y: rect.minY + 4, width: rect.width, height: 14),
+            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
+            color: enabled ? NSColor.white : NSColor(calibratedWhite: 1, alpha: 0.32),
+            alignment: .center
+        )
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let button = buttons.first(where: { $0.enabled && $0.rect.contains(point) }) else {
+            return
+        }
+        onCommand?(button.id)
+    }
 }
 
 @MainActor
@@ -1056,15 +1154,17 @@ final class StageOverlayController: NSObject {
     private let stopFile: String
     private let writer: ResponseWriter
     private let logger: DebugLogger
+    private let controlFile: String?
     private var window: NSWindow?
     private var overlayView: StageOverlayView?
     private var lastStateData: Data?
 
-    init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?) {
+    init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?, controlFile: String?) {
         self.stateFile = stateFile
         self.stopFile = stopFile
         self.writer = ResponseWriter(replyFile: replyFile)
         self.logger = DebugLogger(path: debugLogPath)
+        self.controlFile = controlFile
     }
 
     func run() throws {
@@ -1145,13 +1245,39 @@ final class StageOverlayController: NSObject {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.ignoresMouseEvents = true
+        window.ignoresMouseEvents = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
         let overlayView = StageOverlayView(frame: CGRect(origin: .zero, size: screen.frame.size), screenFrame: screen.frame)
+        overlayView.onCommand = { [weak self] command in
+            self?.appendControlCommand(command)
+        }
         window.contentView = overlayView
         self.window = window
         self.overlayView = overlayView
+    }
+
+    private func appendControlCommand(_ command: String) {
+        guard let controlFile else {
+            return
+        }
+
+        let line = "\(command)\n"
+        do {
+            let url = URL(fileURLWithPath: controlFile)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: controlFile) {
+                let handle = try FileHandle(forWritingTo: url)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data(line.utf8))
+                try handle.close()
+            } else {
+                try Data(line.utf8).write(to: url)
+            }
+            logger.log("stage-overlay: control \(command)")
+        } catch {
+            logger.log("stage-overlay: control write failed \(error.localizedDescription)")
+        }
     }
 }
 
@@ -1179,12 +1305,14 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         let stopFile = try options.required("stop-file")
         let replyFile = options.options["reply-file"]
         let debugLogPath = options.options["debug-log"]
+        let controlFile = options.options["control-file"]
         try await MainActor.run {
             let controller = StageOverlayController(
                 stateFile: stateFile,
                 stopFile: stopFile,
                 replyFile: replyFile,
-                debugLogPath: debugLogPath
+                debugLogPath: debugLogPath,
+                controlFile: controlFile
             )
             try controller.run()
         }

@@ -25,12 +25,19 @@ class HudController {
   private currentSession?: GuidedCaptureSession;
   private currentTimeline?: ReturnType<typeof compileScenario>["timeline"];
   private readonly listeners = new Set<ServerResponse>();
+  private runPromise?: Promise<HudState>;
   private state: HudState = {
     engineMode: "mock",
     events: [],
     sceneSteps: [],
     status: "idle",
   };
+
+  constructor() {
+    setInterval(() => {
+      void this.pollStageControls();
+    }, 220);
+  }
 
   getState(): HudState {
     return this.state;
@@ -64,7 +71,7 @@ class HudController {
       sessionId: `session_${scenario.id.replace(/[^a-z0-9]+/gi, "_")}`,
       outputDir: resolve(process.cwd(), "artifacts", "sessions", scenario.id),
       captureProfile: "draft",
-      stageHoldMsAfterComplete: 0,
+      stageHoldMsAfterComplete: -1,
       initialActionDelayMs: 650,
       actionCadenceMs: 900,
     });
@@ -125,43 +132,53 @@ class HudController {
     if (!this.currentSession || !this.currentTimeline) {
       return this.state;
     }
+    const session = this.currentSession;
+    const timeline = this.currentTimeline;
 
-    if (this.state.status === "running") {
+    if (this.runPromise) {
+      return this.runPromise;
+    }
+
+    this.runPromise = (async () => {
+      this.state = {
+        ...this.state,
+        status: "running",
+        error: undefined,
+      };
+      this.broadcast();
+
+      try {
+        await session.beginRun(timeline);
+        await this.pushSnapshot();
+
+        if (session.snapshot().phase === "recording" || session.snapshot().phase === "completing") {
+          await session.captureScreenshot("screenshot-viewport-final.png", "viewport");
+          await session.captureScreenshot("screenshot-full-final.png", "full");
+          await this.pushSnapshot();
+
+          await session.stop();
+        }
+        this.state = {
+          ...this.state,
+          snapshot: session.snapshot(),
+          status: "completed",
+        };
+      } catch (error) {
+        this.state = {
+          ...this.state,
+          snapshot: session.snapshot(),
+          status: "failed",
+          error: error instanceof Error ? error.message : "Unknown HUD run error",
+        };
+      } finally {
+        this.runPromise = undefined;
+      }
+
+      this.broadcast();
       return this.state;
-    }
+    })();
 
-    this.state = {
-      ...this.state,
-      status: "running",
-      error: undefined,
-    };
-    this.broadcast();
-
-    try {
-      await this.currentSession.beginRun(this.currentTimeline);
-      await this.pushSnapshot();
-
-      await this.currentSession.captureScreenshot("screenshot-viewport-final.png", "viewport");
-      await this.currentSession.captureScreenshot("screenshot-full-final.png", "full");
-      await this.pushSnapshot();
-
-      await this.currentSession.stop();
-      this.state = {
-        ...this.state,
-        snapshot: this.currentSession.snapshot(),
-        status: "completed",
-      };
-    } catch (error) {
-      this.state = {
-        ...this.state,
-        snapshot: this.currentSession.snapshot(),
-        status: "failed",
-        error: error instanceof Error ? error.message : "Unknown HUD run error",
-      };
-    }
-
-    this.broadcast();
-    return this.state;
+    return this.runPromise;
   }
 
   async replay(): Promise<HudState> {
@@ -333,6 +350,65 @@ class HudController {
 
     for (const listener of this.listeners) {
       listener.write(payload);
+    }
+  }
+
+  private async pollStageControls(): Promise<void> {
+    if (!this.currentSession || this.state.engineMode !== "macos") {
+      return;
+    }
+    const session = this.currentSession;
+
+    const commands = await session.consumeStageControls();
+    if (commands.length === 0) {
+      return;
+    }
+
+    for (const command of commands) {
+      switch (command) {
+        case "start":
+          if (this.state.status === "staged") {
+            void this.run();
+          } else {
+            void this.start(this.state.engineMode);
+          }
+          break;
+        case "stop":
+          if (this.state.status === "running") {
+            session.requestStop();
+            this.state = {
+              ...this.state,
+              snapshot: session.snapshot(),
+            };
+            this.broadcast();
+          }
+          break;
+        case "replay":
+          void this.replay();
+          break;
+        case "clear":
+        case "quit":
+          if (!this.runPromise) {
+            await session.clearStage();
+            this.currentSession = undefined;
+            this.currentTimeline = undefined;
+            this.state = {
+              ...this.state,
+              snapshot: this.state.snapshot
+                ? {
+                    ...this.state.snapshot,
+                    phase: "created",
+                    isRecording: false,
+                  }
+                : this.state.snapshot,
+              status: "idle",
+            };
+            this.broadcast();
+          }
+          break;
+        default:
+          break;
+      }
     }
   }
 }

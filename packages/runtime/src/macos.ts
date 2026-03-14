@@ -46,6 +46,7 @@ export class MacOSCommandEngine implements CaptureEngine {
   private overlayStatePath?: string;
   private overlayStopPath?: string;
   private overlayLogPath?: string;
+  private overlayControlPath?: string;
   private overlayActive = false;
   private overlayPid?: number;
 
@@ -87,10 +88,12 @@ export class MacOSCommandEngine implements CaptureEngine {
     this.overlayStatePath = paths.statePath;
     this.overlayStopPath = paths.stopPath;
     this.overlayLogPath = paths.logPath;
+    this.overlayControlPath = paths.controlPath;
 
     await mkdir(dirname(paths.statePath), { recursive: true });
     await rm(paths.stopPath, { force: true });
     await rm(paths.logPath, { force: true });
+    await rm(paths.controlPath, { force: true });
     await this.writeOverlayState(paths.statePath, presentation);
 
     if (this.overlayActive) {
@@ -107,6 +110,8 @@ export class MacOSCommandEngine implements CaptureEngine {
       paths.stopPath,
       "--debug-log",
       paths.logPath,
+      "--control-file",
+      paths.controlPath,
     );
     const response = JSON.parse(stdout) as { detail?: string };
     this.overlayPid = response.detail ? Number(response.detail) : undefined;
@@ -144,6 +149,7 @@ export class MacOSCommandEngine implements CaptureEngine {
     this.overlayLogPath = undefined;
     this.overlayStopPath = undefined;
     this.overlayStatePath = undefined;
+    this.overlayControlPath = undefined;
   }
 
   async setBackdrop(_backdrop: BackdropPreset): Promise<void> {}
@@ -308,6 +314,27 @@ export class MacOSCommandEngine implements CaptureEngine {
     };
   }
 
+  async consumeStageControls(): Promise<string[]> {
+    const controlPath = this.overlayControlPath;
+    if (!controlPath) {
+      return [];
+    }
+
+    try {
+      const raw = await readFile(controlPath, "utf8");
+      const commands = raw
+        .split(/\r?\n/g)
+        .map((line) => line.trim().toLowerCase())
+        .filter(Boolean);
+      if (commands.length > 0) {
+        await writeFile(controlPath, "");
+      }
+      return commands;
+    } catch {
+      return [];
+    }
+  }
+
   async resolveTarget(query: TargetQuery): Promise<ResolvedTarget> {
     return {
       id: query.semanticId ?? query.text ?? "target",
@@ -413,6 +440,7 @@ export class MacOSCommandEngine implements CaptureEngine {
       statePath: resolve(root, "stage.json"),
       stopPath: resolve(root, "stage.stop"),
       logPath: resolve(root, "stage.log"),
+      controlPath: resolve(root, "stage.controls"),
     };
   }
 
