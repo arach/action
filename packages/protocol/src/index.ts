@@ -321,7 +321,7 @@ export interface CaptureEngine {
   setBackdrop(backdrop: BackdropPreset): Promise<void>;
   launchApp(app: TargetApp): Promise<SurfaceRef>;
   focusSurface(surfaceId: string): Promise<void>;
-  configureViewport(viewport: StageViewport): Promise<void>;
+  configureViewport(viewport: StageViewport): Promise<StageViewport>;
   startCapture(request: CaptureStartRequest): Promise<void>;
   pauseCapture(): Promise<void>;
   resumeCapture(): Promise<void>;

@@ -37,6 +37,7 @@ enum ActionHostCommand: String {
     case clickCalculatorButton = "click-calculator-button"
     case inspectCalculatorButtons = "inspect-calculator-buttons"
     case setWindowFrame = "set-window-frame"
+    case getWindowFrame = "get-window-frame"
     case recordRegion = "record-region"
     case screenshotRegion = "screenshot-region"
     case screenshotScreen = "screenshot-screen"
@@ -291,6 +292,42 @@ func sizeValue(_ size: CGSize) -> AXValue {
     return AXValueCreate(.cgSize, &size)!
 }
 
+func point(from value: AnyObject?) -> CGPoint? {
+    guard let value else {
+        return nil
+    }
+    guard CFGetTypeID(value) == AXValueGetTypeID() else {
+        return nil
+    }
+    let ax = unsafeDowncast(value, to: AXValue.self)
+    guard AXValueGetType(ax) == .cgPoint else {
+        return nil
+    }
+    var point = CGPoint.zero
+    guard AXValueGetValue(ax, .cgPoint, &point) else {
+        return nil
+    }
+    return point
+}
+
+func size(from value: AnyObject?) -> CGSize? {
+    guard let value else {
+        return nil
+    }
+    guard CFGetTypeID(value) == AXValueGetTypeID() else {
+        return nil
+    }
+    let ax = unsafeDowncast(value, to: AXValue.self)
+    guard AXValueGetType(ax) == .cgSize else {
+        return nil
+    }
+    var size = CGSize.zero
+    guard AXValueGetValue(ax, .cgSize, &size) else {
+        return nil
+    }
+    return size
+}
+
 func setWindowFrame(bundleId: String, rect: CGRect) throws {
     let window = try firstWindowElement(for: bundleId)
 
@@ -311,6 +348,22 @@ func setWindowFrame(bundleId: String, rect: CGRect) throws {
     // Some native apps expose a fixed or constrained window size. Positioning is
     // still useful for viewport capture, so size failure is best-effort only.
     _ = sizeResult
+}
+
+struct WindowFrameResponse: Encodable {
+    let status: String
+    let bundleId: String
+    let frame: OverlayBounds
+}
+
+func getWindowFrame(bundleId: String) throws -> CGRect {
+    let window = try firstWindowElement(for: bundleId)
+    let position = point(from: axValue(window, attribute: kAXPositionAttribute))
+    let size = size(from: axValue(window, attribute: kAXSizeAttribute))
+    guard let position, let size else {
+        throw ActionHostError.accessibilityLookupFailed("Failed to read window frame for \(bundleId)")
+    }
+    return CGRect(origin: position, size: size)
 }
 
 func findButton(in root: AXUIElement, label: String) -> AXUIElement? {
@@ -767,7 +820,7 @@ func captureScreenScreenshot(outputPath: String, writer: ResponseWriter) async t
     try writer.write(ActionHostResponse(status: "screenshot", outputPath: outputPath, detail: "main-display"))
 }
 
-struct OverlayBounds: Decodable {
+struct OverlayBounds: Codable {
     let x: Double
     let y: Double
     let width: Double
@@ -1092,6 +1145,18 @@ final class StageControlDockView: NSView {
     var summary: String = "Guided capture session" {
         didSet { needsDisplay = true }
     }
+    var detail: String? {
+        didSet { needsDisplay = true }
+    }
+    var stepLabel: String? {
+        didSet { needsDisplay = true }
+    }
+    var recentLogs: [String] = [] {
+        didSet { needsDisplay = true }
+    }
+    var elapsedMs: Double? {
+        didSet { needsDisplay = true }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1116,52 +1181,113 @@ final class StageControlDockView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
-        NSColor(calibratedWhite: 0.03, alpha: 0.9).setFill()
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
+        NSColor(calibratedWhite: 0.04, alpha: 0.94).setFill()
         path.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.16).setStroke()
+        NSColor(calibratedWhite: 1, alpha: 0.1).setStroke()
         path.lineWidth = 1
         path.stroke()
 
+        let insets: CGFloat = 14
+        let top: CGFloat = bounds.height - insets
+        let headerHeight: CGFloat = 64
+        let headerRect = CGRect(x: insets, y: top - headerHeight, width: bounds.width - (insets * 2), height: headerHeight)
+        let controlsHeight: CGFloat = 80
+        let controlsRect = CGRect(
+            x: insets,
+            y: headerRect.minY - 10 - controlsHeight,
+            width: headerRect.width,
+            height: controlsHeight
+        )
+        let logsRect = CGRect(
+            x: insets,
+            y: insets,
+            width: headerRect.width,
+            height: max(120, controlsRect.minY - insets - 12)
+        )
+
+        drawHeader(in: headerRect)
+        drawControlStrip(in: controlsRect)
+        drawLogPanel(in: logsRect)
+    }
+
+    private func drawHeader(in rect: CGRect) {
+        let phaseColor: NSColor = phase == "recording"
+            ? NSColor(calibratedRed: 0.98, green: 0.38, blue: 0.38, alpha: 0.98)
+            : NSColor(calibratedWhite: 1, alpha: 0.86)
+
         drawText(
             text: phase.uppercased(),
-            in: CGRect(x: 10, y: bounds.height - 20, width: 90, height: 12),
-            font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
-            color: phase == "recording" ? NSColor(calibratedWhite: 1.0, alpha: 0.92) : NSColor(calibratedWhite: 1, alpha: 0.72),
-            alignment: .left
+            in: CGRect(x: rect.minX + 18, y: rect.maxY - 24, width: 160, height: 14),
+            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
+            color: phaseColor,
+            alignment: .left,
+            lineBreak: .byTruncatingTail
         )
         drawText(
             text: targetApp,
-            in: CGRect(x: bounds.width - 120, y: bounds.height - 20, width: 110, height: 12),
-            font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
-            color: NSColor(calibratedWhite: 1, alpha: 0.58),
-            alignment: .right
+            in: CGRect(x: rect.maxX - 150, y: rect.maxY - 24, width: 140, height: 14),
+            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            color: NSColor(calibratedWhite: 1, alpha: 0.6),
+            alignment: .right,
+            lineBreak: .byTruncatingTail
         )
         drawText(
             text: summary,
-            in: CGRect(x: 10, y: bounds.height - 34, width: bounds.width - 20, height: 12),
-            font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
-            color: NSColor(calibratedWhite: 1, alpha: 0.58),
-            alignment: .left
+            in: CGRect(x: rect.minX + 18, y: rect.maxY - 42, width: rect.width - 36, height: 14),
+            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium),
+            color: NSColor(calibratedWhite: 1, alpha: 0.88),
+            alignment: .left,
+            lineBreak: .byTruncatingTail
         )
+        if let detail, !detail.isEmpty {
+            drawText(
+                text: detail,
+                in: CGRect(x: rect.minX + 18, y: rect.maxY - 57, width: rect.width - 36, height: 13),
+                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                color: NSColor(calibratedWhite: 1, alpha: 0.52),
+                alignment: .left,
+                lineBreak: .byTruncatingTail
+            )
+        }
+    }
+
+    private func drawControlStrip(in rect: CGRect) {
+        let container = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+        NSColor(calibratedWhite: 1, alpha: 0.04).setFill()
+        container.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.08).setStroke()
+        container.lineWidth = 1
+        container.stroke()
+
+        if let stepLabel, !stepLabel.isEmpty {
+            drawText(
+                text: stepLabel,
+                in: CGRect(x: rect.minX + 12, y: rect.maxY - 18, width: rect.width - 24, height: 12),
+                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                color: NSColor(calibratedWhite: 1, alpha: 0.5),
+                alignment: .left,
+                lineBreak: .byTruncatingTail
+            )
+        }
 
         for def in defs {
-            let buttonPath = NSBezierPath(roundedRect: def.rect, xRadius: 3, yRadius: 3)
+            let buttonPath = NSBezierPath(roundedRect: def.rect, xRadius: 4, yRadius: 4)
             var fill = def.enabled
-                ? NSColor(calibratedWhite: 1, alpha: 0.12)
+                ? NSColor(calibratedWhite: 1, alpha: 0.11)
                 : NSColor(calibratedWhite: 1, alpha: 0.05)
             let stroke = def.enabled
-                ? NSColor(calibratedWhite: 1, alpha: 0.25)
+                ? NSColor(calibratedWhite: 1, alpha: 0.18)
                 : NSColor(calibratedWhite: 1, alpha: 0.08)
 
             if hoveredId == def.id && def.enabled {
-                fill = NSColor(calibratedWhite: 1, alpha: 0.18)
+                fill = NSColor(calibratedWhite: 1, alpha: 0.2)
             }
 
             if def.id == "start" && def.enabled {
-                NSColor(calibratedWhite: 1, alpha: 0.2).setFill()
+                NSColor(calibratedWhite: 1, alpha: 0.24).setFill()
             } else if def.id == "stop" && def.enabled {
-                NSColor(calibratedRed: 0.8, green: 0.35, blue: 0.35, alpha: hoveredId == def.id ? 0.28 : 0.2).setFill()
+                NSColor(calibratedRed: 0.82, green: 0.32, blue: 0.32, alpha: hoveredId == def.id ? 0.3 : 0.22).setFill()
             } else {
                 fill.setFill()
             }
@@ -1172,23 +1298,100 @@ final class StageControlDockView: NSView {
 
             drawText(
                 text: def.title,
-                in: CGRect(x: def.rect.minX, y: def.rect.minY + 5, width: def.rect.width, height: 16),
-                font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
+                in: CGRect(x: def.rect.minX, y: def.rect.minY + 9, width: def.rect.width, height: 15),
+                font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
                 color: def.enabled ? NSColor.white : NSColor(calibratedWhite: 1, alpha: 0.34),
-                alignment: .center
+                alignment: .center,
+                lineBreak: .byTruncatingTail
+            )
+        }
+    }
+
+    private func drawLogPanel(in rect: CGRect) {
+        let panel = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+        NSColor(calibratedWhite: 1, alpha: 0.03).setFill()
+        panel.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.08).setStroke()
+        panel.lineWidth = 1
+        panel.stroke()
+
+        drawText(
+            text: "LOG",
+            in: CGRect(x: rect.minX + 12, y: rect.maxY - 20, width: 60, height: 12),
+            font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
+            color: NSColor(calibratedWhite: 1, alpha: 0.45),
+            alignment: .left
+        )
+        if let elapsedMs {
+            drawText(
+                text: elapsedText(elapsedMs),
+                in: CGRect(x: rect.maxX - 110, y: rect.maxY - 20, width: 98, height: 12),
+                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                color: NSColor(calibratedWhite: 1, alpha: 0.45),
+                alignment: .right
+            )
+        }
+
+        let lineHeight: CGFloat = 15
+        let topY = rect.maxY - 36
+        let maxLines = max(1, Int((rect.height - 48) / lineHeight))
+        let lines = Array(recentLogs.suffix(maxLines))
+        if lines.isEmpty {
+            drawText(
+                text: "No events yet.",
+                in: CGRect(x: rect.minX + 12, y: rect.minY + 10, width: rect.width - 24, height: 14),
+                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                color: NSColor(calibratedWhite: 1, alpha: 0.34),
+                alignment: .left
+            )
+            return
+        }
+
+        for (index, line) in lines.reversed().enumerated() {
+            let y = topY - (CGFloat(index) * lineHeight)
+            if y < rect.minY + 8 {
+                break
+            }
+            let alpha = max(0.32, 0.78 - (CGFloat(index) * 0.08))
+            drawText(
+                text: line,
+                in: CGRect(x: rect.minX + 12, y: y, width: rect.width - 24, height: lineHeight),
+                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                color: NSColor(calibratedWhite: 1, alpha: alpha),
+                alignment: .left,
+                lineBreak: .byTruncatingTail
             )
         }
     }
 
     private func layoutButtons() {
-        let buttonSize = CGSize(width: 74, height: 28)
-        let spacing: CGFloat = 8
-        let startX: CGFloat = 10
-        let y: CGFloat = 8
+        let insets: CGFloat = 14
+        let headerHeight: CGFloat = 64
+        let controlsHeight: CGFloat = 80
+        let controlsRect = CGRect(
+            x: insets + 10,
+            y: bounds.height - insets - headerHeight - 10 - controlsHeight + 10,
+            width: bounds.width - ((insets + 10) * 2),
+            height: controlsHeight - 22
+        )
+        let rowCount = 2
+        let colCount = 3
+        let spacingX: CGFloat = 8
+        let spacingY: CGFloat = 8
+        let buttonWidth = floor((controlsRect.width - (CGFloat(colCount - 1) * spacingX)) / CGFloat(colCount))
+        let buttonHeight = floor((controlsRect.height - spacingY) / CGFloat(rowCount))
+        let slots: [(Int, Int)] = [
+            (0, 0), (1, 0), (2, 0),
+            (0, 1), (1, 1)
+        ]
 
-        for (index, _) in defs.enumerated() {
-            let x = startX + CGFloat(index) * (buttonSize.width + spacing)
-            defs[index].rect = CGRect(x: x, y: y, width: buttonSize.width, height: buttonSize.height)
+        for (index, slot) in slots.enumerated() {
+            guard index < defs.count else {
+                break
+            }
+            let x = controlsRect.minX + CGFloat(slot.0) * (buttonWidth + spacingX)
+            let y = controlsRect.maxY - buttonHeight - CGFloat(slot.1) * (buttonHeight + spacingY)
+            defs[index].rect = CGRect(x: x, y: y, width: buttonWidth, height: buttonHeight)
         }
     }
 
@@ -1257,21 +1460,36 @@ final class StageControlDockView: NSView {
         return self
     }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layoutButtons()
+        needsDisplay = true
+    }
+
     private func drawText(
         text: String,
         in rect: CGRect,
         font: NSFont,
         color: NSColor,
-        alignment: NSTextAlignment
+        alignment: NSTextAlignment,
+        lineBreak: NSLineBreakMode = .byWordWrapping
     ) {
         let style = NSMutableParagraphStyle()
         style.alignment = alignment
+        style.lineBreakMode = lineBreak
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,
             .paragraphStyle: style,
         ]
         text.draw(in: rect, withAttributes: attrs)
+    }
+
+    private func elapsedText(_ ms: Double) -> String {
+        let totalSeconds = Int(max(0, ms) / 1000)
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 }
 
@@ -1359,12 +1577,15 @@ final class StageOverlayController: NSObject {
         controlView?.phase = state.phase
         controlView?.targetApp = state.targetApp ?? "Action"
         controlView?.summary = state.summary
-        if let dockFrame = controlDockFrame(screenFrame: screen.frame, viewportRect: viewportRect) {
+        controlView?.detail = state.detail
+        controlView?.stepLabel = state.stepLabel
+        controlView?.recentLogs = state.recentLogs ?? []
+        controlView?.elapsedMs = state.elapsedMs
+        if let dockFrame = controlPanelFrame(screenFrame: screen.frame, viewportRect: viewportRect) {
             controlWindow?.setFrame(dockFrame, display: true)
         }
         overlayWindow?.orderFrontRegardless()
-        controlWindow?.makeKeyAndOrderFront(nil)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        controlWindow?.orderFrontRegardless()
         logger.log("stage-overlay: window ordered front viewport=\(viewportRect)")
     }
 
@@ -1388,7 +1609,7 @@ final class StageOverlayController: NSObject {
         self.overlayWindow = overlayWindow
         self.overlayView = overlayView
 
-        let controlSize = CGSize(width: 420, height: 72)
+        let controlSize = CGSize(width: 360, height: 520)
         let controlWindow = StageControlDockWindow(
             contentRect: CGRect(origin: .zero, size: controlSize),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -1444,23 +1665,28 @@ final class StageOverlayController: NSObject {
         NSApplication.shared.stop(nil)
     }
 
-    private func controlDockFrame(screenFrame: CGRect, viewportRect: CGRect) -> CGRect? {
-        let dockWidth: CGFloat = 420
-        let dockHeight: CGFloat = 72
-        let localViewport = CGRect(
-            x: viewportRect.minX - screenFrame.minX,
-            y: viewportRect.minY - screenFrame.minY,
-            width: viewportRect.width,
-            height: viewportRect.height
+    private func controlPanelFrame(screenFrame: CGRect, viewportRect: CGRect) -> CGRect? {
+        let margin: CGFloat = 16
+        let panelWidth: CGFloat = 360
+        let panelHeight = min(screenFrame.height - (margin * 2), max(360, viewportRect.height + 24))
+        let desiredY = viewportRect.minY - 12
+        let clampedY = min(
+            screenFrame.maxY - panelHeight - margin,
+            max(screenFrame.minY + margin, desiredY)
         )
-        let localX = min(screenFrame.width - dockWidth - 16, max(16, localViewport.maxX - dockWidth))
-        let localY = min(screenFrame.height - dockHeight - 16, max(24, localViewport.maxY + 10))
-        return CGRect(
-            x: screenFrame.minX + localX,
-            y: screenFrame.minY + localY,
-            width: dockWidth,
-            height: dockHeight
-        )
+
+        let rightX = viewportRect.maxX + 16
+        if rightX + panelWidth <= screenFrame.maxX - margin {
+            return CGRect(x: rightX, y: clampedY, width: panelWidth, height: panelHeight)
+        }
+
+        let leftX = viewportRect.minX - panelWidth - 16
+        if leftX >= screenFrame.minX + margin {
+            return CGRect(x: leftX, y: clampedY, width: panelWidth, height: panelHeight)
+        }
+
+        let fallbackX = screenFrame.maxX - panelWidth - margin
+        return CGRect(x: fallbackX, y: clampedY, width: panelWidth, height: panelHeight)
     }
 
     private func configureAppIcon() {
@@ -1598,6 +1824,21 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         let rect = try rectFromOptions(options)
         try setWindowFrame(bundleId: bundleId, rect: rect)
         try writer.write(ActionHostResponse(status: "window-framed", outputPath: nil, detail: bundleId))
+    case .getWindowFrame:
+        let bundleId = try options.required("bundle-id")
+        let rect = try getWindowFrame(bundleId: bundleId)
+        try writer.write(
+            WindowFrameResponse(
+                status: "window-frame",
+                bundleId: bundleId,
+                frame: OverlayBounds(
+                    x: rect.origin.x,
+                    y: rect.origin.y,
+                    width: rect.size.width,
+                    height: rect.size.height
+                )
+            )
+        )
     }
 }
 

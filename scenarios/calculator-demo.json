@@ -10,10 +10,10 @@
     "viewport": {
       "id": "main",
       "bounds": {
-        "x": 320,
-        "y": 180,
-        "width": 960,
-        "height": 720
+        "x": 220,
+        "y": 150,
+        "width": 420,
+        "height": 620
       },
       "dimming": "surround"
     }

@@ -178,17 +178,19 @@ export class MacOSCommandEngine implements CaptureEngine {
     this.focusedSurfaceId = surfaceId;
   }
 
-  async configureViewport(viewport: StageViewport): Promise<void> {
-    this.activeViewport = viewport;
+  async configureViewport(viewport: StageViewport): Promise<StageViewport> {
+    let resolvedViewport = viewport;
 
     const surfaceId = viewport.surfaceId ?? this.focusedSurfaceId;
     if (!surfaceId) {
-      return;
+      this.activeViewport = resolvedViewport;
+      return resolvedViewport;
     }
 
     const app = this.surfaces.get(surfaceId);
     if (!app) {
-      return;
+      this.activeViewport = resolvedViewport;
+      return resolvedViewport;
     }
 
     await this.runHost(
@@ -204,6 +206,27 @@ export class MacOSCommandEngine implements CaptureEngine {
       "--height",
       String(viewport.bounds.height),
     );
+
+    try {
+      const { stdout } = await this.runHost(
+        "get-window-frame",
+        "--bundle-id",
+        app.bundleId,
+      );
+      const payload = JSON.parse(stdout) as {
+        frame?: { x: number; y: number; width: number; height: number };
+      };
+      if (payload.frame) {
+        resolvedViewport = {
+          ...viewport,
+          bounds: payload.frame,
+          surfaceId,
+        };
+      }
+    } catch {}
+
+    this.activeViewport = resolvedViewport;
+    return resolvedViewport;
   }
 
   async startCapture(request: { outputPath: string; viewport?: StageViewport; profile?: CaptureProfile }): Promise<void> {

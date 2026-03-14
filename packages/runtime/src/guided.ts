@@ -143,17 +143,14 @@ export class GuidedCaptureSession {
 
     const surface = await this.engine.launchApp(input.targetApp);
     await this.engine.focusSurface(surface.id);
-    await this.engine.configureViewport({
+    const configuredViewport = await this.engine.configureViewport({
       ...input.viewport,
       surfaceId: surface.id,
     });
 
     this.stage = {
       ...this.stage,
-      viewport: {
-        ...input.viewport,
-        surfaceId: surface.id,
-      },
+      viewport: configuredViewport,
     };
     await this.syncStagePresentation("Stage ready", `${input.targetApp.name} framed in viewport`);
 
@@ -492,7 +489,7 @@ export class GuidedCaptureSession {
       stepCurrent: this.stepCurrent,
       stepTotal: this.stepTotal,
       stepLabel: this.stepLabel,
-      recentLogs: this.logEntries.slice(-3).map((entry) => entry.message),
+      recentLogs: this.logEntries.slice(-12).map((entry) => entry.message),
     };
   }
 
@@ -549,7 +546,9 @@ export class MockCaptureEngine implements CaptureEngine {
 
   async focusSurface(_surfaceId: string): Promise<void> {}
 
-  async configureViewport(_viewport: StageViewport): Promise<void> {}
+  async configureViewport(viewport: StageViewport): Promise<StageViewport> {
+    return viewport;
+  }
 
   async startCapture(input: { outputPath: string }): Promise<void> {
     this.activeCapturePath = input.outputPath;
