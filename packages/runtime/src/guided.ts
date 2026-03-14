@@ -65,6 +65,9 @@ export class GuidedCaptureSession {
   private recordingStartedAt?: number;
   private stageSummary = "Ready";
   private stageDetail?: string;
+  private stepCurrent?: number;
+  private stepTotal?: number;
+  private stepLabel?: string;
 
   constructor(
     private readonly engine: CaptureEngine,
@@ -181,6 +184,9 @@ export class GuidedCaptureSession {
     }
 
     this.setPhase("countdown", "Countdown started");
+    this.stepTotal = timeline.steps.length;
+    this.stepCurrent = undefined;
+    this.stepLabel = undefined;
 
     for (let remaining = this.countdownSeconds; remaining > 0; remaining -= 1) {
       this.emit("countdown.tick", `Recording in ${remaining}`, {
@@ -294,7 +300,9 @@ export class GuidedCaptureSession {
   }
 
   private async executeTimeline(timeline: CompiledTimeline): Promise<void> {
-    for (const step of timeline.steps) {
+    for (const [index, step] of timeline.steps.entries()) {
+      this.stepCurrent = index + 1;
+      this.stepLabel = step.action.description;
       this.session.recordAction(step.action, "planned");
       this.addLog("info", "action.planned", step.action.description);
 
@@ -428,6 +436,9 @@ export class GuidedCaptureSession {
       countdownRemaining,
       elapsedMs: this.elapsedMs,
       isRecording: this.phase === "recording",
+      stepCurrent: this.stepCurrent,
+      stepTotal: this.stepTotal,
+      stepLabel: this.stepLabel,
     };
   }
 

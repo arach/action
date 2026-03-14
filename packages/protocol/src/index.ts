@@ -174,6 +174,9 @@ export interface StagePresentation {
   countdownRemaining?: number;
   elapsedMs?: number;
   isRecording: boolean;
+  stepCurrent?: number;
+  stepTotal?: number;
+  stepLabel?: string;
 }
 
 export type HudControl =

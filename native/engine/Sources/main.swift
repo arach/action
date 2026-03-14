@@ -772,6 +772,9 @@ struct StageOverlayState: Decodable {
     let countdownRemaining: Int?
     let elapsedMs: Double?
     let isRecording: Bool
+    let stepCurrent: Int?
+    let stepTotal: Int?
+    let stepLabel: String?
 }
 
 final class StageOverlayView: NSView {
@@ -842,18 +845,18 @@ final class StageOverlayView: NSView {
         switch state.backdrop {
         case "gradient":
             gradient = NSGradient(colors: [
-                NSColor(calibratedRed: 0.30, green: 0.16, blue: 0.08, alpha: 0.68),
-                NSColor(calibratedRed: 0.08, green: 0.12, blue: 0.15, alpha: 0.82),
+                NSColor(calibratedWhite: 0.18, alpha: 0.64),
+                NSColor(calibratedWhite: 0.05, alpha: 0.88),
             ])!
         case "spotlight":
             gradient = NSGradient(colors: [
-                NSColor(calibratedWhite: 0.12, alpha: 0.22),
-                NSColor(calibratedWhite: 0.05, alpha: 0.74),
+                NSColor(calibratedWhite: 0.16, alpha: 0.18),
+                NSColor(calibratedWhite: 0.04, alpha: 0.78),
             ])!
         default:
             gradient = NSGradient(colors: [
-                NSColor(calibratedRed: 0.28, green: 0.17, blue: 0.10, alpha: 0.60),
-                NSColor(calibratedRed: 0.04, green: 0.05, blue: 0.07, alpha: 0.84),
+                NSColor(calibratedWhite: 0.14, alpha: 0.56),
+                NSColor(calibratedWhite: 0.04, alpha: 0.86),
             ])!
         }
 
@@ -865,11 +868,11 @@ final class StageOverlayView: NSView {
 
         drawOrb(
             rect: CGRect(x: 42, y: bounds.height - 220, width: 280, height: 280),
-            color: NSColor(calibratedRed: 1.00, green: 0.54, blue: 0.30, alpha: 0.14)
+            color: NSColor(calibratedWhite: 1.0, alpha: 0.08)
         )
         drawOrb(
             rect: CGRect(x: bounds.width - 260, y: 42, width: 220, height: 220),
-            color: NSColor(calibratedRed: 0.98, green: 0.86, blue: 0.64, alpha: 0.09)
+            color: NSColor(calibratedWhite: 1.0, alpha: 0.05)
         )
     }
 
@@ -895,8 +898,8 @@ final class StageOverlayView: NSView {
 
         let glowPath = NSBezierPath(roundedRect: outer, xRadius: 28, yRadius: 28)
         let accent = state.isRecording
-            ? NSColor(calibratedRed: 1.0, green: 0.45, blue: 0.26, alpha: 0.84)
-            : NSColor(calibratedWhite: 1, alpha: 0.24)
+            ? NSColor(calibratedWhite: 0.9, alpha: 0.82)
+            : NSColor(calibratedWhite: 1, alpha: 0.22)
         accent.setStroke()
         glowPath.lineWidth = state.isRecording ? 4 : 2
         glowPath.stroke()
@@ -926,8 +929,8 @@ final class StageOverlayView: NSView {
         let indicatorRect = CGRect(x: rect.minX + 16, y: rect.maxY - 26, width: 10, height: 10)
         let indicatorPath = NSBezierPath(ovalIn: indicatorRect)
         let indicatorColor = state.isRecording
-            ? NSColor(calibratedRed: 1.0, green: 0.38, blue: 0.24, alpha: 1)
-            : NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.31, alpha: 1)
+            ? NSColor(calibratedWhite: 0.92, alpha: 1)
+            : NSColor(calibratedWhite: 0.75, alpha: 1)
         indicatorColor.setFill()
         indicatorPath.fill()
 
@@ -944,16 +947,25 @@ final class StageOverlayView: NSView {
             color: NSColor(calibratedWhite: 1, alpha: 0.72),
             alignment: .right
         )
+        if let current = state.stepCurrent, let total = state.stepTotal, total > 0 {
+            drawText(
+                text: "Step \(current)/\(total)",
+                in: CGRect(x: rect.maxX - 120, y: rect.minY + 14, width: 96, height: 16),
+                font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+                color: NSColor(calibratedWhite: 1, alpha: 0.78),
+                alignment: .right
+            )
+        }
         drawText(
             text: state.summary,
             in: CGRect(x: rect.minX + 16, y: rect.minY + 36, width: rect.width - 32, height: 20),
-            font: NSFont.systemFont(ofSize: 18, weight: .semibold),
+            font: NSFont.monospacedSystemFont(ofSize: 15, weight: .semibold),
             color: NSColor(calibratedWhite: 0.98, alpha: 1)
         )
         drawText(
-            text: state.detail ?? phaseDetail(for: state),
+            text: state.stepLabel ?? state.detail ?? phaseDetail(for: state),
             in: CGRect(x: rect.minX + 16, y: rect.minY + 14, width: rect.width - 32, height: 16),
-            font: NSFont.systemFont(ofSize: 12, weight: .regular),
+            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
             color: NSColor(calibratedWhite: 1, alpha: 0.62)
         )
     }
@@ -978,8 +990,8 @@ final class StageOverlayView: NSView {
         glow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.6)
 
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: min(viewport.width, viewport.height) * 0.30, weight: .black),
-            .foregroundColor: NSColor(calibratedRed: 1.0, green: 0.96, blue: 0.88, alpha: 0.95),
+            .font: NSFont.monospacedSystemFont(ofSize: min(viewport.width, viewport.height) * 0.28, weight: .bold),
+            .foregroundColor: NSColor(calibratedWhite: 0.96, alpha: 0.95),
             .shadow: glow,
         ]
         let size = text.size(withAttributes: attrs)

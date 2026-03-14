@@ -12,6 +12,11 @@ interface HudState {
   engineMode: EngineMode;
   snapshot?: HudSnapshot;
   events: GuidedSessionEvent[];
+  sceneSteps: Array<{
+    id: string;
+    title: string;
+    status: "pending" | "active" | "completed" | "failed";
+  }>;
   status: "idle" | "running" | "completed" | "failed";
   error?: string;
 }
@@ -22,6 +27,7 @@ class HudController {
   private state: HudState = {
     engineMode: "mock",
     events: [],
+    sceneSteps: [],
     status: "idle",
   };
 
@@ -35,6 +41,12 @@ class HudController {
     }
 
     const scenario = await this.loadScenario("calculator-demo");
+    const { timeline } = compileScenario(scenario);
+    const initialSteps = timeline.steps.map((step) => ({
+      id: step.action.id,
+      title: step.action.description,
+      status: "pending" as const,
+    }));
     const engine = engineMode === "macos"
       ? new MacOSCommandEngine()
       : new MockCaptureEngine();
@@ -50,6 +62,7 @@ class HudController {
       engineMode,
       snapshot: session.snapshot(),
       events: [],
+      sceneSteps: initialSteps,
       status: "running",
     };
 
@@ -58,11 +71,10 @@ class HudController {
         ...this.state,
         snapshot: session.snapshot(),
         events: [...this.state.events, event],
+        sceneSteps: this.applyStepEvent(this.state.sceneSteps, event),
       };
       this.broadcast();
     });
-
-    const { timeline } = compileScenario(scenario);
 
     void (async () => {
       try {
@@ -163,6 +175,7 @@ class HudController {
       this.state = {
         ...this.state,
         snapshot: this.withDiagnostics(diagnostics),
+        sceneSteps: [],
       };
       return this.state;
     }
@@ -209,6 +222,39 @@ class HudController {
         backdrop: "neutral",
       },
     };
+  }
+
+  private applyStepEvent(
+    steps: HudState["sceneSteps"],
+    event: GuidedSessionEvent,
+  ): HudState["sceneSteps"] {
+    if (!["action.started", "action.completed", "action.failed"].includes(event.type)) {
+      return steps;
+    }
+
+    const action = (event.payload as { action?: { id?: string; description?: string } }).action;
+    const stepId = action?.id;
+    const stepTitle = action?.description;
+    if (!stepId && !stepTitle) {
+      return steps;
+    }
+
+    return steps.map((step) => {
+      const isMatch = step.id === stepId || step.title === stepTitle;
+      if (!isMatch) {
+        return step;
+      }
+
+      if (event.type === "action.started") {
+        return { ...step, status: "active" };
+      }
+
+      if (event.type === "action.completed") {
+        return { ...step, status: "completed" };
+      }
+
+      return { ...step, status: "failed" };
+    });
   }
 
   addListener(res: ServerResponse): void {
@@ -274,31 +320,30 @@ function html(): string {
     <title>Action HUD</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
       :root {
-        --bg: #f4efe7;
-        --panel: rgba(255, 251, 245, 0.85);
-        --ink: #111111;
-        --muted: #5a564f;
-        --accent: #ff6a00;
-        --accent-soft: rgba(255, 106, 0, 0.14);
-        --line: rgba(17, 17, 17, 0.1);
-        --success: #11795b;
-        --warn: #8a4b00;
-        --error: #8f1d2c;
-        --shadow: 0 24px 80px rgba(30, 18, 4, 0.16);
+        --bg: #0a0a0b;
+        --panel: rgba(18, 18, 20, 0.72);
+        --ink: #e6e6e8;
+        --muted: #9a9aa1;
+        --line: rgba(255, 255, 255, 0.12);
+        --line-soft: rgba(255, 255, 255, 0.06);
+        --success: #d4d4d8;
+        --error: #ef4444;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
       }
 
       * { box-sizing: border-box; }
       body {
         margin: 0;
         min-height: 100vh;
-        font-family: "IBM Plex Mono", monospace;
+        font-family: "JetBrains Mono", monospace;
         color: var(--ink);
         background:
-          radial-gradient(circle at top left, rgba(255,106,0,0.24), transparent 34%),
-          linear-gradient(135deg, #fbf6ee 0%, #efe7db 100%);
+          radial-gradient(circle at 12% 10%, rgba(255,255,255,0.08), transparent 26%),
+          radial-gradient(circle at 90% 80%, rgba(255,255,255,0.06), transparent 24%),
+          linear-gradient(140deg, #050505 0%, #0c0c0e 100%);
       }
 
       .shell {
@@ -332,22 +377,18 @@ function html(): string {
         pointer-events: none;
       }
 
-      .eyebrow, h1, .status, .section-title, button {
-        font-family: "Syne", sans-serif;
-      }
-
       .eyebrow {
         font-size: 12px;
-        letter-spacing: 0.18em;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
         color: var(--muted);
       }
 
       h1 {
-        font-size: clamp(3rem, 6vw, 6rem);
-        line-height: 0.92;
+        font-size: clamp(2rem, 4vw, 3.4rem);
+        line-height: 1.02;
         margin: 12px 0 18px;
-        max-width: 8ch;
+        max-width: 16ch;
       }
 
       .lede {
@@ -360,7 +401,7 @@ function html(): string {
       .viewport {
         margin-top: 32px;
         background: linear-gradient(160deg, #141414, #292119);
-        color: #f6ead7;
+        color: #f3f4f6;
         border-radius: 24px;
         min-height: 420px;
         padding: 22px;
@@ -403,7 +444,7 @@ function html(): string {
         font-size: 13px;
       }
 
-      .status strong { color: white; }
+      .status strong { color: #f3f4f6; }
 
       .stack {
         display: grid;
@@ -427,9 +468,8 @@ function html(): string {
       .stage-card strong {
         display: block;
         margin-top: 8px;
-        color: white;
-        font-family: "Syne", sans-serif;
-        font-size: 1.1rem;
+        color: #f3f4f6;
+        font-size: 1rem;
       }
 
       .stage-canvas {
@@ -479,11 +519,11 @@ function html(): string {
       }
 
       .viewport-frame[data-active="true"] {
-        border-color: rgba(255, 137, 77, 0.9);
+        border-color: rgba(255, 255, 255, 0.7);
         box-shadow:
           0 24px 90px rgba(0,0,0,0.44),
           0 0 0 1px rgba(255,255,255,0.08) inset,
-          0 0 0 3px rgba(255, 120, 54, 0.22);
+          0 0 0 3px rgba(255, 255, 255, 0.15);
       }
 
       .viewport-mask {
@@ -549,8 +589,8 @@ function html(): string {
         width: 10px;
         height: 10px;
         border-radius: 50%;
-        background: #ff5f3f;
-        box-shadow: 0 0 0 8px rgba(255, 95, 63, 0.18);
+        background: #f5f5f5;
+        box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.16);
       }
 
       .countdown {
@@ -558,7 +598,7 @@ function html(): string {
         inset: 0;
         display: grid;
         place-items: center;
-        font-family: "Syne", sans-serif;
+        font-family: "JetBrains Mono", monospace;
         font-size: clamp(5rem, 12vw, 10rem);
         line-height: 1;
         color: rgba(255, 244, 224, 0.94);
@@ -637,8 +677,7 @@ function html(): string {
 
       .window-placeholder strong {
         display: block;
-        font-family: "Syne", sans-serif;
-        font-size: clamp(1.8rem, 5vw, 3.3rem);
+        font-size: clamp(1.5rem, 4vw, 2.4rem);
         margin-bottom: 10px;
       }
 
@@ -675,15 +714,15 @@ function html(): string {
         padding: 14px 16px;
         font-size: 14px;
         cursor: pointer;
-        background: #111111;
-        color: white;
+        background: #f3f4f6;
+        color: #09090b;
         transition: transform 140ms ease, opacity 140ms ease, background 140ms ease;
       }
 
       button.secondary {
-        background: white;
+        background: rgba(255,255,255,0.04);
         color: var(--ink);
-        border: 1px solid var(--line);
+        border: 1px solid var(--line-soft);
       }
 
       button:disabled {
@@ -693,7 +732,7 @@ function html(): string {
 
       button:not(:disabled):hover { transform: translateY(-1px); }
 
-      .diagnostics, .artifacts, .logs {
+      .diagnostics, .artifacts, .logs, .steps {
         display: grid;
         gap: 10px;
       }
@@ -704,11 +743,11 @@ function html(): string {
         gap: 8px;
         padding: 8px 10px;
         border-radius: 999px;
-        background: var(--accent-soft);
+        background: rgba(255,255,255,0.08);
         color: var(--ink);
       }
 
-      .chip[data-state="granted"] { background: rgba(17, 121, 91, 0.12); color: var(--success); }
+      .chip[data-state="granted"] { background: rgba(255,255,255,0.12); color: var(--success); }
       .chip[data-state="denied"] { background: rgba(143, 29, 44, 0.12); color: var(--error); }
       .chip[data-state="unknown"] { background: rgba(17, 17, 17, 0.06); color: var(--muted); }
 
@@ -735,7 +774,7 @@ function html(): string {
         padding: 12px;
         border-radius: 16px;
         border: 1px solid var(--line);
-        background: rgba(255,255,255,0.65);
+        background: rgba(255,255,255,0.04);
       }
 
       .artifact a {
@@ -748,6 +787,41 @@ function html(): string {
         justify-content: space-between;
         gap: 12px;
         font-size: 12px;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid var(--line-soft);
+      }
+
+      .step-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.35);
+        box-shadow: 0 0 0 6px rgba(255,255,255,0.05);
+      }
+
+      .step[data-status="active"] .step-dot {
+        background: #f5f5f5;
+      }
+
+      .step[data-status="completed"] .step-dot {
+        background: #9ca3af;
+      }
+
+      .step[data-status="failed"] .step-dot {
+        background: #ef4444;
+      }
+
+      .step small {
+        color: var(--muted);
       }
 
       @media (max-width: 980px) {
@@ -852,6 +926,10 @@ function html(): string {
           <div class="artifacts list" id="artifacts"></div>
         </section>
         <section class="panel">
+          <h2 class="section-title">Scene Steps</h2>
+          <div class="steps list" id="steps"></div>
+        </section>
+        <section class="panel">
           <h2 class="section-title">Logs</h2>
           <div class="logs list" id="logs"></div>
         </section>
@@ -882,6 +960,7 @@ function html(): string {
         notes: document.getElementById("diagnostic-notes"),
         error: document.getElementById("error"),
         artifacts: document.getElementById("artifacts"),
+        steps: document.getElementById("steps"),
         logs: document.getElementById("logs")
       };
 
@@ -993,6 +1072,15 @@ function html(): string {
           node.className = "artifact";
           node.innerHTML = "<a href='/api/file?path=" + encodeURIComponent(artifact.path) + "' target='_blank' rel='noreferrer'><strong>" + artifact.kind + "</strong><br><small>" + artifact.path + "</small></a>";
           els.artifacts.appendChild(node);
+        }
+
+        els.steps.innerHTML = "";
+        for (const [index, step] of (state.sceneSteps || []).entries()) {
+          const node = document.createElement("div");
+          node.className = "step";
+          node.dataset.status = step.status;
+          node.innerHTML = "<span class='step-dot'></span><div><strong>" + (index + 1) + ". " + step.title + "</strong><br><small>" + step.status + "</small></div>";
+          els.steps.appendChild(node);
         }
 
         els.logs.innerHTML = "";
