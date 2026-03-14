@@ -163,6 +163,19 @@ export interface StageScene {
   targetApp?: TargetApp;
 }
 
+export interface StagePresentation {
+  sessionId: string;
+  phase: GuidedSessionPhase;
+  backdrop: BackdropPreset;
+  viewport?: StageViewport;
+  targetApp?: string;
+  summary: string;
+  detail?: string;
+  countdownRemaining?: number;
+  elapsedMs?: number;
+  isRecording: boolean;
+}
+
 export type HudControl =
   | "start"
   | "pause"
@@ -299,6 +312,8 @@ export interface CaptureEngine {
   diagnostics(): Promise<EngineDiagnostics>;
   requestPermissions(): Promise<EngineDiagnostics>;
   openPermissionSettings(kind: "accessibility" | "screen-recording"): Promise<void>;
+  presentStage(presentation: StagePresentation): Promise<void>;
+  clearStage(): Promise<void>;
   setBackdrop(backdrop: BackdropPreset): Promise<void>;
   launchApp(app: TargetApp): Promise<SurfaceRef>;
   focusSurface(surfaceId: string): Promise<void>;

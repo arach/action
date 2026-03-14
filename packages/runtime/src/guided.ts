@@ -18,6 +18,7 @@ import type {
   RuntimeAction,
   RuntimeArtifact,
   StageScene,
+  StagePresentation,
   StageViewport,
   TargetApp,
   TargetQuery,
@@ -62,6 +63,8 @@ export class GuidedCaptureSession {
   private latestCapture?: RuntimeArtifact;
   private diagnostics?: EngineDiagnostics;
   private recordingStartedAt?: number;
+  private stageSummary = "Ready";
+  private stageDetail?: string;
 
   constructor(
     private readonly engine: CaptureEngine,
@@ -139,6 +142,7 @@ export class GuidedCaptureSession {
         surfaceId: surface.id,
       },
     };
+    await this.syncStagePresentation("Stage ready", `${input.targetApp.name} framed in viewport`);
 
     this.emit("app.launched", `Opened ${input.targetApp.name}`, {
       app: input.targetApp,
@@ -273,6 +277,7 @@ export class GuidedCaptureSession {
     }
     this.setPhase("completed", "Run completed");
     await this.persistSessionFiles();
+    await this.engine.clearStage();
 
     return this.snapshot();
   }
@@ -365,6 +370,13 @@ export class GuidedCaptureSession {
     };
 
     this.addLog("info", type, summary, event.at);
+    this.stageSummary = summary;
+    if (type === "action.started" || type === "action.completed" || type === "action.failed") {
+      this.stageDetail = summary;
+    } else if (type === "countdown.tick") {
+      this.stageDetail = summary;
+    }
+    void this.syncStagePresentation(summary, this.stageDetail, type === "countdown.tick" ? (payload as { remaining?: number }).remaining : undefined);
 
     for (const listener of this.listeners) {
       listener(event);
@@ -403,6 +415,33 @@ export class GuidedCaptureSession {
       JSON.stringify(this.snapshot(), null, 2),
     );
   }
+
+  private presentation(summary: string, detail?: string, countdownRemaining?: number): StagePresentation {
+    return {
+      sessionId: this.session.snapshot().id,
+      phase: this.phase,
+      backdrop: this.stage.backdrop,
+      viewport: this.stage.viewport,
+      targetApp: this.targetApp?.name,
+      summary,
+      detail,
+      countdownRemaining,
+      elapsedMs: this.elapsedMs,
+      isRecording: this.phase === "recording",
+    };
+  }
+
+  private async syncStagePresentation(
+    summary = this.stageSummary,
+    detail = this.stageDetail,
+    countdownRemaining?: number,
+  ): Promise<void> {
+    if (!this.stage.viewport) {
+      return;
+    }
+
+    await this.engine.presentStage(this.presentation(summary, detail, countdownRemaining));
+  }
 }
 
 export class MockCaptureEngine implements CaptureEngine {
@@ -428,6 +467,10 @@ export class MockCaptureEngine implements CaptureEngine {
   }
 
   async openPermissionSettings(_kind: "accessibility" | "screen-recording"): Promise<void> {}
+
+  async presentStage(_presentation: StagePresentation): Promise<void> {}
+
+  async clearStage(): Promise<void> {}
 
   async setBackdrop(_backdrop: BackdropPreset): Promise<void> {}
 

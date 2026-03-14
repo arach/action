@@ -28,6 +28,7 @@ enum ActionHostCommand: String {
     case request
     case openAccessibilitySettings = "open-accessibility-settings"
     case openScreenRecordingSettings = "open-screen-recording-settings"
+    case stageOverlay = "stage-overlay"
     case recordAppWindow = "record-app-window"
     case screenshotAppWindow = "screenshot-app-window"
     case activateApp = "activate-app"
@@ -746,6 +747,374 @@ func captureRegionScreenshot(rect: CGRect, outputPath: String, writer: ResponseW
     try writer.write(ActionHostResponse(status: "screenshot", outputPath: outputPath, detail: nil))
 }
 
+struct OverlayBounds: Decodable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+}
+
+struct OverlayViewport: Decodable {
+    let id: String
+    let bounds: OverlayBounds
+    let surfaceId: String?
+    let dimming: String
+}
+
+struct StageOverlayState: Decodable {
+    let sessionId: String
+    let phase: String
+    let backdrop: String
+    let viewport: OverlayViewport?
+    let targetApp: String?
+    let summary: String
+    let detail: String?
+    let countdownRemaining: Int?
+    let elapsedMs: Double?
+    let isRecording: Bool
+}
+
+final class StageOverlayView: NSView {
+    var state: StageOverlayState? {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    let screenFrame: CGRect
+
+    init(frame frameRect: NSRect, screenFrame: CGRect) {
+        self.screenFrame = screenFrame
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let state else {
+            return
+        }
+
+        guard let viewport = viewportRect(for: state) else {
+            return
+        }
+
+        drawBackdrop(state: state, viewport: viewport)
+        drawViewportFrame(state: state, viewport: viewport)
+        drawHudPill(state: state, viewport: viewport)
+
+        if state.phase == "countdown", let countdown = state.countdownRemaining {
+            drawCountdown(String(countdown), viewport: viewport)
+        }
+    }
+
+    private func viewportRect(for state: StageOverlayState) -> CGRect? {
+        guard let bounds = state.viewport?.bounds else {
+            return nil
+        }
+
+        return CGRect(
+            x: bounds.x - screenFrame.minX,
+            y: bounds.y - screenFrame.minY,
+            width: bounds.width,
+            height: bounds.height
+        )
+    }
+
+    private func drawBackdrop(state: StageOverlayState, viewport: CGRect) {
+        let outer = NSBezierPath(rect: bounds)
+        let cutout = NSBezierPath(
+            roundedRect: viewport.insetBy(dx: -18, dy: -18),
+            xRadius: 28,
+            yRadius: 28
+        )
+        outer.append(cutout)
+        outer.windingRule = .evenOdd
+        outer.addClip()
+
+        let gradient: NSGradient
+        switch state.backdrop {
+        case "gradient":
+            gradient = NSGradient(colors: [
+                NSColor(calibratedRed: 0.30, green: 0.16, blue: 0.08, alpha: 0.68),
+                NSColor(calibratedRed: 0.08, green: 0.12, blue: 0.15, alpha: 0.82),
+            ])!
+        case "spotlight":
+            gradient = NSGradient(colors: [
+                NSColor(calibratedWhite: 0.12, alpha: 0.22),
+                NSColor(calibratedWhite: 0.05, alpha: 0.74),
+            ])!
+        default:
+            gradient = NSGradient(colors: [
+                NSColor(calibratedRed: 0.28, green: 0.17, blue: 0.10, alpha: 0.60),
+                NSColor(calibratedRed: 0.04, green: 0.05, blue: 0.07, alpha: 0.84),
+            ])!
+        }
+
+        gradient.draw(in: bounds, angle: 300)
+
+        let veilAlpha: CGFloat = state.phase == "countdown" || state.isRecording ? 0.62 : 0.42
+        NSColor(calibratedWhite: 0.03, alpha: veilAlpha).setFill()
+        bounds.fill()
+
+        drawOrb(
+            rect: CGRect(x: 42, y: bounds.height - 220, width: 280, height: 280),
+            color: NSColor(calibratedRed: 1.00, green: 0.54, blue: 0.30, alpha: 0.14)
+        )
+        drawOrb(
+            rect: CGRect(x: bounds.width - 260, y: 42, width: 220, height: 220),
+            color: NSColor(calibratedRed: 0.98, green: 0.86, blue: 0.64, alpha: 0.09)
+        )
+    }
+
+    private func drawOrb(rect: CGRect, color: NSColor) {
+        guard let gradient = NSGradient(colorsAndLocations:
+            (color, 0.0),
+            (color.withAlphaComponent(0), 1.0)
+        ) else {
+            return
+        }
+
+        let path = NSBezierPath(ovalIn: rect)
+        gradient.draw(in: path, relativeCenterPosition: NSZeroPoint)
+    }
+
+    private func drawViewportFrame(state: StageOverlayState, viewport: CGRect) {
+        let outer = viewport.insetBy(dx: -10, dy: -10)
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 30
+        shadow.shadowOffset = .zero
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.4)
+        shadow.set()
+
+        let glowPath = NSBezierPath(roundedRect: outer, xRadius: 28, yRadius: 28)
+        let accent = state.isRecording
+            ? NSColor(calibratedRed: 1.0, green: 0.45, blue: 0.26, alpha: 0.84)
+            : NSColor(calibratedWhite: 1, alpha: 0.24)
+        accent.setStroke()
+        glowPath.lineWidth = state.isRecording ? 4 : 2
+        glowPath.stroke()
+
+        NSGraphicsContext.saveGraphicsState()
+        let innerPath = NSBezierPath(roundedRect: viewport, xRadius: 22, yRadius: 22)
+        NSColor(calibratedWhite: 1, alpha: 0.12).setStroke()
+        innerPath.lineWidth = 1
+        innerPath.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawHudPill(state: StageOverlayState, viewport: CGRect) {
+        let width: CGFloat = 320
+        let height: CGFloat = 82
+        let x = min(bounds.width - width - 24, max(24, viewport.maxX - width))
+        let y = min(bounds.height - height - 24, viewport.maxY + 18)
+        let rect = CGRect(x: x, y: y, width: width, height: height)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 22, yRadius: 22)
+
+        NSColor(calibratedWhite: 0.06, alpha: 0.76).setFill()
+        path.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.12).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        let indicatorRect = CGRect(x: rect.minX + 16, y: rect.maxY - 26, width: 10, height: 10)
+        let indicatorPath = NSBezierPath(ovalIn: indicatorRect)
+        let indicatorColor = state.isRecording
+            ? NSColor(calibratedRed: 1.0, green: 0.38, blue: 0.24, alpha: 1)
+            : NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.31, alpha: 1)
+        indicatorColor.setFill()
+        indicatorPath.fill()
+
+        drawText(
+            text: state.isRecording ? "Recording" : state.phase.capitalized,
+            in: CGRect(x: rect.minX + 34, y: rect.maxY - 34, width: 140, height: 18),
+            font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            color: NSColor.white
+        )
+        drawText(
+            text: state.targetApp ?? "Action",
+            in: CGRect(x: rect.maxX - 120, y: rect.maxY - 34, width: 96, height: 18),
+            font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            color: NSColor(calibratedWhite: 1, alpha: 0.72),
+            alignment: .right
+        )
+        drawText(
+            text: state.summary,
+            in: CGRect(x: rect.minX + 16, y: rect.minY + 36, width: rect.width - 32, height: 20),
+            font: NSFont.systemFont(ofSize: 18, weight: .semibold),
+            color: NSColor(calibratedWhite: 0.98, alpha: 1)
+        )
+        drawText(
+            text: state.detail ?? phaseDetail(for: state),
+            in: CGRect(x: rect.minX + 16, y: rect.minY + 14, width: rect.width - 32, height: 16),
+            font: NSFont.systemFont(ofSize: 12, weight: .regular),
+            color: NSColor(calibratedWhite: 1, alpha: 0.62)
+        )
+    }
+
+    private func phaseDetail(for state: StageOverlayState) -> String {
+        switch state.phase {
+        case "countdown":
+            return "Stand by for capture"
+        case "recording":
+            return "Viewport locked and capture live"
+        case "completed":
+            return "Artifacts saved"
+        default:
+            return "Guided capture session"
+        }
+    }
+
+    private func drawCountdown(_ text: String, viewport: CGRect) {
+        let glow = NSShadow()
+        glow.shadowBlurRadius = 36
+        glow.shadowOffset = .zero
+        glow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.6)
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: min(viewport.width, viewport.height) * 0.30, weight: .black),
+            .foregroundColor: NSColor(calibratedRed: 1.0, green: 0.96, blue: 0.88, alpha: 0.95),
+            .shadow: glow,
+        ]
+        let size = text.size(withAttributes: attrs)
+        let rect = CGRect(
+            x: viewport.midX - size.width / 2,
+            y: viewport.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+        text.draw(in: rect, withAttributes: attrs)
+    }
+
+    private func drawText(
+        text: String,
+        in rect: CGRect,
+        font: NSFont,
+        color: NSColor,
+        alignment: NSTextAlignment = .left
+    ) {
+        let style = NSMutableParagraphStyle()
+        style.alignment = alignment
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: style,
+        ]
+        text.draw(in: rect, withAttributes: attrs)
+    }
+}
+
+@MainActor
+final class StageOverlayController: NSObject {
+    private let stateFile: String
+    private let stopFile: String
+    private let writer: ResponseWriter
+    private let logger: DebugLogger
+    private var window: NSWindow?
+    private var overlayView: StageOverlayView?
+    private var lastStateData: Data?
+
+    init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?) {
+        self.stateFile = stateFile
+        self.stopFile = stopFile
+        self.writer = ResponseWriter(replyFile: replyFile)
+        self.logger = DebugLogger(path: debugLogPath)
+    }
+
+    func run() throws {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+
+        try refreshState(force: true)
+        try writer.write(
+            ActionHostResponse(
+                status: "overlay-running",
+                outputPath: nil,
+                detail: String(ProcessInfo.processInfo.processIdentifier)
+            )
+        )
+        while !FileManager.default.fileExists(atPath: stopFile) {
+            do {
+                try refreshState(force: false)
+            } catch {
+                logger.log("stage-overlay: refresh failed \(error.localizedDescription)")
+            }
+
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.12))
+        }
+
+        logger.log("stage-overlay: stop signal received")
+        window?.orderOut(nil)
+    }
+
+    private func refreshState(force: Bool) throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: stateFile))
+        if !force, data == lastStateData {
+            return
+        }
+
+        let state = try JSONDecoder().decode(StageOverlayState.self, from: data)
+        lastStateData = data
+        logger.log("stage-overlay: apply phase=\(state.phase) summary=\(state.summary)")
+        apply(state: state)
+    }
+
+    private func apply(state: StageOverlayState) {
+        guard let viewport = state.viewport else {
+            return
+        }
+
+        let viewportRect = CGRect(
+            x: viewport.bounds.x,
+            y: viewport.bounds.y,
+            width: viewport.bounds.width,
+            height: viewport.bounds.height
+        )
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: viewportRect.midX, y: viewportRect.midY)) })
+            ?? NSScreen.main
+        guard let screen else {
+            return
+        }
+
+        if window == nil || window?.screen != screen {
+            logger.log("stage-overlay: create window on screen \(screen.frame)")
+            createWindow(screen: screen)
+        }
+
+        window?.setFrame(screen.frame, display: true)
+        overlayView?.state = state
+        window?.orderFrontRegardless()
+        logger.log("stage-overlay: window ordered front viewport=\(viewportRect)")
+    }
+
+    private func createWindow(screen: NSScreen) {
+        let window = NSPanel(
+            contentRect: screen.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false,
+            screen: screen
+        )
+        window.level = .screenSaver
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+
+        let overlayView = StageOverlayView(frame: CGRect(origin: .zero, size: screen.frame.size), screenFrame: screen.frame)
+        window.contentView = overlayView
+        self.window = window
+        self.overlayView = overlayView
+    }
+}
+
 func rectFromOptions(_ options: CommandOptions) throws -> CGRect {
     let x = Double(try options.required("x")) ?? 0
     let y = Double(try options.required("y")) ?? 0
@@ -765,6 +1134,20 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         openSettingsPane(anchor: "Privacy_Accessibility")
     case .openScreenRecordingSettings:
         openSettingsPane(anchor: "Privacy_ScreenCapture")
+    case .stageOverlay:
+        let stateFile = try options.required("state-file")
+        let stopFile = try options.required("stop-file")
+        let replyFile = options.options["reply-file"]
+        let debugLogPath = options.options["debug-log"]
+        try await MainActor.run {
+            let controller = StageOverlayController(
+                stateFile: stateFile,
+                stopFile: stopFile,
+                replyFile: replyFile,
+                debugLogPath: debugLogPath
+            )
+            try controller.run()
+        }
     case .recordAppWindow:
         guard #available(macOS 15.0, *) else {
             throw ActionHostError.unsupportedOS("Window recording requires macOS 15.0 or newer.")

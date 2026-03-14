@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -11,6 +11,7 @@ import type {
   ResolvedTarget,
   RuntimeAction,
   RuntimeArtifact,
+  StagePresentation,
   StageViewport,
   SurfaceRef,
   TargetApp,
@@ -42,6 +43,11 @@ export class MacOSCommandEngine implements CaptureEngine {
   private activeCaptureFinishedPath?: string;
   private activeViewport?: StageViewport;
   private focusedSurfaceId?: string;
+  private overlayStatePath?: string;
+  private overlayStopPath?: string;
+  private overlayLogPath?: string;
+  private overlayActive = false;
+  private overlayPid?: number;
 
   constructor(
     private readonly nativeHostPath = "native/engine/scripts/run-app-host.sh",
@@ -74,6 +80,70 @@ export class MacOSCommandEngine implements CaptureEngine {
         ? "open-accessibility-settings"
         : "open-screen-recording-settings",
     );
+  }
+
+  async presentStage(presentation: StagePresentation): Promise<void> {
+    const paths = this.ensureOverlayPaths(presentation.sessionId);
+    this.overlayStatePath = paths.statePath;
+    this.overlayStopPath = paths.stopPath;
+    this.overlayLogPath = paths.logPath;
+
+    await mkdir(dirname(paths.statePath), { recursive: true });
+    await rm(paths.stopPath, { force: true });
+    await rm(paths.logPath, { force: true });
+    await this.writeOverlayState(paths.statePath, presentation);
+
+    if (this.overlayActive) {
+      return;
+    }
+
+    await this.writeOverlayState(paths.statePath, presentation);
+
+    const { stdout } = await this.runHost(
+      "stage-overlay",
+      "--state-file",
+      paths.statePath,
+      "--stop-file",
+      paths.stopPath,
+      "--debug-log",
+      paths.logPath,
+    );
+    const response = JSON.parse(stdout) as { detail?: string };
+    this.overlayPid = response.detail ? Number(response.detail) : undefined;
+    this.overlayActive = true;
+  }
+
+  async clearStage(): Promise<void> {
+    if (this.overlayStopPath) {
+      await writeFile(this.overlayStopPath, "stop\n");
+    }
+
+    if (this.overlayPid) {
+      try {
+        await execFileAsync("kill", ["-TERM", String(this.overlayPid)]);
+      } catch {}
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      try {
+        process.kill(this.overlayPid, 0);
+        await execFileAsync("kill", ["-KILL", String(this.overlayPid)]);
+      } catch {}
+    }
+
+    if (this.overlayStatePath) {
+      await rm(this.overlayStatePath, { force: true });
+    }
+
+    if (this.overlayStopPath) {
+      await rm(this.overlayStopPath, { force: true });
+    }
+
+    this.overlayActive = false;
+    this.overlayPid = undefined;
+    this.overlayLogPath = undefined;
+    this.overlayStopPath = undefined;
+    this.overlayStatePath = undefined;
   }
 
   async setBackdrop(_backdrop: BackdropPreset): Promise<void> {}
@@ -316,5 +386,20 @@ export class MacOSCommandEngine implements CaptureEngine {
     }
 
     throw new Error(`Timed out waiting for file ${path}`);
+  }
+
+  private ensureOverlayPaths(sessionId: string) {
+    const root = resolve(process.cwd(), "artifacts", "overlays", sessionId);
+    return {
+      statePath: resolve(root, "stage.json"),
+      stopPath: resolve(root, "stage.stop"),
+      logPath: resolve(root, "stage.log"),
+    };
+  }
+
+  private async writeOverlayState(path: string, presentation: StagePresentation): Promise<void> {
+    const tempPath = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify(presentation, null, 2)}\n`);
+    await rename(tempPath, path);
   }
 }
