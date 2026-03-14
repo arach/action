@@ -13,17 +13,44 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 PLIST_TEMPLATE="$APP_TEMPLATE_DIR/Info.plist"
 
+detect_identity() {
+  if [[ -n "${ACTION_CODESIGN_IDENTITY:-}" ]]; then
+    printf '%s\n' "$ACTION_CODESIGN_IDENTITY"
+    return
+  fi
+
+  local identity
+
+  identity=$(security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development:/{print $2; exit}')
+  if [[ -n "$identity" ]]; then
+    printf '%s\n' "$identity"
+    return
+  fi
+
+  identity=$(security find-identity -v -p codesigning 2>/dev/null | awk '/"Developer ID Application:/{print $2; exit}')
+  if [[ -n "$identity" ]]; then
+    printf '%s\n' "$identity"
+    return
+  fi
+
+  printf '%s\n' "-"
+}
+
 swift build --package-path "$PACKAGE_DIR" -c debug >&2
 
 BIN_DIR=$(swift build --package-path "$PACKAGE_DIR" -c debug --show-bin-path)
 HOST_EXECUTABLE="$BIN_DIR/ActionHost"
 APP_EXECUTABLE="$MACOS_DIR/Action"
+SIGNING_IDENTITY=$(detect_identity)
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$HOST_EXECUTABLE" "$APP_EXECUTABLE"
 cp "$PLIST_TEMPLATE" "$CONTENTS_DIR/Info.plist"
 
-codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
+codesign --force --sign "$SIGNING_IDENTITY" "$APP_EXECUTABLE" >&2
+codesign --force --sign "$SIGNING_IDENTITY" "$APP_DIR" >&2
+
+printf 'codesigned-with=%s\n' "$SIGNING_IDENTITY" >&2
 
 printf '%s\n' "$APP_DIR"

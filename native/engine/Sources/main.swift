@@ -83,6 +83,32 @@ struct CommandOptions {
     }
 }
 
+final class ResponseWriter {
+    private let replyFile: String?
+
+    init(replyFile: String?) {
+        self.replyFile = replyFile
+    }
+
+    func write(_ value: some Encodable) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(value)
+
+        if let replyFile {
+            let url = URL(fileURLWithPath: replyFile)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: url)
+        } else {
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data([0x0a]))
+        }
+    }
+}
+
 func accessibilityStatus(prompt: Bool) -> PermissionState {
     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
     return AXIsProcessTrustedWithOptions(options) ? .granted : .denied
@@ -117,14 +143,6 @@ func snapshot(promptAccessibility: Bool, requestScreenRecordingPermission: Bool)
             "bundlePath=\(bundlePath)"
         ]
     )
-}
-
-func printJSON(_ value: some Encodable) throws {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    let data = try encoder.encode(value)
-    FileHandle.standardOutput.write(data)
-    FileHandle.standardOutput.write(Data([0x0a]))
 }
 
 func openSettingsPane(anchor: String) {
@@ -172,6 +190,11 @@ func pngData(from image: CGImage) -> Data? {
 final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegate {
     private var stream: SCStream?
     private var recordingOutput: SCRecordingOutput?
+    private let writer: ResponseWriter
+
+    init(writer: ResponseWriter) {
+        self.writer = writer
+    }
 
     func recordAppWindow(bundleId: String, outputPath: String) async throws {
         let outputURL = URL(fileURLWithPath: outputPath)
@@ -204,12 +227,12 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         self.recordingOutput = recordingOutput
 
         try await stream.startCapture()
-        try printJSON(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
+        try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
 
         _ = try FileHandle.standardInput.readToEnd()
 
         try await stream.stopCapture()
-        try printJSON(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
+        try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
     }
 
     func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: any Error) {
@@ -221,7 +244,7 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
     }
 }
 
-func captureAppWindowScreenshot(bundleId: String, outputPath: String) async throws {
+func captureAppWindowScreenshot(bundleId: String, outputPath: String, writer: ResponseWriter) async throws {
     let outputURL = URL(fileURLWithPath: outputPath)
     try FileManager.default.createDirectory(
         at: outputURL.deletingLastPathComponent(),
@@ -241,15 +264,15 @@ func captureAppWindowScreenshot(bundleId: String, outputPath: String) async thro
     }
 
     try data.write(to: outputURL)
-    try printJSON(ActionHostResponse(status: "screenshot", outputPath: outputPath, detail: nil))
+    try writer.write(ActionHostResponse(status: "screenshot", outputPath: outputPath, detail: nil))
 }
 
-func run(command: ActionHostCommand, options: CommandOptions) async throws {
+func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWriter) async throws {
     switch command {
     case .status:
-        try printJSON(snapshot(promptAccessibility: false, requestScreenRecordingPermission: false))
+        try writer.write(snapshot(promptAccessibility: false, requestScreenRecordingPermission: false))
     case .request:
-        try printJSON(snapshot(promptAccessibility: true, requestScreenRecordingPermission: true))
+        try writer.write(snapshot(promptAccessibility: true, requestScreenRecordingPermission: true))
     case .openAccessibilitySettings:
         openSettingsPane(anchor: "Privacy_Accessibility")
     case .openScreenRecordingSettings:
@@ -261,7 +284,7 @@ func run(command: ActionHostCommand, options: CommandOptions) async throws {
 
         let bundleId = try options.required("bundle-id")
         let outputPath = try options.required("output")
-        let recorder = WindowRecorder()
+        let recorder = WindowRecorder(writer: writer)
         try await recorder.recordAppWindow(bundleId: bundleId, outputPath: outputPath)
     case .screenshotAppWindow:
         guard #available(macOS 14.0, *) else {
@@ -270,7 +293,7 @@ func run(command: ActionHostCommand, options: CommandOptions) async throws {
 
         let bundleId = try options.required("bundle-id")
         let outputPath = try options.required("output")
-        try await captureAppWindowScreenshot(bundleId: bundleId, outputPath: outputPath)
+        try await captureAppWindowScreenshot(bundleId: bundleId, outputPath: outputPath, writer: writer)
     }
 }
 
@@ -278,9 +301,10 @@ func run(command: ActionHostCommand, options: CommandOptions) async throws {
 struct ActionHostMain {
     static func main() async {
         let options = CommandOptions(arguments: CommandLine.arguments)
+        let writer = ResponseWriter(replyFile: options.options["reply-file"])
 
         do {
-            try await run(command: options.command, options: options)
+            try await run(command: options.command, options: options, writer: writer)
         } catch {
             FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
             exit(1)

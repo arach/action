@@ -5,8 +5,34 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT_DIR=$(cd "$SCRIPT_DIR/../../.." && pwd)
 PACKAGE_DIR="$ROOT_DIR/native/engine"
+APP_DIR="$ROOT_DIR/native/dist/Action.app"
 APP_EXECUTABLE="$ROOT_DIR/native/dist/Action.app/Contents/MacOS/Action"
 PLIST_TEMPLATE="$PACKAGE_DIR/App/Info.plist"
+COMMAND="${1:-status}"
+
+run_direct() {
+  exec "$APP_EXECUTABLE" "$@"
+}
+
+run_via_open() {
+  local reply_file
+  local attempt
+  reply_file=$(mktemp "${TMPDIR:-/tmp}/action-host.XXXXXX")
+
+  open -n "$APP_DIR" --args "$@" --reply-file "$reply_file" >/dev/null
+
+  for attempt in {1..100}; do
+    if [[ -s "$reply_file" ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  if [[ -f "$reply_file" ]]; then
+    cat "$reply_file"
+    rm -f "$reply_file"
+  fi
+}
 
 needs_build=0
 
@@ -22,4 +48,11 @@ if [[ $needs_build -eq 1 ]]; then
   "$SCRIPT_DIR/build-app.sh" >/dev/stderr
 fi
 
-exec "$APP_EXECUTABLE" "$@"
+case "$COMMAND" in
+  record-app-window)
+    run_direct "$@"
+    ;;
+  *)
+    run_via_open "$@"
+    ;;
+esac
