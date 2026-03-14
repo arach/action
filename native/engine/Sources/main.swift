@@ -39,6 +39,7 @@ enum ActionHostCommand: String {
     case setWindowFrame = "set-window-frame"
     case recordRegion = "record-region"
     case screenshotRegion = "screenshot-region"
+    case screenshotScreen = "screenshot-screen"
 }
 
 enum ActionHostError: LocalizedError {
@@ -747,6 +748,25 @@ func captureRegionScreenshot(rect: CGRect, outputPath: String, writer: ResponseW
     try writer.write(ActionHostResponse(status: "screenshot", outputPath: outputPath, detail: nil))
 }
 
+func captureScreenScreenshot(outputPath: String, writer: ResponseWriter) async throws {
+    let outputURL = URL(fileURLWithPath: outputPath)
+    try FileManager.default.createDirectory(
+        at: outputURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+
+    guard let image = CGDisplayCreateImage(CGMainDisplayID()) else {
+        throw ActionHostError.unableToEncodeImage
+    }
+
+    guard let data = pngData(from: image) else {
+        throw ActionHostError.unableToEncodeImage
+    }
+
+    try data.write(to: outputURL)
+    try writer.write(ActionHostResponse(status: "screenshot", outputPath: outputPath, detail: "main-display"))
+}
+
 struct OverlayBounds: Decodable {
     let x: Double
     let y: Double
@@ -913,10 +933,10 @@ final class StageOverlayView: NSView {
     }
 
     private func drawHudPill(state: StageOverlayState, viewport: CGRect) {
-        let width: CGFloat = 320
-        let height: CGFloat = 82
-        let x = min(bounds.width - width - 24, max(24, viewport.maxX - width))
-        let y = min(bounds.height - height - 24, viewport.maxY + 18)
+        let width: CGFloat = 360
+        let height: CGFloat = 92
+        let x = min(bounds.width - width - 24, max(24, viewport.midX - width / 2))
+        let y = max(24, viewport.minY - height - 16)
         let rect = CGRect(x: x, y: y, width: width, height: height)
         let path = NSBezierPath(roundedRect: rect, xRadius: 22, yRadius: 22)
 
@@ -958,13 +978,21 @@ final class StageOverlayView: NSView {
         }
         drawText(
             text: state.summary,
-            in: CGRect(x: rect.minX + 16, y: rect.minY + 36, width: rect.width - 32, height: 20),
+            in: CGRect(x: rect.minX + 16, y: rect.minY + 46, width: rect.width - 32, height: 20),
             font: NSFont.monospacedSystemFont(ofSize: 15, weight: .semibold),
             color: NSColor(calibratedWhite: 0.98, alpha: 1)
         )
+        if state.phase == "countdown", let remaining = state.countdownRemaining {
+            drawText(
+                text: "Recording starts in \(remaining)s",
+                in: CGRect(x: rect.minX + 16, y: rect.minY + 30, width: rect.width - 32, height: 14),
+                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
+                color: NSColor(calibratedWhite: 1, alpha: 0.7)
+            )
+        }
         drawText(
             text: state.stepLabel ?? state.detail ?? phaseDetail(for: state),
-            in: CGRect(x: rect.minX + 16, y: rect.minY + 14, width: rect.width - 32, height: 16),
+            in: CGRect(x: rect.minX + 16, y: rect.minY + 12, width: rect.width - 32, height: 16),
             font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
             color: NSColor(calibratedWhite: 1, alpha: 0.62)
         )
@@ -1202,6 +1230,9 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         let outputPath = try options.required("output")
         let rect = try rectFromOptions(options)
         try await captureRegionScreenshot(rect: rect, outputPath: outputPath, writer: writer)
+    case .screenshotScreen:
+        let outputPath = try options.required("output")
+        try await captureScreenScreenshot(outputPath: outputPath, writer: writer)
     case .activateApp:
         let bundleId = try options.required("bundle-id")
         try activateApplication(bundleId: bundleId)

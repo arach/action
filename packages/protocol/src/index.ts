@@ -326,6 +326,7 @@ export interface CaptureEngine {
   resumeCapture(): Promise<void>;
   stopCapture(): Promise<RuntimeArtifact>;
   captureScreenshot(path: string): Promise<RuntimeArtifact>;
+  captureFullScreenshot(path: string): Promise<RuntimeArtifact>;
   resolveTarget(query: TargetQuery): Promise<ResolvedTarget>;
   performAction(action: RuntimeAction, target?: ResolvedTarget): Promise<void>;
   replayArtifact(path: string): Promise<void>;

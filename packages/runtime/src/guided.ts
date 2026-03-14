@@ -45,6 +45,9 @@ export interface GuidedCaptureSessionOptions {
   outputDir: string;
   countdownSeconds?: number;
   captureProfile?: CaptureProfile;
+  stageHoldMsAfterComplete?: number;
+  initialActionDelayMs?: number;
+  actionCadenceMs?: number;
 }
 
 export type GuidedSessionListener = (event: GuidedSessionEvent) => void;
@@ -56,6 +59,9 @@ export class GuidedCaptureSession {
   private readonly countdownSeconds: number;
   private readonly outputDir: string;
   private readonly captureProfile: CaptureProfile;
+  private readonly stageHoldMsAfterComplete: number;
+  private readonly initialActionDelayMs: number;
+  private readonly actionCadenceMs: number;
   private phase: GuidedSessionPhase = "created";
   private stage: StageScene = { backdrop: "neutral" };
   private targetApp?: TargetApp;
@@ -77,6 +83,9 @@ export class GuidedCaptureSession {
     this.countdownSeconds = options.countdownSeconds ?? 3;
     this.outputDir = options.outputDir;
     this.captureProfile = options.captureProfile ?? "draft";
+    this.stageHoldMsAfterComplete = options.stageHoldMsAfterComplete ?? 0;
+    this.initialActionDelayMs = options.initialActionDelayMs ?? 650;
+    this.actionCadenceMs = options.actionCadenceMs ?? 900;
   }
 
   onEvent(listener: GuidedSessionListener): () => void {
@@ -211,6 +220,10 @@ export class GuidedCaptureSession {
       outputPath: capturePath,
     });
 
+    if (this.initialActionDelayMs > 0) {
+      await sleep(this.initialActionDelayMs);
+    }
+
     await this.executeTimeline(timeline);
 
     return this.snapshot();
@@ -242,8 +255,14 @@ export class GuidedCaptureSession {
     return this.snapshot();
   }
 
-  async captureScreenshot(name = "screenshot-final.png"): Promise<RuntimeArtifact> {
-    const artifact = await this.engine.captureScreenshot(`${this.outputDir}/${name}`);
+  async captureScreenshot(
+    name = "screenshot-final.png",
+    scope: "viewport" | "full" = "viewport",
+  ): Promise<RuntimeArtifact> {
+    const outputPath = `${this.outputDir}/${name}`;
+    const artifact = scope === "full"
+      ? await this.engine.captureFullScreenshot(outputPath)
+      : await this.engine.captureScreenshot(outputPath);
     this.session.registerArtifact(artifact);
     this.emit("artifact.created", `Saved ${artifact.kind}`, {
       artifact,
@@ -283,6 +302,9 @@ export class GuidedCaptureSession {
     }
     this.setPhase("completed", "Run completed");
     await this.persistSessionFiles();
+    if (this.stageHoldMsAfterComplete > 0) {
+      await sleep(this.stageHoldMsAfterComplete);
+    }
     await this.engine.clearStage();
 
     return this.snapshot();
@@ -297,6 +319,10 @@ export class GuidedCaptureSession {
       artifact: this.latestCapture,
     });
     await this.engine.replayArtifact(this.latestCapture.path);
+  }
+
+  async clearStage(): Promise<void> {
+    await this.engine.clearStage();
   }
 
   private async executeTimeline(timeline: CompiledTimeline): Promise<void> {
@@ -327,6 +353,9 @@ export class GuidedCaptureSession {
         this.emit("action.completed", step.action.description, {
           action: step.action,
         });
+        if (this.actionCadenceMs > 0 && index < timeline.steps.length - 1) {
+          await sleep(this.actionCadenceMs);
+        }
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unknown action failure";
         this.session.recordAction(step.action, "failed", detail);
@@ -528,6 +557,10 @@ export class MockCaptureEngine implements CaptureEngine {
       kind: "screenshot",
       path,
     };
+  }
+
+  async captureFullScreenshot(path: string): Promise<RuntimeArtifact> {
+    return this.captureScreenshot(path);
   }
 
   async resolveTarget(query: TargetQuery): Promise<ResolvedTarget> {

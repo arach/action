@@ -17,12 +17,13 @@ interface HudState {
     title: string;
     status: "pending" | "active" | "completed" | "failed";
   }>;
-  status: "idle" | "running" | "completed" | "failed";
+  status: "idle" | "staged" | "running" | "completed" | "failed";
   error?: string;
 }
 
 class HudController {
   private currentSession?: GuidedCaptureSession;
+  private currentTimeline?: ReturnType<typeof compileScenario>["timeline"];
   private readonly listeners = new Set<ServerResponse>();
   private state: HudState = {
     engineMode: "mock",
@@ -35,9 +36,17 @@ class HudController {
     return this.state;
   }
 
-  async start(engineMode: EngineMode): Promise<HudState> {
+  async stage(engineMode: EngineMode): Promise<HudState> {
     if (this.state.status === "running") {
       return this.state;
+    }
+
+    if (this.currentSession) {
+      try {
+        await this.currentSession.clearStage();
+      } catch {}
+      this.currentSession = undefined;
+      this.currentTimeline = undefined;
     }
 
     const scenario = await this.loadScenario("calculator-demo");
@@ -55,15 +64,19 @@ class HudController {
       sessionId: `session_${scenario.id.replace(/[^a-z0-9]+/gi, "_")}`,
       outputDir: resolve(process.cwd(), "artifacts", "sessions", scenario.id),
       captureProfile: "draft",
+      stageHoldMsAfterComplete: 0,
+      initialActionDelayMs: 650,
+      actionCadenceMs: 900,
     });
 
     this.currentSession = session;
+    this.currentTimeline = timeline;
     this.state = {
       engineMode,
       snapshot: session.snapshot(),
       events: [],
       sceneSteps: initialSteps,
-      status: "running",
+      status: "idle",
     };
 
     session.onEvent((event) => {
@@ -76,38 +89,76 @@ class HudController {
       this.broadcast();
     });
 
-    void (async () => {
-      try {
-        await session.stageScene({
-          backdrop: scenario.stage.backdrop,
-          viewport: scenario.stage.viewport,
-          targetApp: scenario.targetApp,
-        });
-        await this.pushSnapshot();
+    try {
+      await session.stageScene({
+        backdrop: scenario.stage.backdrop,
+        viewport: scenario.stage.viewport,
+        targetApp: scenario.targetApp,
+      });
+      this.state = {
+        ...this.state,
+        snapshot: session.snapshot(),
+        status: "staged",
+      };
+    } catch (error) {
+      this.state = {
+        ...this.state,
+        snapshot: session.snapshot(),
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown HUD stage error",
+      };
+    }
 
-        await session.beginRun(timeline);
-        await this.pushSnapshot();
+    this.broadcast();
+    return this.state;
+  }
 
-        await session.captureScreenshot();
-        await this.pushSnapshot();
+  async start(engineMode: EngineMode): Promise<HudState> {
+    await this.stage(engineMode);
+    if (this.state.status === "failed") {
+      return this.state;
+    }
+    return this.run();
+  }
 
-        await session.stop();
-        this.state = {
-          ...this.state,
-          snapshot: session.snapshot(),
-          status: "completed",
-        };
-      } catch (error) {
-        this.state = {
-          ...this.state,
-          snapshot: session.snapshot(),
-          status: "failed",
-          error: error instanceof Error ? error.message : "Unknown HUD run error",
-        };
-      }
+  async run(): Promise<HudState> {
+    if (!this.currentSession || !this.currentTimeline) {
+      return this.state;
+    }
 
-      this.broadcast();
-    })();
+    if (this.state.status === "running") {
+      return this.state;
+    }
+
+    this.state = {
+      ...this.state,
+      status: "running",
+      error: undefined,
+    };
+    this.broadcast();
+
+    try {
+      await this.currentSession.beginRun(this.currentTimeline);
+      await this.pushSnapshot();
+
+      await this.currentSession.captureScreenshot("screenshot-viewport-final.png", "viewport");
+      await this.currentSession.captureScreenshot("screenshot-full-final.png", "full");
+      await this.pushSnapshot();
+
+      await this.currentSession.stop();
+      this.state = {
+        ...this.state,
+        snapshot: this.currentSession.snapshot(),
+        status: "completed",
+      };
+    } catch (error) {
+      this.state = {
+        ...this.state,
+        snapshot: this.currentSession.snapshot(),
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown HUD run error",
+      };
+    }
 
     this.broadcast();
     return this.state;
@@ -400,7 +451,7 @@ function html(): string {
 
       .viewport {
         margin-top: 32px;
-        background: linear-gradient(160deg, #141414, #292119);
+        background: linear-gradient(160deg, #121214, #0b0b0d);
         color: #f3f4f6;
         border-radius: 24px;
         min-height: 420px;
@@ -413,7 +464,7 @@ function html(): string {
         content: "";
         position: absolute;
         inset: 20px;
-        border: 1px solid rgba(246,234,215,0.18);
+        border: 1px solid rgba(255,255,255,0.14);
         border-radius: 18px;
         pointer-events: none;
       }
@@ -431,6 +482,16 @@ function html(): string {
         border-radius: 999px;
         background: rgba(255,255,255,0.1);
         border: 1px solid rgba(255,255,255,0.14);
+      }
+
+      .record-start {
+        margin-top: 10px;
+        padding: 8px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--line-soft);
+        background: rgba(255,255,255,0.04);
+        color: var(--muted);
+        font-size: 12px;
       }
 
       .status {
@@ -479,22 +540,22 @@ function html(): string {
         border-radius: 22px;
         overflow: hidden;
         background:
-          radial-gradient(circle at 20% 18%, rgba(255, 145, 56, 0.45), transparent 30%),
-          linear-gradient(140deg, #1d1914 0%, #0f0f10 58%, #141b20 100%);
+          radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.12), transparent 30%),
+          linear-gradient(140deg, #121214 0%, #0f0f11 58%, #101215 100%);
         box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
       }
 
       .stage-canvas[data-backdrop="studio"] {
         background:
-          radial-gradient(circle at 18% 18%, rgba(255, 124, 53, 0.45), transparent 30%),
-          radial-gradient(circle at 80% 84%, rgba(255, 232, 182, 0.15), transparent 24%),
-          linear-gradient(140deg, #1e1c16 0%, #111112 58%, #10171d 100%);
+          radial-gradient(circle at 18% 18%, rgba(255, 255, 255, 0.1), transparent 30%),
+          radial-gradient(circle at 80% 84%, rgba(255, 255, 255, 0.08), transparent 24%),
+          linear-gradient(140deg, #141417 0%, #101012 58%, #101215 100%);
       }
 
       .stage-canvas[data-backdrop="gradient"] {
         background:
-          radial-gradient(circle at 20% 18%, rgba(255, 153, 102, 0.28), transparent 30%),
-          linear-gradient(145deg, #42210d 0%, #111214 52%, #123444 100%);
+          radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.1), transparent 30%),
+          linear-gradient(145deg, #1a1a1d 0%, #121215 52%, #0d0d10 100%);
       }
 
       .stage-canvas[data-backdrop="spotlight"] {
@@ -601,7 +662,7 @@ function html(): string {
         font-family: "JetBrains Mono", monospace;
         font-size: clamp(5rem, 12vw, 10rem);
         line-height: 1;
-        color: rgba(255, 244, 224, 0.94);
+        color: rgba(245, 245, 245, 0.94);
         text-shadow: 0 18px 60px rgba(0,0,0,0.45);
         z-index: 2;
       }
@@ -639,9 +700,9 @@ function html(): string {
         background: rgba(255,255,255,0.18);
       }
 
-      .traffic span:nth-child(1) { background: #ff5f57; }
-      .traffic span:nth-child(2) { background: #febb2f; }
-      .traffic span:nth-child(3) { background: #28c840; }
+      .traffic span:nth-child(1) { background: rgba(255,255,255,0.42); }
+      .traffic span:nth-child(2) { background: rgba(255,255,255,0.26); }
+      .traffic span:nth-child(3) { background: rgba(255,255,255,0.18); }
 
       .window-title {
         color: rgba(255,255,255,0.88);
@@ -854,6 +915,7 @@ function html(): string {
             <div class="status"><span>Target</span><strong id="target">Calculator</strong></div>
             <div class="timer"><strong id="timer">00:00.0</strong></div>
           </div>
+          <div class="record-start" id="record-start">Recording timer idle</div>
           <div class="stage-meta">
             <div class="stage-card">
               <small>Backdrop</small>
@@ -903,8 +965,9 @@ function html(): string {
         <section class="panel">
           <h2 class="section-title">Controls</h2>
           <div class="controls">
-            <button id="start-mock">Run Mock Demo</button>
-            <button id="start-macos" class="secondary">Run macOS Demo</button>
+            <button id="stage-mock">Stage Mock Scene</button>
+            <button id="stage-macos" class="secondary">Stage macOS Scene</button>
+            <button id="run-scene">Run Staged Scene</button>
             <button id="request-perms" class="secondary">Request Permissions</button>
             <button id="open-access" class="secondary">Open Accessibility</button>
             <button id="open-screen" class="secondary">Open Screen Recording</button>
@@ -942,6 +1005,7 @@ function html(): string {
         phase: document.getElementById("phase"),
         target: document.getElementById("target"),
         timer: document.getElementById("timer"),
+        recordStart: document.getElementById("record-start"),
         backdrop: document.getElementById("backdrop"),
         viewportBounds: document.getElementById("viewport-bounds"),
         captureState: document.getElementById("capture-state"),
@@ -1021,7 +1085,7 @@ function html(): string {
         const snapshot = state.snapshot || {};
         const phase = snapshot.phase || "created";
         const viewport = snapshot.stage && snapshot.stage.viewport;
-        const screenshot = (snapshot.artifacts || []).find((artifact) => artifact.kind === "screenshot");
+        const screenshot = [...(snapshot.artifacts || [])].reverse().find((artifact) => artifact.kind === "screenshot");
 
         els.mode.textContent = state.engineMode;
         els.status.textContent = state.status;
@@ -1043,6 +1107,15 @@ function html(): string {
         const countdown = latestCountdown(state);
         els.countdown.hidden = phase !== "countdown";
         els.countdown.textContent = countdown ? String(countdown) : "";
+        if (phase === "countdown" && countdown) {
+          els.recordStart.textContent = "Recording starts in " + countdown + "s";
+        } else if (snapshot.isRecording) {
+          els.recordStart.textContent = "Recording live";
+        } else if (phase === "completed") {
+          els.recordStart.textContent = "Completed. Review the captured artifacts.";
+        } else {
+          els.recordStart.textContent = "Recording timer idle";
+        }
         updateStageLayout(viewport);
         els.viewportBounds.textContent = viewport
           ? viewport.bounds.x + "," + viewport.bounds.y + " " + viewport.bounds.width + "x" + viewport.bounds.height
@@ -1092,8 +1165,9 @@ function html(): string {
         }
       }
 
-      document.getElementById("start-mock").onclick = () => post("/api/start?engine=mock");
-      document.getElementById("start-macos").onclick = () => post("/api/start?engine=macos");
+      document.getElementById("stage-mock").onclick = () => post("/api/stage?engine=mock");
+      document.getElementById("stage-macos").onclick = () => post("/api/stage?engine=macos");
+      document.getElementById("run-scene").onclick = () => post("/api/run");
       document.getElementById("request-perms").onclick = () => post("/api/permissions/request");
       document.getElementById("open-access").onclick = () => post("/api/permissions/open?kind=accessibility");
       document.getElementById("open-screen").onclick = () => post("/api/permissions/open?kind=screen-recording");
@@ -1167,6 +1241,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (req.method === "POST" && url.pathname === "/api/start") {
     const engine = url.searchParams.get("engine") === "macos" ? "macos" : "mock";
     sendJson(res, 200, await controller.start(engine));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/stage") {
+    const engine = url.searchParams.get("engine") === "macos" ? "macos" : "mock";
+    sendJson(res, 200, await controller.stage(engine));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/run") {
+    sendJson(res, 200, await controller.run());
     return;
   }
 

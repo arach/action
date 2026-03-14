@@ -35,6 +35,9 @@ export async function runScenarioGuidedCaptureDemo(
     sessionId: `session_${scenario.id.replace(/[^a-z0-9]+/gi, "_")}`,
     outputDir: resolve(process.cwd(), "artifacts", "sessions", scenario.id),
     captureProfile: "draft",
+    stageHoldMsAfterComplete: 0,
+    initialActionDelayMs: 650,
+    actionCadenceMs: 900,
   });
 
   const events: GuidedSessionEvent[] = [];
@@ -51,7 +54,8 @@ export async function runScenarioGuidedCaptureDemo(
   const { timeline } = compileScenario(scenario);
 
   await session.beginRun(timeline);
-  await session.captureScreenshot();
+  await session.captureScreenshot("screenshot-viewport-final.png", "viewport");
+  await session.captureScreenshot("screenshot-full-final.png", "full");
   const snapshot = await session.stop();
 
   return {

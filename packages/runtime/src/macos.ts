@@ -289,6 +289,25 @@ export class MacOSCommandEngine implements CaptureEngine {
     };
   }
 
+  async captureFullScreenshot(path: string): Promise<RuntimeArtifact> {
+    await mkdir(dirname(path), { recursive: true });
+    await rm(path, { force: true });
+    await this.runHost(
+      "screenshot-screen",
+      "--output",
+      path,
+    );
+    await this.waitForFile(path, 1);
+
+    return {
+      kind: "screenshot",
+      path,
+      metadata: {
+        scope: "full-screen",
+      },
+    };
+  }
+
   async resolveTarget(query: TargetQuery): Promise<ResolvedTarget> {
     return {
       id: query.semanticId ?? query.text ?? "target",
