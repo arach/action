@@ -121,6 +121,8 @@ export class MacOSCommandEngine implements CaptureEngine {
   async clearStage(): Promise<void> {
     if (this.overlayStopPath) {
       await writeFile(this.overlayStopPath, "stop\n");
+      // Give the native overlay timer loop a chance to observe the stop file.
+      await new Promise((resolve) => setTimeout(resolve, 220));
     }
 
     if (this.overlayPid) {
@@ -133,6 +135,14 @@ export class MacOSCommandEngine implements CaptureEngine {
       try {
         process.kill(this.overlayPid, 0);
         await execFileAsync("kill", ["-KILL", String(this.overlayPid)]);
+      } catch {}
+    } else {
+      // Fallback for cases where PID was not captured but an overlay process remains.
+      try {
+        await execFileAsync("pkill", [
+          "-f",
+          "/Action.app/Contents/MacOS/Action stage-overlay",
+        ]);
       } catch {}
     }
 

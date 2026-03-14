@@ -199,6 +199,44 @@ class HudController {
     return this.state;
   }
 
+  async clear(): Promise<HudState> {
+    if (!this.currentSession) {
+      this.state = {
+        ...this.state,
+        status: "idle",
+      };
+      this.broadcast();
+      return this.state;
+    }
+
+    if (this.runPromise) {
+      this.currentSession.requestStop();
+      this.state = {
+        ...this.state,
+        snapshot: this.currentSession.snapshot(),
+      };
+      this.broadcast();
+      return this.state;
+    }
+
+    await this.currentSession.clearStage();
+    this.currentSession = undefined;
+    this.currentTimeline = undefined;
+    this.state = {
+      ...this.state,
+      snapshot: this.state.snapshot
+        ? {
+            ...this.state.snapshot,
+            phase: "created",
+            isRecording: false,
+          }
+        : this.state.snapshot,
+      status: "idle",
+    };
+    this.broadcast();
+    return this.state;
+  }
+
   async requestPermissions(): Promise<HudState> {
     if (!this.currentSession) {
       const engine = new MacOSCommandEngine();
@@ -388,23 +426,7 @@ class HudController {
           break;
         case "clear":
         case "quit":
-          if (!this.runPromise) {
-            await session.clearStage();
-            this.currentSession = undefined;
-            this.currentTimeline = undefined;
-            this.state = {
-              ...this.state,
-              snapshot: this.state.snapshot
-                ? {
-                    ...this.state.snapshot,
-                    phase: "created",
-                    isRecording: false,
-                  }
-                : this.state.snapshot,
-              status: "idle",
-            };
-            this.broadcast();
-          }
+          await this.clear();
           break;
         default:
           break;
@@ -1047,6 +1069,7 @@ function html(): string {
             <button id="stage-mock">Stage Mock Scene</button>
             <button id="stage-macos" class="secondary">Stage macOS Scene</button>
             <button id="run-scene">Run Staged Scene</button>
+            <button id="clear-scene" class="secondary">Clear Stage</button>
             <button id="request-perms" class="secondary">Request Permissions</button>
             <button id="open-access" class="secondary">Open Accessibility</button>
             <button id="open-screen" class="secondary">Open Screen Recording</button>
@@ -1247,6 +1270,7 @@ function html(): string {
       document.getElementById("stage-mock").onclick = () => post("/api/stage?engine=mock");
       document.getElementById("stage-macos").onclick = () => post("/api/stage?engine=macos");
       document.getElementById("run-scene").onclick = () => post("/api/run");
+      document.getElementById("clear-scene").onclick = () => post("/api/clear");
       document.getElementById("request-perms").onclick = () => post("/api/permissions/request");
       document.getElementById("open-access").onclick = () => post("/api/permissions/open?kind=accessibility");
       document.getElementById("open-screen").onclick = () => post("/api/permissions/open?kind=screen-recording");
@@ -1336,6 +1360,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   if (req.method === "POST" && url.pathname === "/api/replay") {
     sendJson(res, 200, await controller.replay());
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/clear") {
+    sendJson(res, 200, await controller.clear());
     return;
   }
 
