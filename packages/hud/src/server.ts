@@ -447,11 +447,11 @@ function html(): string {
     <title>Action HUD</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
       :root {
         --bg: #0a0a0b;
-        --panel: rgba(18, 18, 20, 0.72);
+        --panel: rgba(18, 18, 20, 0.84);
         --ink: #e6e6e8;
         --muted: #9a9aa1;
         --line: rgba(255, 255, 255, 0.12);
@@ -459,13 +459,16 @@ function html(): string {
         --success: #d4d4d8;
         --error: #ef4444;
         --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+        --radius-lg: 10px;
+        --radius-md: 6px;
+        --radius-sm: 4px;
       }
 
       * { box-sizing: border-box; }
       body {
         margin: 0;
         min-height: 100vh;
-        font-family: "JetBrains Mono", monospace;
+        font-family: "IBM Plex Mono", monospace;
         color: var(--ink);
         background:
           radial-gradient(circle at 12% 10%, rgba(255,255,255,0.08), transparent 26%),
@@ -483,7 +486,7 @@ function html(): string {
       .hero, .panel {
         background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 28px;
+        border-radius: var(--radius-lg);
         box-shadow: var(--shadow);
         backdrop-filter: blur(18px);
       }
@@ -500,7 +503,7 @@ function html(): string {
         position: absolute;
         inset: 18px;
         border: 1px dashed rgba(17,17,17,0.12);
-        border-radius: 24px;
+        border-radius: var(--radius-md);
         pointer-events: none;
       }
 
@@ -529,7 +532,7 @@ function html(): string {
         margin-top: 32px;
         background: linear-gradient(160deg, #121214, #0b0b0d);
         color: #f3f4f6;
-        border-radius: 24px;
+        border-radius: var(--radius-md);
         min-height: 420px;
         padding: 22px;
         position: relative;
@@ -541,7 +544,7 @@ function html(): string {
         position: absolute;
         inset: 20px;
         border: 1px solid rgba(255,255,255,0.14);
-        border-radius: 18px;
+        border-radius: var(--radius-sm);
         pointer-events: none;
       }
 
@@ -555,7 +558,7 @@ function html(): string {
       .timer {
         margin-left: auto;
         padding: 10px 14px;
-        border-radius: 999px;
+        border-radius: var(--radius-sm);
         background: rgba(255,255,255,0.1);
         border: 1px solid rgba(255,255,255,0.14);
       }
@@ -563,7 +566,7 @@ function html(): string {
       .record-start {
         margin-top: 10px;
         padding: 8px 12px;
-        border-radius: 10px;
+        border-radius: var(--radius-sm);
         border: 1px solid var(--line-soft);
         background: rgba(255,255,255,0.04);
         color: var(--muted);
@@ -575,7 +578,7 @@ function html(): string {
         align-items: center;
         gap: 10px;
         padding: 10px 14px;
-        border-radius: 999px;
+        border-radius: var(--radius-sm);
         background: rgba(255,255,255,0.08);
         border: 1px solid rgba(255,255,255,0.12);
         font-size: 13px;
@@ -597,7 +600,7 @@ function html(): string {
 
       .stage-card {
         padding: 14px;
-        border-radius: 18px;
+        border-radius: var(--radius-sm);
         background: rgba(255,255,255,0.06);
         border: 1px solid rgba(255,255,255,0.1);
       }
@@ -613,7 +616,7 @@ function html(): string {
         position: relative;
         margin-top: 22px;
         aspect-ratio: 16 / 10;
-        border-radius: 22px;
+        border-radius: var(--radius-md);
         overflow: hidden;
         background:
           radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.12), transparent 30%),
@@ -636,7 +639,7 @@ function html(): string {
 
       .stage-canvas[data-backdrop="spotlight"] {
         background:
-          radial-gradient(circle at 50% 50%, rgba(245, 238, 223, 0.16), transparent 18%),
+          radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.14), transparent 18%),
           linear-gradient(145deg, #171717 0%, #101214 100%);
       }
 
@@ -646,7 +649,7 @@ function html(): string {
         top: var(--viewport-top, 15%);
         width: var(--viewport-width, 64%);
         height: var(--viewport-height, 70%);
-        border-radius: 20px;
+        border-radius: var(--radius-sm);
         overflow: hidden;
         background: rgba(255,255,255,0.04);
         border: 1px solid rgba(255,255,255,0.18);
@@ -711,7 +714,7 @@ function html(): string {
         align-items: center;
         gap: 10px;
         padding: 10px 14px;
-        border-radius: 999px;
+        border-radius: var(--radius-sm);
         background: rgba(8, 8, 10, 0.72);
         border: 1px solid rgba(255,255,255,0.14);
         color: white;
@@ -735,7 +738,7 @@ function html(): string {
         inset: 0;
         display: grid;
         place-items: center;
-        font-family: "JetBrains Mono", monospace;
+        font-family: "IBM Plex Mono", monospace;
         font-size: clamp(5rem, 12vw, 10rem);
         line-height: 1;
         color: rgba(245, 245, 245, 0.94);
@@ -847,7 +850,7 @@ function html(): string {
 
       button {
         border: 0;
-        border-radius: 18px;
+        border-radius: var(--radius-sm);
         padding: 14px 16px;
         font-size: 14px;
         cursor: pointer;
@@ -879,7 +882,7 @@ function html(): string {
         align-items: center;
         gap: 8px;
         padding: 8px 10px;
-        border-radius: 999px;
+        border-radius: var(--radius-sm);
         background: rgba(255,255,255,0.08);
         color: var(--ink);
       }
@@ -898,7 +901,7 @@ function html(): string {
 
       .log {
         padding: 12px;
-        border-radius: 16px;
+        border-radius: var(--radius-sm);
         background: rgba(17,17,17,0.04);
         border: 1px solid rgba(17,17,17,0.06);
       }
@@ -909,7 +912,7 @@ function html(): string {
 
       .artifact {
         padding: 12px;
-        border-radius: 16px;
+        border-radius: var(--radius-sm);
         border: 1px solid var(--line);
         background: rgba(255,255,255,0.04);
       }
@@ -932,7 +935,7 @@ function html(): string {
         align-items: center;
         gap: 10px;
         padding: 10px 12px;
-        border-radius: 14px;
+        border-radius: var(--radius-sm);
         background: rgba(255,255,255,0.03);
         border: 1px solid var(--line-soft);
       }

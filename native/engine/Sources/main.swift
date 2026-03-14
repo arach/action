@@ -866,8 +866,8 @@ final class StageOverlayView: NSView {
         let outer = NSBezierPath(rect: bounds)
         let cutout = NSBezierPath(
             roundedRect: viewport.insetBy(dx: -18, dy: -18),
-            xRadius: 28,
-            yRadius: 28
+            xRadius: 12,
+            yRadius: 12
         )
         outer.append(cutout)
         outer.windingRule = .evenOdd
@@ -928,7 +928,7 @@ final class StageOverlayView: NSView {
         shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.4)
         shadow.set()
 
-        let glowPath = NSBezierPath(roundedRect: outer, xRadius: 28, yRadius: 28)
+        let glowPath = NSBezierPath(roundedRect: outer, xRadius: 12, yRadius: 12)
         let accent = state.isRecording
             ? NSColor(calibratedWhite: 0.9, alpha: 0.82)
             : NSColor(calibratedWhite: 1, alpha: 0.22)
@@ -937,7 +937,7 @@ final class StageOverlayView: NSView {
         glowPath.stroke()
 
         NSGraphicsContext.saveGraphicsState()
-        let innerPath = NSBezierPath(roundedRect: viewport, xRadius: 22, yRadius: 22)
+        let innerPath = NSBezierPath(roundedRect: viewport, xRadius: 8, yRadius: 8)
         NSColor(calibratedWhite: 1, alpha: 0.12).setStroke()
         innerPath.lineWidth = 1
         innerPath.stroke()
@@ -950,7 +950,7 @@ final class StageOverlayView: NSView {
         let x = min(bounds.width - width - 24, max(24, viewport.midX - width / 2))
         let y = max(24, viewport.minY - height - 16)
         let rect = CGRect(x: x, y: y, width: width, height: height)
-        let path = NSBezierPath(roundedRect: rect, xRadius: 22, yRadius: 22)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
 
         NSColor(calibratedWhite: 0.06, alpha: 0.76).setFill()
         path.fill()
@@ -1086,7 +1086,7 @@ final class StageOverlayView: NSView {
         let dockX = min(bounds.width - dockWidth - 24, max(24, viewport.midX - dockWidth / 2))
         let dockY = max(24, viewport.minY - 148)
         let dockRect = CGRect(x: dockX, y: dockY, width: dockWidth, height: dockHeight)
-        let dockPath = NSBezierPath(roundedRect: dockRect, xRadius: 14, yRadius: 14)
+        let dockPath = NSBezierPath(roundedRect: dockRect, xRadius: 8, yRadius: 8)
         NSColor(calibratedWhite: 0.05, alpha: 0.78).setFill()
         dockPath.fill()
         NSColor(calibratedWhite: 1, alpha: 0.1).setStroke()
@@ -1117,7 +1117,7 @@ final class StageOverlayView: NSView {
     }
 
     private func drawButton(label: String, rect: CGRect, enabled: Bool) {
-        let buttonPath = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
+        let buttonPath = NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4)
         let fill = enabled
             ? NSColor(calibratedWhite: 1, alpha: 0.12)
             : NSColor(calibratedWhite: 1, alpha: 0.04)
@@ -1145,6 +1145,13 @@ final class StageOverlayView: NSView {
             return
         }
         onCommand?(button.id)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard buttons.contains(where: { $0.enabled && $0.rect.contains(point) }) else {
+            return nil
+        }
+        return self
     }
 }
 
@@ -1262,21 +1269,22 @@ final class StageOverlayController: NSObject {
             return
         }
 
-        let line = "\(command)\n"
-        do {
-            let url = URL(fileURLWithPath: controlFile)
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: controlFile) {
-                let handle = try FileHandle(forWritingTo: url)
-                try handle.seekToEnd()
-                try handle.write(contentsOf: Data(line.utf8))
-                try handle.close()
-            } else {
-                try Data(line.utf8).write(to: url)
+        DispatchQueue.global(qos: .utility).async {
+            let line = "\(command)\n"
+            do {
+                let url = URL(fileURLWithPath: controlFile)
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if FileManager.default.fileExists(atPath: controlFile) {
+                    let handle = try FileHandle(forWritingTo: url)
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: Data(line.utf8))
+                    try handle.close()
+                } else {
+                    try Data(line.utf8).write(to: url)
+                }
+            } catch {
+                FileHandle.standardError.write(Data("ActionHost control write failed: \(error.localizedDescription)\n".utf8))
             }
-            logger.log("stage-overlay: control \(command)")
-        } catch {
-            logger.log("stage-overlay: control write failed \(error.localizedDescription)")
         }
     }
 }
