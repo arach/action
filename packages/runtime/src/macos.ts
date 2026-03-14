@@ -45,7 +45,7 @@ export class MacOSCommandEngine implements CaptureEngine {
   private activeCaptureProcess?: ChildProcessWithoutNullStreams;
 
   constructor(
-    private readonly nativePackagePath = "native/engine",
+    private readonly nativeHostPath = "native/engine/scripts/run-app-host.sh",
   ) {}
 
   async diagnostics(): Promise<EngineDiagnostics> {
@@ -224,25 +224,14 @@ export class MacOSCommandEngine implements CaptureEngine {
   }
 
   private runHost(command: string, ...args: string[]) {
-    return execFileAsync("swift", [
-      "run",
-      "--package-path",
-      this.nativePackagePath,
-      "ActionHost",
-      command,
-      ...args,
-    ]);
+    return execFileAsync(this.nativeHostPath, [command, ...args]);
   }
 
   private startRecordingProcess(bundleId: string, outputPath: string): Promise<ChildProcessWithoutNullStreams> {
     return new Promise((resolve, reject) => {
       const child = spawn(
-        "swift",
+        this.nativeHostPath,
         [
-          "run",
-          "--package-path",
-          this.nativePackagePath,
-          "ActionHost",
           "record-app-window",
           "--bundle-id",
           bundleId,

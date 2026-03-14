@@ -5,3 +5,4 @@ coverage
 *.log
 artifacts
 .build
+native/dist

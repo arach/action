@@ -526,6 +526,7 @@ function html(): string {
           <div class="diagnostics">
             <div class="chip" id="access-chip" data-state="unknown">Accessibility: unknown</div>
             <div class="chip" id="screen-chip" data-state="unknown">Screen Recording: unknown</div>
+            <div class="notes list" id="diagnostic-notes"></div>
             <div class="meta" id="error"></div>
           </div>
         </section>
@@ -547,6 +548,7 @@ function html(): string {
         target: document.getElementById("target"),
         access: document.getElementById("access-chip"),
         screen: document.getElementById("screen-chip"),
+        notes: document.getElementById("diagnostic-notes"),
         error: document.getElementById("error"),
         artifacts: document.getElementById("artifacts"),
         logs: document.getElementById("logs")
@@ -568,6 +570,13 @@ function html(): string {
         els.target.textContent = state.snapshot?.targetApp || "Calculator";
         setChip(els.access, "Accessibility", state.snapshot?.diagnostics?.accessibility);
         setChip(els.screen, "Screen Recording", state.snapshot?.diagnostics?.screenRecording);
+        els.notes.innerHTML = "";
+        for (const note of state.snapshot?.diagnostics?.notes || []) {
+          const node = document.createElement("div");
+          node.className = "artifact";
+          node.innerHTML = "<small>" + note + "</small>";
+          els.notes.appendChild(node);
+        }
         els.error.textContent = state.error || "";
 
         els.artifacts.innerHTML = "";

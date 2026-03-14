@@ -14,6 +14,7 @@ enum PermissionState: String, Encodable {
 struct PermissionSnapshot: Encodable {
     let accessibility: PermissionState
     let screenRecording: PermissionState
+    let notes: [String]?
 }
 
 struct ActionHostResponse: Encodable {
@@ -105,10 +106,16 @@ func snapshot(promptAccessibility: Bool, requestScreenRecordingPermission: Bool)
     let screenRecording = requestScreenRecordingPermission
         ? requestScreenRecording()
         : screenRecordingStatus()
+    let bundleId = Bundle.main.bundleIdentifier ?? "unknown"
+    let bundlePath = Bundle.main.bundlePath
 
     return PermissionSnapshot(
         accessibility: accessibility,
-        screenRecording: screenRecording
+        screenRecording: screenRecording,
+        notes: [
+            "bundleId=\(bundleId)",
+            "bundlePath=\(bundlePath)"
+        ]
     )
 }
 
