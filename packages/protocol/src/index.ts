@@ -121,6 +121,8 @@ export interface RuntimeArtifact {
 
 export type PermissionState = "granted" | "denied" | "unknown";
 
+export type CaptureProfile = "draft" | "final";
+
 export interface EngineDiagnostics {
   accessibility: PermissionState;
   screenRecording: PermissionState;
@@ -290,6 +292,7 @@ export interface CaptureStartRequest {
   sessionId: string;
   outputPath: string;
   viewport?: StageViewport;
+  profile?: CaptureProfile;
 }
 
 export interface CaptureEngine {

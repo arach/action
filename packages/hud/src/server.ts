@@ -41,7 +41,8 @@ class HudController {
 
     const session = new GuidedCaptureSession(engine, {
       sessionId: `session_${scenario.id.replace(/[^a-z0-9]+/gi, "_")}`,
-      outputDir: `artifacts/sessions/${scenario.id}`,
+      outputDir: resolve(process.cwd(), "artifacts", "sessions", scenario.id),
+      captureProfile: "draft",
     });
 
     this.currentSession = session;

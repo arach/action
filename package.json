@@ -15,10 +15,14 @@
     "scenario:calculator": "bun packages/cli/src/main.ts scenario calculator-demo",
     "hud": "bun packages/hud/src/server.ts",
     "native:app:build": "native/engine/scripts/build-app.sh",
+    "native:doctor": "native/engine/scripts/doctor.sh",
+    "native:verify": "native/engine/scripts/verify-app.sh",
     "native:permissions:status": "native/engine/scripts/run-app-host.sh status",
     "native:permissions:request": "native/engine/scripts/run-app-host.sh request",
     "native:permissions:open:accessibility": "native/engine/scripts/run-app-host.sh open-accessibility-settings",
-    "native:permissions:open:screen-recording": "native/engine/scripts/run-app-host.sh open-screen-recording-settings"
+    "native:permissions:open:screen-recording": "native/engine/scripts/run-app-host.sh open-screen-recording-settings",
+    "native:test:screenshot": "native/engine/scripts/test-screenshot.sh",
+    "native:test:record": "native/engine/scripts/test-record.sh"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -12,6 +12,7 @@ CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 PLIST_TEMPLATE="$APP_TEMPLATE_DIR/Info.plist"
+LOCK_DIR="$ROOT_DIR/native/.action-build.lock"
 
 detect_identity() {
   if [[ -n "${ACTION_CODESIGN_IDENTITY:-}" ]]; then
@@ -36,6 +37,19 @@ detect_identity() {
   printf '%s\n' "-"
 }
 
+acquire_lock() {
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    sleep 0.1
+  done
+}
+
+release_lock() {
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+acquire_lock
+trap release_lock EXIT
+
 swift build --package-path "$PACKAGE_DIR" -c debug >&2
 
 BIN_DIR=$(swift build --package-path "$PACKAGE_DIR" -c debug --show-bin-path)
@@ -52,5 +66,7 @@ codesign --force --sign "$SIGNING_IDENTITY" "$APP_EXECUTABLE" >&2
 codesign --force --sign "$SIGNING_IDENTITY" "$APP_DIR" >&2
 
 printf 'codesigned-with=%s\n' "$SIGNING_IDENTITY" >&2
+
+"$SCRIPT_DIR/verify-app.sh" >&2
 
 printf '%s\n' "$APP_DIR"

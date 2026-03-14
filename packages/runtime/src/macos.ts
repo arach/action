@@ -1,11 +1,12 @@
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { execFile } from "node:child_process";
+import { access, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import type {
   BackdropPreset,
   CaptureEngine,
+  CaptureProfile,
   EngineDiagnostics,
   ResolvedTarget,
   RuntimeAction,
@@ -22,17 +23,13 @@ function appSurfaceId(app: TargetApp): string {
   return `surface_${app.bundleId.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`;
 }
 
-function shellQuote(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
-}
-
 function calculatorButtonName(query: TargetQuery): string {
   if (query.semanticId === "calculator.operator.plus") {
-    return "+";
+    return "Add";
   }
 
   if (query.semanticId === "calculator.operator.equals") {
-    return "=";
+    return "Equals";
   }
 
   return query.text ?? query.semanticId ?? "unknown";
@@ -41,8 +38,9 @@ function calculatorButtonName(query: TargetQuery): string {
 export class MacOSCommandEngine implements CaptureEngine {
   private readonly surfaces = new Map<string, TargetApp>();
   private activeCapturePath?: string;
+  private activeCaptureStopPath?: string;
+  private activeViewport?: StageViewport;
   private focusedSurfaceId?: string;
-  private activeCaptureProcess?: ChildProcessWithoutNullStreams;
 
   constructor(
     private readonly nativeHostPath = "native/engine/scripts/run-app-host.sh",
@@ -99,29 +97,50 @@ export class MacOSCommandEngine implements CaptureEngine {
       throw new Error(`Unknown surface: ${surfaceId}`);
     }
 
-    await execFileAsync("osascript", [
-      "-e",
-      `tell application "${shellQuote(app.name)}" to activate`,
-    ]);
+    await this.runHost("activate-app", "--bundle-id", app.bundleId);
     this.focusedSurfaceId = surfaceId;
   }
 
-  async configureViewport(_viewport: StageViewport): Promise<void> {}
+  async configureViewport(viewport: StageViewport): Promise<void> {
+    this.activeViewport = viewport;
 
-  async startCapture(request: { outputPath: string }): Promise<void> {
-    const surfaceId = this.focusedSurfaceId;
+    const surfaceId = viewport.surfaceId ?? this.focusedSurfaceId;
     if (!surfaceId) {
-      throw new Error("No focused surface is available for capture.");
+      return;
     }
 
     const app = this.surfaces.get(surfaceId);
     if (!app) {
-      throw new Error(`No app is registered for surface ${surfaceId}.`);
+      return;
+    }
+
+    await this.runHost(
+      "set-window-frame",
+      "--bundle-id",
+      app.bundleId,
+      "--x",
+      String(viewport.bounds.x),
+      "--y",
+      String(viewport.bounds.y),
+      "--width",
+      String(viewport.bounds.width),
+      "--height",
+      String(viewport.bounds.height),
+    );
+  }
+
+  async startCapture(request: { outputPath: string; viewport?: StageViewport; profile?: CaptureProfile }): Promise<void> {
+    const viewport = request.viewport ?? this.activeViewport;
+    if (!viewport) {
+      throw new Error("No viewport is configured for capture.");
     }
 
     await mkdir(dirname(request.outputPath), { recursive: true });
+    await rm(request.outputPath, { force: true });
     this.activeCapturePath = request.outputPath;
-    this.activeCaptureProcess = await this.startRecordingProcess(app.bundleId, request.outputPath);
+    this.activeCaptureStopPath = `${request.outputPath}.stop`;
+    await rm(this.activeCaptureStopPath, { force: true });
+    await this.startRecordingSession(viewport, request.outputPath, this.activeCaptureStopPath, request.profile ?? "draft");
   }
 
   async pauseCapture(): Promise<void> {}
@@ -129,10 +148,10 @@ export class MacOSCommandEngine implements CaptureEngine {
   async resumeCapture(): Promise<void> {}
 
   async stopCapture(): Promise<RuntimeArtifact> {
-    const path = this.activeCapturePath ?? "artifacts/sessions/macos/capture.mov";
-    const child = this.activeCaptureProcess;
+    const path = this.activeCapturePath ?? resolve(process.cwd(), "artifacts", "sessions", "macos", "capture.mov");
+    const stopPath = this.activeCaptureStopPath;
 
-    if (!child) {
+    if (!stopPath) {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, "");
 
@@ -146,13 +165,10 @@ export class MacOSCommandEngine implements CaptureEngine {
       };
     }
 
-    child.stdin.end();
-    const result = await this.waitForProcessExit(child);
-    this.activeCaptureProcess = undefined;
-
-    if (result.code !== 0) {
-      throw new Error(result.stderr || `Capture process exited with code ${result.code}`);
-    }
+    await writeFile(stopPath, "stop\n");
+    await this.waitForCaptureFile(path);
+    await rm(stopPath, { force: true });
+    this.activeCaptureStopPath = undefined;
 
     return {
       kind: "raw-capture",
@@ -161,18 +177,27 @@ export class MacOSCommandEngine implements CaptureEngine {
   }
 
   async captureScreenshot(path: string): Promise<RuntimeArtifact> {
-    const surfaceId = this.focusedSurfaceId;
-    if (!surfaceId) {
-      throw new Error("No focused surface is available for screenshot capture.");
-    }
-
-    const app = this.surfaces.get(surfaceId);
-    if (!app) {
-      throw new Error(`No app is registered for surface ${surfaceId}.`);
+    const viewport = this.activeViewport;
+    if (!viewport) {
+      throw new Error("No viewport is configured for screenshot capture.");
     }
 
     await mkdir(dirname(path), { recursive: true });
-    await this.runHost("screenshot-app-window", "--bundle-id", app.bundleId, "--output", path);
+    await rm(path, { force: true });
+    await this.runHost(
+      "screenshot-region",
+      "--x",
+      String(viewport.bounds.x),
+      "--y",
+      String(viewport.bounds.y),
+      "--width",
+      String(viewport.bounds.width),
+      "--height",
+      String(viewport.bounds.height),
+      "--output",
+      path,
+    );
+    await this.waitForFile(path, 1);
 
     return {
       kind: "screenshot",
@@ -193,28 +218,19 @@ export class MacOSCommandEngine implements CaptureEngine {
   async performAction(action: RuntimeAction, target?: ResolvedTarget): Promise<void> {
     if (action.kind === "type") {
       const text = String(action.input?.text ?? "");
-      await execFileAsync("osascript", [
-        "-e",
-        "tell application \"System Events\" to keystroke " + JSON.stringify(text),
-      ]);
+      await this.runHost("type-text", "--text", text);
       return;
     }
 
     if (action.kind === "press-key") {
       const key = String(action.input?.key ?? "");
-      await execFileAsync("osascript", [
-        "-e",
-        "tell application \"System Events\" to keystroke " + JSON.stringify(key),
-      ]);
+      await this.runHost("press-key", "--key", key);
       return;
     }
 
     if (action.kind === "click") {
       const buttonName = calculatorButtonName(target ? { text: target.label, semanticId: target.id } : action.target ?? {});
-      await execFileAsync("osascript", [
-        "-e",
-        `tell application "System Events" to tell process "Calculator" to click button "${shellQuote(buttonName)}" of window 1`,
-      ]);
+      await this.runHost("click-calculator-button", "--button", buttonName);
       return;
     }
   }
@@ -227,72 +243,53 @@ export class MacOSCommandEngine implements CaptureEngine {
     return execFileAsync(this.nativeHostPath, [command, ...args]);
   }
 
-  private startRecordingProcess(bundleId: string, outputPath: string): Promise<ChildProcessWithoutNullStreams> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(
-        this.nativeHostPath,
-        [
-          "record-app-window",
-          "--bundle-id",
-          bundleId,
-          "--output",
-          outputPath,
-        ],
-        {
-          stdio: ["pipe", "pipe", "pipe"],
-        },
-      );
+  private async startRecordingSession(
+    viewport: StageViewport,
+    outputPath: string,
+    stopPath: string,
+    profile: CaptureProfile,
+  ): Promise<void> {
+    const fps = profile === "draft" ? "15" : "30";
+    const scale = profile === "draft" ? "0.75" : "1";
 
-      let stdout = "";
-      let stderr = "";
-      let settled = false;
-
-      child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8");
-        if (settled || !stdout.includes("\n")) {
-          return;
-        }
-
-        settled = true;
-        resolve(child);
-      });
-
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8");
-      });
-
-      child.on("exit", (code) => {
-        if (settled) {
-          return;
-        }
-
-        reject(new Error(stderr || stdout || `Capture process exited before start with code ${code}`));
-      });
-
-      child.on("error", (error) => {
-        if (settled) {
-          return;
-        }
-
-        reject(error);
-      });
-    });
+    await this.runHost(
+      "record-region",
+      "--x",
+      String(viewport.bounds.x),
+      "--y",
+      String(viewport.bounds.y),
+      "--width",
+      String(viewport.bounds.width),
+      "--height",
+      String(viewport.bounds.height),
+      "--fps",
+      fps,
+      "--scale",
+      scale,
+      "--output",
+      outputPath,
+      "--stop-file",
+      stopPath,
+    );
   }
 
-  private waitForProcessExit(child: ChildProcessWithoutNullStreams): Promise<{
-    code: number | null;
-    stderr: string;
-  }> {
-    return new Promise((resolve) => {
-      let stderr = "";
+  private async waitForCaptureFile(path: string): Promise<void> {
+    await this.waitForFile(path, 1);
+  }
 
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8");
-      });
+  private async waitForFile(path: string, minBytes: number): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        await access(path);
+        const file = await stat(path);
+        if (file.size >= minBytes) {
+          return;
+        }
+      } catch {}
 
-      child.on("exit", (code) => {
-        resolve({ code, stderr });
-      });
-    });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    throw new Error(`Timed out waiting for file ${path}`);
   }
 }

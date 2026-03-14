@@ -28,10 +28,19 @@ run_via_open() {
     sleep 0.1
   done
 
-  if [[ -f "$reply_file" ]]; then
+  if [[ -s "$reply_file" ]]; then
     cat "$reply_file"
+    if grep -q '"status"[[:space:]]*:[[:space:]]*"error"' "$reply_file"; then
+      rm -f "$reply_file"
+      return 1
+    fi
     rm -f "$reply_file"
+    return 0
   fi
+
+  rm -f "$reply_file"
+  echo "ActionHost did not write a reply file for command $*" >&2
+  return 1
 }
 
 needs_build=0
@@ -48,11 +57,4 @@ if [[ $needs_build -eq 1 ]]; then
   "$SCRIPT_DIR/build-app.sh" >/dev/stderr
 fi
 
-case "$COMMAND" in
-  record-app-window)
-    run_direct "$@"
-    ;;
-  *)
-    run_via_open "$@"
-    ;;
-esac
+run_via_open "$@"

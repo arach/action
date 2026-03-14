@@ -54,3 +54,41 @@ the relevant prior work and capture:
 - what decision `action` is taking now
 
 See [docs/PRECEDENT_REVIEW.md](/Users/arach/dev/action/docs/PRECEDENT_REVIEW.md).
+
+## Native Dev Loop
+
+Use the native wrappers when working on the macOS host:
+
+- `bun run native:doctor`
+- `bun run native:permissions:status`
+- `bun run native:test:screenshot`
+- `bun run native:test:record`
+
+`native:doctor` is the clean-state wrapper:
+
+- builds `Action.app`
+- signs it
+- verifies the signature is not ad-hoc
+- prints the current Accessibility and Screen Recording state
+
+This avoids guessing whether the current native app bundle is in a trustworthy
+state before debugging capture or automation behavior.
+
+The smoke tests default to the Calculator demo viewport:
+
+- `x=320`
+- `y=180`
+- `width=960`
+- `height=720`
+
+Override them with:
+
+- `ACTION_CAPTURE_X`
+- `ACTION_CAPTURE_Y`
+- `ACTION_CAPTURE_WIDTH`
+- `ACTION_CAPTURE_HEIGHT`
+
+Draft recording defaults:
+
+- `ACTION_RECORD_FPS=15`
+- `ACTION_RECORD_SCALE=0.75`

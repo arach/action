@@ -1,6 +1,7 @@
 import { compileScenario, type ScenarioDocument } from "@action/compiler";
 import type { GuidedSessionEvent, HudSnapshot } from "@action/protocol";
 import { GuidedCaptureSession, MacOSCommandEngine, MockCaptureEngine } from "@action/runtime";
+import { resolve } from "node:path";
 
 export function describeCli(): string[] {
   return [
@@ -32,7 +33,8 @@ export async function runScenarioGuidedCaptureDemo(
     : new MockCaptureEngine();
   const session = new GuidedCaptureSession(engine, {
     sessionId: `session_${scenario.id.replace(/[^a-z0-9]+/gi, "_")}`,
-    outputDir: `artifacts/sessions/${scenario.id}`,
+    outputDir: resolve(process.cwd(), "artifacts", "sessions", scenario.id),
+    captureProfile: "draft",
   });
 
   const events: GuidedSessionEvent[] = [];

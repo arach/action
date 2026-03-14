@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import type {
   BackdropPreset,
   CaptureEngine,
+  CaptureProfile,
   CompiledTimeline,
   EngineDiagnostics,
   GuidedSessionEvent,
@@ -42,6 +43,7 @@ export interface GuidedCaptureSessionOptions {
   sessionId: string;
   outputDir: string;
   countdownSeconds?: number;
+  captureProfile?: CaptureProfile;
 }
 
 export type GuidedSessionListener = (event: GuidedSessionEvent) => void;
@@ -52,6 +54,7 @@ export class GuidedCaptureSession {
   private readonly logEntries: HudLogEntry[] = [];
   private readonly countdownSeconds: number;
   private readonly outputDir: string;
+  private readonly captureProfile: CaptureProfile;
   private phase: GuidedSessionPhase = "created";
   private stage: StageScene = { backdrop: "neutral" };
   private targetApp?: TargetApp;
@@ -67,6 +70,7 @@ export class GuidedCaptureSession {
     this.session = new Session(options.sessionId);
     this.countdownSeconds = options.countdownSeconds ?? 3;
     this.outputDir = options.outputDir;
+    this.captureProfile = options.captureProfile ?? "draft";
   }
 
   onEvent(listener: GuidedSessionListener): () => void {
@@ -187,6 +191,7 @@ export class GuidedCaptureSession {
       sessionId: this.session.snapshot().id,
       outputPath: capturePath,
       viewport: this.stage.viewport,
+      profile: this.captureProfile,
     });
 
     this.session.transition("running", { reason: "capture started" });
