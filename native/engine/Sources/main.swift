@@ -1066,21 +1066,23 @@ final class StageControlDockView: NSView {
     private struct ButtonDef {
         let id: String
         let title: String
+        var rect: CGRect
+        var enabled: Bool
     }
 
-    private let defs: [ButtonDef] = [
-        ButtonDef(id: "start", title: "Start"),
-        ButtonDef(id: "stop", title: "Stop"),
-        ButtonDef(id: "replay", title: "Replay"),
-        ButtonDef(id: "clear", title: "Clear"),
-        ButtonDef(id: "quit", title: "Quit"),
+    private var defs: [ButtonDef] = [
+        ButtonDef(id: "start", title: "Start", rect: .zero, enabled: true),
+        ButtonDef(id: "stop", title: "Stop", rect: .zero, enabled: false),
+        ButtonDef(id: "replay", title: "Replay", rect: .zero, enabled: false),
+        ButtonDef(id: "clear", title: "Clear", rect: .zero, enabled: true),
+        ButtonDef(id: "quit", title: "Quit", rect: .zero, enabled: true),
     ]
-    private var buttonMap: [String: NSButton] = [:]
     var onCommand: ((String) -> Void)?
 
     var phase: String = "staging" {
         didSet {
             updateButtonState()
+            needsDisplay = true
         }
     }
 
@@ -1088,7 +1090,7 @@ final class StageControlDockView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
-        buildButtons()
+        layoutButtons()
         updateButtonState()
     }
 
@@ -1105,9 +1107,32 @@ final class StageControlDockView: NSView {
         NSColor(calibratedWhite: 1, alpha: 0.12).setStroke()
         path.lineWidth = 1
         path.stroke()
+
+        for def in defs {
+            let buttonPath = NSBezierPath(roundedRect: def.rect, xRadius: 4, yRadius: 4)
+            let fill = def.enabled
+                ? NSColor(calibratedWhite: 1, alpha: 0.14)
+                : NSColor(calibratedWhite: 1, alpha: 0.05)
+            let stroke = def.enabled
+                ? NSColor(calibratedWhite: 1, alpha: 0.2)
+                : NSColor(calibratedWhite: 1, alpha: 0.08)
+            fill.setFill()
+            buttonPath.fill()
+            stroke.setStroke()
+            buttonPath.lineWidth = 1
+            buttonPath.stroke()
+
+            drawText(
+                text: def.title,
+                in: CGRect(x: def.rect.minX, y: def.rect.minY + 4, width: def.rect.width, height: 14),
+                font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
+                color: def.enabled ? NSColor.white : NSColor(calibratedWhite: 1, alpha: 0.34),
+                alignment: .center
+            )
+        }
     }
 
-    private func buildButtons() {
+    private func layoutButtons() {
         let buttonSize = CGSize(width: 68, height: 24)
         let spacing: CGFloat = 8
         let startX: CGFloat = 10
@@ -1115,16 +1140,7 @@ final class StageControlDockView: NSView {
 
         for (index, def) in defs.enumerated() {
             let x = startX + CGFloat(index) * (buttonSize.width + spacing)
-            let button = NSButton(frame: CGRect(x: x, y: y, width: buttonSize.width, height: buttonSize.height))
-            button.title = def.title
-            button.bezelStyle = .regularSquare
-            button.isBordered = true
-            button.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
-            button.identifier = NSUserInterfaceItemIdentifier(def.id)
-            button.target = self
-            button.action = #selector(handleButton(_:))
-            addSubview(button)
-            buttonMap[def.id] = button
+            defs[index].rect = CGRect(x: x, y: y, width: buttonSize.width, height: buttonSize.height)
         }
     }
 
@@ -1142,22 +1158,41 @@ final class StageControlDockView: NSView {
     }
 
     private func updateButtonState() {
-        for def in defs {
-            guard let button = buttonMap[def.id] else {
-                continue
-            }
-            let isEnabled = enabled(for: def.id, phase: phase)
-            button.isEnabled = isEnabled
-            button.alphaValue = isEnabled ? 0.95 : 0.35
+        for index in defs.indices {
+            defs[index].enabled = enabled(for: defs[index].id, phase: phase)
         }
     }
 
-    @objc
-    private func handleButton(_ sender: NSButton) {
-        guard sender.isEnabled, let id = sender.identifier?.rawValue else {
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let button = defs.first(where: { $0.enabled && $0.rect.contains(point) }) else {
             return
         }
-        onCommand?(id)
+        onCommand?(button.id)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard defs.contains(where: { $0.enabled && $0.rect.contains(point) }) else {
+            return nil
+        }
+        return self
+    }
+
+    private func drawText(
+        text: String,
+        in rect: CGRect,
+        font: NSFont,
+        color: NSColor,
+        alignment: NSTextAlignment
+    ) {
+        let style = NSMutableParagraphStyle()
+        style.alignment = alignment
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: style,
+        ]
+        text.draw(in: rect, withAttributes: attrs)
     }
 }
 
@@ -1173,6 +1208,7 @@ final class StageOverlayController: NSObject {
     private var overlayView: StageOverlayView?
     private var controlView: StageControlDockView?
     private var lastStateData: Data?
+    private var pollTimer: Timer?
 
     init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?, controlFile: String?) {
         self.stateFile = stateFile
@@ -1196,19 +1232,8 @@ final class StageOverlayController: NSObject {
                 detail: String(ProcessInfo.processInfo.processIdentifier)
             )
         )
-        while !FileManager.default.fileExists(atPath: stopFile) {
-            do {
-                try refreshState(force: false)
-            } catch {
-                logger.log("stage-overlay: refresh failed \(error.localizedDescription)")
-            }
-
-            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.12))
-        }
-
-        logger.log("stage-overlay: stop signal received")
-        overlayWindow?.orderOut(nil)
-        controlWindow?.orderOut(nil)
+        startPolling()
+        app.run()
     }
 
     private func refreshState(force: Bool) throws {
@@ -1252,7 +1277,8 @@ final class StageOverlayController: NSObject {
             controlWindow?.setFrame(dockFrame, display: true)
         }
         overlayWindow?.orderFrontRegardless()
-        controlWindow?.orderFrontRegardless()
+        controlWindow?.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
         logger.log("stage-overlay: window ordered front viewport=\(viewportRect)")
     }
 
@@ -1277,18 +1303,22 @@ final class StageOverlayController: NSObject {
         self.overlayView = overlayView
 
         let controlSize = CGSize(width: 392, height: 42)
-        let controlWindow = NSPanel(
+        let controlWindow = NSWindow(
             contentRect: CGRect(origin: .zero, size: controlSize),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.titled, .fullSizeContentView],
             backing: .buffered,
             defer: false,
             screen: screen
         )
-        controlWindow.level = .screenSaver
+        controlWindow.level = .statusBar
         controlWindow.isOpaque = false
         controlWindow.backgroundColor = .clear
         controlWindow.hasShadow = true
         controlWindow.ignoresMouseEvents = false
+        controlWindow.titleVisibility = .hidden
+        controlWindow.titlebarAppearsTransparent = true
+        controlWindow.isMovable = true
+        controlWindow.isMovableByWindowBackground = true
         controlWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         let controlView = StageControlDockView(frame: CGRect(origin: .zero, size: controlSize))
         controlView.onCommand = { [weak self] command in
@@ -1297,6 +1327,38 @@ final class StageOverlayController: NSObject {
         controlWindow.contentView = controlView
         self.controlWindow = controlWindow
         self.controlView = controlView
+    }
+
+    private func startPolling() {
+        let timer = Timer(timeInterval: 0.12, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.tick()
+            }
+        }
+        pollTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func tick() {
+        if FileManager.default.fileExists(atPath: stopFile) {
+            logger.log("stage-overlay: stop signal received")
+            shutdown()
+            return
+        }
+
+        do {
+            try refreshState(force: false)
+        } catch {
+            logger.log("stage-overlay: refresh failed \(error.localizedDescription)")
+        }
+    }
+
+    private func shutdown() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        overlayWindow?.orderOut(nil)
+        controlWindow?.orderOut(nil)
+        NSApplication.shared.stop(nil)
     }
 
     private func controlDockFrame(screenFrame: CGRect, viewportRect: CGRect) -> CGRect? {
