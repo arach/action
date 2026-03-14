@@ -1184,7 +1184,9 @@ final class StageOverlayController: NSObject {
 
     func run() throws {
         let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
+        app.setActivationPolicy(.regular)
+        configureAppIcon()
+        app.activate(ignoringOtherApps: true)
 
         try refreshState(force: true)
         try writer.write(
@@ -1248,9 +1250,9 @@ final class StageOverlayController: NSObject {
         controlView?.phase = state.phase
         if let dockFrame = controlDockFrame(screenFrame: screen.frame, viewportRect: viewportRect) {
             controlWindow?.setFrame(dockFrame, display: true)
-            controlWindow?.orderFrontRegardless()
         }
         overlayWindow?.orderFrontRegardless()
+        controlWindow?.orderFrontRegardless()
         logger.log("stage-overlay: window ordered front viewport=\(viewportRect)")
     }
 
@@ -1314,6 +1316,13 @@ final class StageOverlayController: NSObject {
             width: dockWidth,
             height: dockHeight
         )
+    }
+
+    private func configureAppIcon() {
+        if let image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Action") {
+            image.size = NSSize(width: 512, height: 512)
+            NSApplication.shared.applicationIconImage = image
+        }
     }
 
     private func appendControlCommand(_ command: String) {
