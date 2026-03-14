@@ -799,23 +799,13 @@ struct StageOverlayState: Decodable {
 }
 
 final class StageOverlayView: NSView {
-    struct ControlButton {
-        let id: String
-        let title: String
-        let rect: CGRect
-        let enabled: Bool
-    }
-
     var state: StageOverlayState? {
         didSet {
             needsDisplay = true
         }
     }
 
-    var onCommand: ((String) -> Void)?
-
     let screenFrame: CGRect
-    private var buttons: [ControlButton] = []
 
     init(frame frameRect: NSRect, screenFrame: CGRect) {
         self.screenFrame = screenFrame
@@ -842,7 +832,6 @@ final class StageOverlayView: NSView {
         drawBackdrop(state: state, viewport: viewport)
         drawViewportFrame(state: state, viewport: viewport)
         drawHudPill(state: state, viewport: viewport)
-        drawControlDock(state: state, viewport: viewport)
 
         if state.phase == "countdown", let countdown = state.countdownRemaining {
             drawCountdown(String(countdown), viewport: viewport)
@@ -1071,42 +1060,78 @@ final class StageOverlayView: NSView {
         text.draw(in: rect, withAttributes: attrs)
     }
 
-    private func drawControlDock(state: StageOverlayState, viewport: CGRect) {
-        let buttonSize = CGSize(width: 68, height: 24)
-        let spacing: CGFloat = 8
-        let labels: [(id: String, title: String)] = [
-            ("start", "Start"),
-            ("stop", "Stop"),
-            ("replay", "Replay"),
-            ("clear", "Clear"),
-            ("quit", "Quit"),
-        ]
-        let dockWidth = CGFloat(labels.count) * buttonSize.width + CGFloat(labels.count - 1) * spacing + 20
-        let dockHeight: CGFloat = 42
-        let dockX = min(bounds.width - dockWidth - 24, max(24, viewport.midX - dockWidth / 2))
-        let dockY = max(24, viewport.minY - 148)
-        let dockRect = CGRect(x: dockX, y: dockY, width: dockWidth, height: dockHeight)
-        let dockPath = NSBezierPath(roundedRect: dockRect, xRadius: 8, yRadius: 8)
-        NSColor(calibratedWhite: 0.05, alpha: 0.78).setFill()
-        dockPath.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.1).setStroke()
-        dockPath.lineWidth = 1
-        dockPath.stroke()
+}
 
-        buttons = []
-        for (index, label) in labels.enumerated() {
-            let x = dockRect.minX + 10 + CGFloat(index) * (buttonSize.width + spacing)
-            let buttonRect = CGRect(x: x, y: dockRect.minY + 9, width: buttonSize.width, height: buttonSize.height)
-            let enabled = isButtonEnabled(id: label.id, phase: state.phase)
-            drawButton(label: label.title, rect: buttonRect, enabled: enabled)
-            buttons.append(ControlButton(id: label.id, title: label.title, rect: buttonRect, enabled: enabled))
+final class StageControlDockView: NSView {
+    private struct ButtonDef {
+        let id: String
+        let title: String
+    }
+
+    private let defs: [ButtonDef] = [
+        ButtonDef(id: "start", title: "Start"),
+        ButtonDef(id: "stop", title: "Stop"),
+        ButtonDef(id: "replay", title: "Replay"),
+        ButtonDef(id: "clear", title: "Clear"),
+        ButtonDef(id: "quit", title: "Quit"),
+    ]
+    private var buttonMap: [String: NSButton] = [:]
+    var onCommand: ((String) -> Void)?
+
+    var phase: String = "staging" {
+        didSet {
+            updateButtonState()
         }
     }
 
-    private func isButtonEnabled(id: String, phase: String) -> Bool {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        buildButtons()
+        updateButtonState()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
+        NSColor(calibratedWhite: 0.05, alpha: 0.84).setFill()
+        path.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.12).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    private func buildButtons() {
+        let buttonSize = CGSize(width: 68, height: 24)
+        let spacing: CGFloat = 8
+        let startX: CGFloat = 10
+        let y: CGFloat = 9
+
+        for (index, def) in defs.enumerated() {
+            let x = startX + CGFloat(index) * (buttonSize.width + spacing)
+            let button = NSButton(frame: CGRect(x: x, y: y, width: buttonSize.width, height: buttonSize.height))
+            button.title = def.title
+            button.bezelStyle = .regularSquare
+            button.isBordered = true
+            button.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+            button.identifier = NSUserInterfaceItemIdentifier(def.id)
+            button.target = self
+            button.action = #selector(handleButton(_:))
+            addSubview(button)
+            buttonMap[def.id] = button
+        }
+    }
+
+    private func enabled(for id: String, phase: String) -> Bool {
         switch id {
         case "start":
-            return phase == "staging" || phase == "completed" || phase == "failed" || phase == "paused"
+            return phase == "staging" || phase == "completed" || phase == "failed" || phase == "paused" || phase == "created"
         case "stop":
             return phase == "countdown" || phase == "recording" || phase == "paused"
         case "replay":
@@ -1116,42 +1141,23 @@ final class StageOverlayView: NSView {
         }
     }
 
-    private func drawButton(label: String, rect: CGRect, enabled: Bool) {
-        let buttonPath = NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4)
-        let fill = enabled
-            ? NSColor(calibratedWhite: 1, alpha: 0.12)
-            : NSColor(calibratedWhite: 1, alpha: 0.04)
-        let stroke = enabled
-            ? NSColor(calibratedWhite: 1, alpha: 0.2)
-            : NSColor(calibratedWhite: 1, alpha: 0.08)
-        fill.setFill()
-        buttonPath.fill()
-        stroke.setStroke()
-        buttonPath.lineWidth = 1
-        buttonPath.stroke()
-
-        drawText(
-            text: label,
-            in: CGRect(x: rect.minX, y: rect.minY + 4, width: rect.width, height: 14),
-            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
-            color: enabled ? NSColor.white : NSColor(calibratedWhite: 1, alpha: 0.32),
-            alignment: .center
-        )
+    private func updateButtonState() {
+        for def in defs {
+            guard let button = buttonMap[def.id] else {
+                continue
+            }
+            let isEnabled = enabled(for: def.id, phase: phase)
+            button.isEnabled = isEnabled
+            button.alphaValue = isEnabled ? 0.95 : 0.35
+        }
     }
 
-    override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        guard let button = buttons.first(where: { $0.enabled && $0.rect.contains(point) }) else {
+    @objc
+    private func handleButton(_ sender: NSButton) {
+        guard sender.isEnabled, let id = sender.identifier?.rawValue else {
             return
         }
-        onCommand?(button.id)
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard buttons.contains(where: { $0.enabled && $0.rect.contains(point) }) else {
-            return nil
-        }
-        return self
+        onCommand?(id)
     }
 }
 
@@ -1162,8 +1168,10 @@ final class StageOverlayController: NSObject {
     private let writer: ResponseWriter
     private let logger: DebugLogger
     private let controlFile: String?
-    private var window: NSWindow?
+    private var overlayWindow: NSWindow?
+    private var controlWindow: NSWindow?
     private var overlayView: StageOverlayView?
+    private var controlView: StageControlDockView?
     private var lastStateData: Data?
 
     init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?, controlFile: String?) {
@@ -1197,7 +1205,8 @@ final class StageOverlayController: NSObject {
         }
 
         logger.log("stage-overlay: stop signal received")
-        window?.orderOut(nil)
+        overlayWindow?.orderOut(nil)
+        controlWindow?.orderOut(nil)
     }
 
     private func refreshState(force: Bool) throws {
@@ -1229,39 +1238,82 @@ final class StageOverlayController: NSObject {
             return
         }
 
-        if window == nil || window?.screen != screen {
+        if overlayWindow == nil || overlayWindow?.screen != screen {
             logger.log("stage-overlay: create window on screen \(screen.frame)")
             createWindow(screen: screen)
         }
 
-        window?.setFrame(screen.frame, display: true)
+        overlayWindow?.setFrame(screen.frame, display: true)
         overlayView?.state = state
-        window?.orderFrontRegardless()
+        controlView?.phase = state.phase
+        if let dockFrame = controlDockFrame(screenFrame: screen.frame, viewportRect: viewportRect) {
+            controlWindow?.setFrame(dockFrame, display: true)
+            controlWindow?.orderFrontRegardless()
+        }
+        overlayWindow?.orderFrontRegardless()
         logger.log("stage-overlay: window ordered front viewport=\(viewportRect)")
     }
 
     private func createWindow(screen: NSScreen) {
-        let window = NSPanel(
+        let overlayWindow = NSPanel(
             contentRect: screen.frame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false,
             screen: screen
         )
-        window.level = .screenSaver
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false
-        window.ignoresMouseEvents = false
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        overlayWindow.level = .screenSaver
+        overlayWindow.isOpaque = false
+        overlayWindow.backgroundColor = .clear
+        overlayWindow.hasShadow = false
+        overlayWindow.ignoresMouseEvents = true
+        overlayWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
         let overlayView = StageOverlayView(frame: CGRect(origin: .zero, size: screen.frame.size), screenFrame: screen.frame)
-        overlayView.onCommand = { [weak self] command in
+        overlayWindow.contentView = overlayView
+        self.overlayWindow = overlayWindow
+        self.overlayView = overlayView
+
+        let controlSize = CGSize(width: 392, height: 42)
+        let controlWindow = NSPanel(
+            contentRect: CGRect(origin: .zero, size: controlSize),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false,
+            screen: screen
+        )
+        controlWindow.level = .screenSaver
+        controlWindow.isOpaque = false
+        controlWindow.backgroundColor = .clear
+        controlWindow.hasShadow = true
+        controlWindow.ignoresMouseEvents = false
+        controlWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        let controlView = StageControlDockView(frame: CGRect(origin: .zero, size: controlSize))
+        controlView.onCommand = { [weak self] command in
             self?.appendControlCommand(command)
         }
-        window.contentView = overlayView
-        self.window = window
-        self.overlayView = overlayView
+        controlWindow.contentView = controlView
+        self.controlWindow = controlWindow
+        self.controlView = controlView
+    }
+
+    private func controlDockFrame(screenFrame: CGRect, viewportRect: CGRect) -> CGRect? {
+        let dockWidth: CGFloat = 392
+        let dockHeight: CGFloat = 42
+        let localViewport = CGRect(
+            x: viewportRect.minX - screenFrame.minX,
+            y: viewportRect.minY - screenFrame.minY,
+            width: viewportRect.width,
+            height: viewportRect.height
+        )
+        let localX = min(screenFrame.width - dockWidth - 24, max(24, localViewport.midX - dockWidth / 2))
+        let localY = max(24, localViewport.minY - 148)
+        return CGRect(
+            x: screenFrame.minX + localX,
+            y: screenFrame.minY + localY,
+            width: dockWidth,
+            height: dockHeight
+        )
     }
 
     private func appendControlCommand(_ command: String) {
