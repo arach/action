@@ -884,7 +884,6 @@ final class StageOverlayView: NSView {
 
         drawBackdrop(state: state, viewport: viewport)
         drawViewportFrame(state: state, viewport: viewport)
-        drawHudPill(state: state, viewport: viewport)
 
         if state.phase == "countdown", let countdown = state.countdownRemaining {
             drawCountdown(String(countdown), viewport: viewport)
@@ -907,9 +906,9 @@ final class StageOverlayView: NSView {
     private func drawBackdrop(state: StageOverlayState, viewport: CGRect) {
         let outer = NSBezierPath(rect: bounds)
         let cutout = NSBezierPath(
-            roundedRect: viewport.insetBy(dx: -6, dy: -6),
-            xRadius: 10,
-            yRadius: 10
+            roundedRect: viewport,
+            xRadius: 8,
+            yRadius: 8
         )
         outer.append(cutout)
         outer.windingRule = .evenOdd
@@ -963,19 +962,19 @@ final class StageOverlayView: NSView {
     }
 
     private func drawViewportFrame(state: StageOverlayState, viewport: CGRect) {
-        let outer = viewport.insetBy(dx: -6, dy: -6)
+        let outer = viewport
         let shadow = NSShadow()
         shadow.shadowBlurRadius = 30
         shadow.shadowOffset = .zero
         shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.4)
         shadow.set()
 
-        let glowPath = NSBezierPath(roundedRect: outer, xRadius: 12, yRadius: 12)
+        let glowPath = NSBezierPath(roundedRect: outer, xRadius: 8, yRadius: 8)
         let accent = state.isRecording
             ? NSColor(calibratedWhite: 0.9, alpha: 0.82)
             : NSColor(calibratedWhite: 1, alpha: 0.22)
         accent.setStroke()
-        glowPath.lineWidth = state.isRecording ? 4 : 2
+        glowPath.lineWidth = state.isRecording ? 2 : 1.5
         glowPath.stroke()
 
         NSGraphicsContext.saveGraphicsState()
@@ -1646,7 +1645,13 @@ final class StageOverlayController: NSObject {
         self.overlayWindow = overlayWindow
         self.overlayView = overlayView
 
-        let controlSize = CGSize(width: 300, height: 640)
+        let sidebarWidth: CGFloat = 300
+        let sidebarTopPadding: CGFloat = 30
+        let sidebarBottomPadding: CGFloat = 8
+        let controlSize = CGSize(
+            width: sidebarWidth,
+            height: max(360, screen.frame.height - sidebarTopPadding - sidebarBottomPadding)
+        )
         let controlWindow = StageControlDockWindow(
             contentRect: CGRect(origin: .zero, size: controlSize),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -1704,8 +1709,8 @@ final class StageOverlayController: NSObject {
 
     private func controlPanelFrame(screenFrame: CGRect) -> CGRect? {
         let sideMargin: CGFloat = 16
-        let topPadding: CGFloat = 34
-        let bottomPadding: CGFloat = 16
+        let topPadding: CGFloat = 30
+        let bottomPadding: CGFloat = 8
         let panelWidth: CGFloat = 300
         let panelHeight = max(360, screenFrame.height - topPadding - bottomPadding)
         let x = screenFrame.maxX - panelWidth - sideMargin

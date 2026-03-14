@@ -1163,10 +1163,10 @@ function html(): string {
         }
 
         const bounds = viewport.bounds;
-        const stageWidth = bounds.width + 320;
-        const stageHeight = bounds.height + 220;
-        const left = ((stageWidth - bounds.width) / 2 / stageWidth) * 100;
-        const top = ((stageHeight - bounds.height) / 2 / stageHeight) * 100;
+        const stageWidth = Math.max(1, bounds.width);
+        const stageHeight = Math.max(1, bounds.height);
+        const left = 0;
+        const top = 0;
         const width = (bounds.width / stageWidth) * 100;
         const height = (bounds.height / stageHeight) * 100;
 
