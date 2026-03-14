@@ -907,9 +907,9 @@ final class StageOverlayView: NSView {
     private func drawBackdrop(state: StageOverlayState, viewport: CGRect) {
         let outer = NSBezierPath(rect: bounds)
         let cutout = NSBezierPath(
-            roundedRect: viewport.insetBy(dx: -18, dy: -18),
-            xRadius: 12,
-            yRadius: 12
+            roundedRect: viewport.insetBy(dx: -6, dy: -6),
+            xRadius: 10,
+            yRadius: 10
         )
         outer.append(cutout)
         outer.windingRule = .evenOdd
@@ -963,7 +963,7 @@ final class StageOverlayView: NSView {
     }
 
     private func drawViewportFrame(state: StageOverlayState, viewport: CGRect) {
-        let outer = viewport.insetBy(dx: -10, dy: -10)
+        let outer = viewport.insetBy(dx: -6, dy: -6)
         let shadow = NSShadow()
         shadow.shadowBlurRadius = 30
         shadow.shadowOffset = .zero
@@ -987,12 +987,21 @@ final class StageOverlayView: NSView {
     }
 
     private func drawHudPill(state: StageOverlayState, viewport: CGRect) {
-        let width: CGFloat = 360
-        let height: CGFloat = 92
-        let x = min(bounds.width - width - 24, max(24, viewport.midX - width / 2))
-        let y = max(24, viewport.minY - height - 16)
+        let reservedRightInset: CGFloat = 340
+        let width: CGFloat = min(420, max(260, viewport.width + 88))
+        let height: CGFloat = 96
+        let maxX = max(24, bounds.width - reservedRightInset - width)
+        let x = min(maxX, max(24, viewport.minX))
+        let yAbove = viewport.maxY + 14
+        let yBelow = viewport.minY - height - 14
+        let y: CGFloat
+        if yAbove + height <= bounds.height - 24 {
+            y = yAbove
+        } else {
+            y = max(24, yBelow)
+        }
         let rect = CGRect(x: x, y: y, width: width, height: height)
-        let path = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
 
         NSColor(calibratedWhite: 0.06, alpha: 0.76).setFill()
         path.fill()
@@ -1011,13 +1020,13 @@ final class StageOverlayView: NSView {
         drawText(
             text: state.isRecording ? "Recording" : state.phase.capitalized,
             in: CGRect(x: rect.minX + 34, y: rect.maxY - 34, width: 140, height: 18),
-            font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
             color: NSColor.white
         )
         drawText(
             text: state.targetApp ?? "Action",
             in: CGRect(x: rect.maxX - 120, y: rect.maxY - 34, width: 96, height: 18),
-            font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
             color: NSColor(calibratedWhite: 1, alpha: 0.72),
             alignment: .right
         )
@@ -1032,8 +1041,8 @@ final class StageOverlayView: NSView {
         }
         drawText(
             text: state.summary,
-            in: CGRect(x: rect.minX + 16, y: rect.minY + 46, width: rect.width - 32, height: 20),
-            font: NSFont.monospacedSystemFont(ofSize: 15, weight: .semibold),
+            in: CGRect(x: rect.minX + 16, y: rect.minY + 48, width: rect.width - 32, height: 20),
+            font: NSFont.monospacedSystemFont(ofSize: 14, weight: .semibold),
             color: NSColor(calibratedWhite: 0.98, alpha: 1)
         )
         if state.phase == "countdown", let remaining = state.countdownRemaining {
@@ -1046,7 +1055,7 @@ final class StageOverlayView: NSView {
         }
         drawText(
             text: state.stepLabel ?? state.detail ?? phaseDetail(for: state),
-            in: CGRect(x: rect.minX + 16, y: rect.minY + 12, width: rect.width - 32, height: 16),
+            in: CGRect(x: rect.minX + 16, y: rect.minY + 26, width: rect.width - 32, height: 16),
             font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
             color: NSColor(calibratedWhite: 1, alpha: 0.62)
         )
@@ -1055,7 +1064,7 @@ final class StageOverlayView: NSView {
         if !logs.isEmpty {
             drawText(
                 text: logs[logs.count - 1],
-                in: CGRect(x: rect.minX + 16, y: rect.minY - 18, width: rect.width, height: 14),
+                in: CGRect(x: rect.minX + 16, y: rect.minY + 10, width: rect.width - 32, height: 14),
                 font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
                 color: NSColor(calibratedWhite: 1, alpha: 0.55)
             )
@@ -1284,13 +1293,7 @@ final class StageControlDockView: NSView {
                 fill = NSColor(calibratedWhite: 1, alpha: 0.2)
             }
 
-            if def.id == "start" && def.enabled {
-                NSColor(calibratedWhite: 1, alpha: 0.24).setFill()
-            } else if def.id == "stop" && def.enabled {
-                NSColor(calibratedRed: 0.82, green: 0.32, blue: 0.32, alpha: hoveredId == def.id ? 0.3 : 0.22).setFill()
-            } else {
-                fill.setFill()
-            }
+            fill.setFill()
             buttonPath.fill()
             stroke.setStroke()
             buttonPath.lineWidth = 1
@@ -1581,7 +1584,7 @@ final class StageOverlayController: NSObject {
         controlView?.stepLabel = state.stepLabel
         controlView?.recentLogs = state.recentLogs ?? []
         controlView?.elapsedMs = state.elapsedMs
-        if let dockFrame = controlPanelFrame(screenFrame: screen.frame, viewportRect: viewportRect) {
+        if let dockFrame = controlPanelFrame(screenFrame: screen.frame) {
             controlWindow?.setFrame(dockFrame, display: true)
         }
         overlayWindow?.orderFrontRegardless()
@@ -1609,7 +1612,7 @@ final class StageOverlayController: NSObject {
         self.overlayWindow = overlayWindow
         self.overlayView = overlayView
 
-        let controlSize = CGSize(width: 360, height: 520)
+        let controlSize = CGSize(width: 300, height: 640)
         let controlWindow = StageControlDockWindow(
             contentRect: CGRect(origin: .zero, size: controlSize),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -1665,28 +1668,15 @@ final class StageOverlayController: NSObject {
         NSApplication.shared.stop(nil)
     }
 
-    private func controlPanelFrame(screenFrame: CGRect, viewportRect: CGRect) -> CGRect? {
-        let margin: CGFloat = 16
-        let panelWidth: CGFloat = 360
-        let panelHeight = min(screenFrame.height - (margin * 2), max(360, viewportRect.height + 24))
-        let desiredY = viewportRect.minY - 12
-        let clampedY = min(
-            screenFrame.maxY - panelHeight - margin,
-            max(screenFrame.minY + margin, desiredY)
-        )
-
-        let rightX = viewportRect.maxX + 16
-        if rightX + panelWidth <= screenFrame.maxX - margin {
-            return CGRect(x: rightX, y: clampedY, width: panelWidth, height: panelHeight)
-        }
-
-        let leftX = viewportRect.minX - panelWidth - 16
-        if leftX >= screenFrame.minX + margin {
-            return CGRect(x: leftX, y: clampedY, width: panelWidth, height: panelHeight)
-        }
-
-        let fallbackX = screenFrame.maxX - panelWidth - margin
-        return CGRect(x: fallbackX, y: clampedY, width: panelWidth, height: panelHeight)
+    private func controlPanelFrame(screenFrame: CGRect) -> CGRect? {
+        let sideMargin: CGFloat = 16
+        let topPadding: CGFloat = 34
+        let bottomPadding: CGFloat = 16
+        let panelWidth: CGFloat = 300
+        let panelHeight = max(360, screenFrame.height - topPadding - bottomPadding)
+        let x = screenFrame.maxX - panelWidth - sideMargin
+        let y = screenFrame.minY + bottomPadding
+        return CGRect(x: x, y: y, width: panelWidth, height: panelHeight)
     }
 
     private func configureAppIcon() {
