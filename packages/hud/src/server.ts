@@ -451,17 +451,17 @@ function html(): string {
     <style>
       :root {
         --bg: #0a0a0b;
-        --panel: rgba(18, 18, 20, 0.84);
+        --panel: rgba(14, 14, 16, 0.92);
         --ink: #e6e6e8;
         --muted: #9a9aa1;
-        --line: rgba(255, 255, 255, 0.12);
-        --line-soft: rgba(255, 255, 255, 0.06);
+        --line: rgba(255, 255, 255, 0.16);
+        --line-soft: rgba(255, 255, 255, 0.08);
         --success: #d4d4d8;
         --error: #ef4444;
-        --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
-        --radius-lg: 10px;
-        --radius-md: 6px;
-        --radius-sm: 4px;
+        --shadow: 0 20px 48px rgba(0, 0, 0, 0.42);
+        --radius-lg: 8px;
+        --radius-md: 4px;
+        --radius-sm: 2px;
       }
 
       * { box-sizing: border-box; }
@@ -478,9 +478,9 @@ function html(): string {
 
       .shell {
         display: grid;
-        grid-template-columns: 1.2fr 0.8fr;
-        gap: 24px;
-        padding: 24px;
+        grid-template-columns: 1.3fr 0.7fr;
+        gap: 14px;
+        padding: 14px;
       }
 
       .hero, .panel {
@@ -488,12 +488,12 @@ function html(): string {
         border: 1px solid var(--line);
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow);
-        backdrop-filter: blur(18px);
+        backdrop-filter: blur(10px);
       }
 
       .hero {
         min-height: calc(100vh - 48px);
-        padding: 28px;
+        padding: 18px;
         position: relative;
         overflow: hidden;
       }
@@ -501,8 +501,8 @@ function html(): string {
       .hero::before {
         content: "";
         position: absolute;
-        inset: 18px;
-        border: 1px dashed rgba(17,17,17,0.12);
+        inset: 12px;
+        border: 1px dashed rgba(255,255,255,0.12);
         border-radius: var(--radius-md);
         pointer-events: none;
       }
@@ -529,12 +529,12 @@ function html(): string {
       }
 
       .viewport {
-        margin-top: 32px;
+        margin-top: 18px;
         background: linear-gradient(160deg, #121214, #0b0b0d);
         color: #f3f4f6;
         border-radius: var(--radius-md);
-        min-height: 420px;
-        padding: 22px;
+        min-height: 380px;
+        padding: 14px;
         position: relative;
         overflow: hidden;
       }
@@ -542,7 +542,7 @@ function html(): string {
       .viewport::after {
         content: "";
         position: absolute;
-        inset: 20px;
+        inset: 12px;
         border: 1px solid rgba(255,255,255,0.14);
         border-radius: var(--radius-sm);
         pointer-events: none;

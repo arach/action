@@ -1077,6 +1077,7 @@ final class StageControlDockView: NSView {
         ButtonDef(id: "clear", title: "Clear", rect: .zero, enabled: true),
         ButtonDef(id: "quit", title: "Quit", rect: .zero, enabled: true),
     ]
+    private var hoveredId: String?
     var onCommand: ((String) -> Void)?
 
     var phase: String = "staging" {
@@ -1085,6 +1086,12 @@ final class StageControlDockView: NSView {
             needsDisplay = true
         }
     }
+    var targetApp: String = "Action" {
+        didSet { needsDisplay = true }
+    }
+    var summary: String = "Guided capture session" {
+        didSet { needsDisplay = true }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1092,6 +1099,14 @@ final class StageControlDockView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
         layoutButtons()
         updateButtonState()
+        addTrackingArea(
+            NSTrackingArea(
+                rect: bounds,
+                options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+        )
     }
 
     @available(*, unavailable)
@@ -1101,22 +1116,55 @@ final class StageControlDockView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
-        NSColor(calibratedWhite: 0.05, alpha: 0.84).setFill()
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
+        NSColor(calibratedWhite: 0.03, alpha: 0.9).setFill()
         path.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.12).setStroke()
+        NSColor(calibratedWhite: 1, alpha: 0.16).setStroke()
         path.lineWidth = 1
         path.stroke()
 
+        drawText(
+            text: phase.uppercased(),
+            in: CGRect(x: 10, y: bounds.height - 20, width: 90, height: 12),
+            font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
+            color: phase == "recording" ? NSColor(calibratedWhite: 1.0, alpha: 0.92) : NSColor(calibratedWhite: 1, alpha: 0.72),
+            alignment: .left
+        )
+        drawText(
+            text: targetApp,
+            in: CGRect(x: bounds.width - 120, y: bounds.height - 20, width: 110, height: 12),
+            font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+            color: NSColor(calibratedWhite: 1, alpha: 0.58),
+            alignment: .right
+        )
+        drawText(
+            text: summary,
+            in: CGRect(x: 10, y: bounds.height - 34, width: bounds.width - 20, height: 12),
+            font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+            color: NSColor(calibratedWhite: 1, alpha: 0.58),
+            alignment: .left
+        )
+
         for def in defs {
-            let buttonPath = NSBezierPath(roundedRect: def.rect, xRadius: 4, yRadius: 4)
-            let fill = def.enabled
-                ? NSColor(calibratedWhite: 1, alpha: 0.14)
+            let buttonPath = NSBezierPath(roundedRect: def.rect, xRadius: 3, yRadius: 3)
+            var fill = def.enabled
+                ? NSColor(calibratedWhite: 1, alpha: 0.12)
                 : NSColor(calibratedWhite: 1, alpha: 0.05)
             let stroke = def.enabled
-                ? NSColor(calibratedWhite: 1, alpha: 0.2)
+                ? NSColor(calibratedWhite: 1, alpha: 0.25)
                 : NSColor(calibratedWhite: 1, alpha: 0.08)
-            fill.setFill()
+
+            if hoveredId == def.id && def.enabled {
+                fill = NSColor(calibratedWhite: 1, alpha: 0.18)
+            }
+
+            if def.id == "start" && def.enabled {
+                NSColor(calibratedWhite: 1, alpha: 0.2).setFill()
+            } else if def.id == "stop" && def.enabled {
+                NSColor(calibratedRed: 0.8, green: 0.35, blue: 0.35, alpha: hoveredId == def.id ? 0.28 : 0.2).setFill()
+            } else {
+                fill.setFill()
+            }
             buttonPath.fill()
             stroke.setStroke()
             buttonPath.lineWidth = 1
@@ -1124,8 +1172,8 @@ final class StageControlDockView: NSView {
 
             drawText(
                 text: def.title,
-                in: CGRect(x: def.rect.minX, y: def.rect.minY + 4, width: def.rect.width, height: 14),
-                font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
+                in: CGRect(x: def.rect.minX, y: def.rect.minY + 5, width: def.rect.width, height: 16),
+                font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
                 color: def.enabled ? NSColor.white : NSColor(calibratedWhite: 1, alpha: 0.34),
                 alignment: .center
             )
@@ -1133,12 +1181,12 @@ final class StageControlDockView: NSView {
     }
 
     private func layoutButtons() {
-        let buttonSize = CGSize(width: 68, height: 24)
+        let buttonSize = CGSize(width: 74, height: 28)
         let spacing: CGFloat = 8
         let startX: CGFloat = 10
-        let y: CGFloat = 9
+        let y: CGFloat = 8
 
-        for (index, def) in defs.enumerated() {
+        for (index, _) in defs.enumerated() {
             let x = startX + CGFloat(index) * (buttonSize.width + spacing)
             defs[index].rect = CGRect(x: x, y: y, width: buttonSize.width, height: buttonSize.height)
         }
@@ -1171,6 +1219,37 @@ final class StageControlDockView: NSView {
         onCommand?(button.id)
     }
 
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let hovered = defs.first(where: { $0.enabled && $0.rect.contains(point) })?.id
+        if hoveredId != hovered {
+            hoveredId = hovered
+            needsDisplay = true
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if hoveredId != nil {
+            hoveredId = nil
+            needsDisplay = true
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: bounds,
+                options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+        )
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard defs.contains(where: { $0.enabled && $0.rect.contains(point) }) else {
             return nil
@@ -1196,6 +1275,11 @@ final class StageControlDockView: NSView {
     }
 }
 
+final class StageControlDockWindow: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 final class StageOverlayController: NSObject {
     private let stateFile: String
@@ -1204,7 +1288,7 @@ final class StageOverlayController: NSObject {
     private let logger: DebugLogger
     private let controlFile: String?
     private var overlayWindow: NSWindow?
-    private var controlWindow: NSWindow?
+    private var controlWindow: StageControlDockWindow?
     private var overlayView: StageOverlayView?
     private var controlView: StageControlDockView?
     private var lastStateData: Data?
@@ -1273,6 +1357,8 @@ final class StageOverlayController: NSObject {
         overlayWindow?.setFrame(screen.frame, display: true)
         overlayView?.state = state
         controlView?.phase = state.phase
+        controlView?.targetApp = state.targetApp ?? "Action"
+        controlView?.summary = state.summary
         if let dockFrame = controlDockFrame(screenFrame: screen.frame, viewportRect: viewportRect) {
             controlWindow?.setFrame(dockFrame, display: true)
         }
@@ -1302,24 +1388,21 @@ final class StageOverlayController: NSObject {
         self.overlayWindow = overlayWindow
         self.overlayView = overlayView
 
-        let controlSize = CGSize(width: 392, height: 42)
-        let controlWindow = NSWindow(
+        let controlSize = CGSize(width: 420, height: 72)
+        let controlWindow = StageControlDockWindow(
             contentRect: CGRect(origin: .zero, size: controlSize),
-            styleMask: [.titled, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false,
             screen: screen
         )
-        controlWindow.level = .statusBar
+        controlWindow.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) - 1)
         controlWindow.isOpaque = false
         controlWindow.backgroundColor = .clear
         controlWindow.hasShadow = true
         controlWindow.ignoresMouseEvents = false
-        controlWindow.titleVisibility = .hidden
-        controlWindow.titlebarAppearsTransparent = true
-        controlWindow.isMovable = true
-        controlWindow.isMovableByWindowBackground = true
-        controlWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        controlWindow.isMovable = false
+        controlWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         let controlView = StageControlDockView(frame: CGRect(origin: .zero, size: controlSize))
         controlView.onCommand = { [weak self] command in
             self?.appendControlCommand(command)
@@ -1362,16 +1445,16 @@ final class StageOverlayController: NSObject {
     }
 
     private func controlDockFrame(screenFrame: CGRect, viewportRect: CGRect) -> CGRect? {
-        let dockWidth: CGFloat = 392
-        let dockHeight: CGFloat = 42
+        let dockWidth: CGFloat = 420
+        let dockHeight: CGFloat = 72
         let localViewport = CGRect(
             x: viewportRect.minX - screenFrame.minX,
             y: viewportRect.minY - screenFrame.minY,
             width: viewportRect.width,
             height: viewportRect.height
         )
-        let localX = min(screenFrame.width - dockWidth - 24, max(24, localViewport.midX - dockWidth / 2))
-        let localY = max(24, localViewport.minY - 148)
+        let localX = min(screenFrame.width - dockWidth - 16, max(16, localViewport.maxX - dockWidth))
+        let localY = min(screenFrame.height - dockHeight - 16, max(24, localViewport.maxY + 10))
         return CGRect(
             x: screenFrame.minX + localX,
             y: screenFrame.minY + localY,
