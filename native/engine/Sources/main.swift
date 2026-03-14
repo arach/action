@@ -466,6 +466,12 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
     private var recordingOutput: SCRecordingOutput?
     private let writer: ResponseWriter
     private let logger: DebugLogger
+    private var finishedSignalPath: String?
+    private var startContinuation: CheckedContinuation<Void, Error>?
+    private var finishContinuation: CheckedContinuation<Void, Error>?
+    private var recordingStarted = false
+    private var recordingFinished = false
+    private var recordingError: Error?
 
     init(writer: ResponseWriter, logger: DebugLogger) {
         self.writer = writer
@@ -473,11 +479,19 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
     }
 
     func recordRegion(rect: CGRect, outputPath: String, stopSignalPath: String?) async throws {
-        try await recordRegion(rect: rect, outputPath: outputPath, stopSignalPath: stopSignalPath, fps: 15, scale: 1)
+        try await recordRegion(
+            rect: rect,
+            outputPath: outputPath,
+            stopSignalPath: stopSignalPath,
+            finishedSignalPath: nil,
+            fps: 15,
+            scale: 1
+        )
     }
 
-    func recordRegion(rect: CGRect, outputPath: String, stopSignalPath: String?, fps: Double, scale: Double) async throws {
+    func recordRegion(rect: CGRect, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, fps: Double, scale: Double) async throws {
         logger.log("record-region: begin rect=\(rect) outputPath=\(outputPath)")
+        self.finishedSignalPath = finishedSignalPath
         let outputURL = URL(fileURLWithPath: outputPath)
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
@@ -511,6 +525,7 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         self.recordingOutput = recordingOutput
 
         try await stream.startCapture()
+        try await waitForRecordingStart()
         try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
 
         if let stopSignalPath {
@@ -520,15 +535,23 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         }
 
         try await stream.stopCapture()
+        try await waitForRecordingFinish()
         try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
+        try writeSignalFile(path: finishedSignalPath, contents: "finished\n")
     }
 
     func recordAppWindow(bundleId: String, outputPath: String) async throws {
-        try await recordAppWindow(bundleId: bundleId, outputPath: outputPath, stopSignalPath: nil)
+        try await recordAppWindow(
+            bundleId: bundleId,
+            outputPath: outputPath,
+            stopSignalPath: nil,
+            finishedSignalPath: nil
+        )
     }
 
-    func recordAppWindow(bundleId: String, outputPath: String, stopSignalPath: String?) async throws {
+    func recordAppWindow(bundleId: String, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?) async throws {
         logger.log("record: begin bundleId=\(bundleId) outputPath=\(outputPath)")
+        self.finishedSignalPath = finishedSignalPath
         let outputURL = URL(fileURLWithPath: outputPath)
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
@@ -567,6 +590,7 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         logger.log("record: starting capture")
         try await stream.startCapture()
         logger.log("record: capture started")
+        try await waitForRecordingStart()
         try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
         logger.log("record: wrote recording reply")
 
@@ -581,7 +605,9 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         logger.log("record: stopping capture")
         try await stream.stopCapture()
         logger.log("record: capture stopped")
+        try await waitForRecordingFinish()
         try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
+        try writeSignalFile(path: finishedSignalPath, contents: "finished\n")
         logger.log("record: wrote finished reply")
     }
 
@@ -592,13 +618,80 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         }
     }
 
+    private func waitForRecordingStart() async throws {
+        if let recordingError {
+            throw recordingError
+        }
+
+        if recordingStarted {
+            return
+        }
+
+        try await withCheckedThrowingContinuation { continuation in
+            startContinuation = continuation
+        }
+    }
+
+    private func waitForRecordingFinish() async throws {
+        if let recordingError {
+            throw recordingError
+        }
+
+        if recordingFinished {
+            return
+        }
+
+        try await withCheckedThrowingContinuation { continuation in
+            finishContinuation = continuation
+        }
+    }
+
+    private func writeSignalFile(path: String?, contents: String) throws {
+        guard let path else {
+            return
+        }
+
+        let url = URL(fileURLWithPath: path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: url)
+    }
+
     func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: any Error) {
+        recordingError = error
         logger.log("record: recordingOutput failed \(error.localizedDescription)")
+        try? writeSignalFile(path: finishedSignalPath, contents: "error:\(error.localizedDescription)\n")
+        startContinuation?.resume(throwing: error)
+        startContinuation = nil
+        finishContinuation?.resume(throwing: error)
+        finishContinuation = nil
         FileHandle.standardError.write(Data("ActionHost recording failed: \(error.localizedDescription)\n".utf8))
     }
 
+    func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
+        logger.log("record: recording output started")
+        recordingStarted = true
+        startContinuation?.resume()
+        startContinuation = nil
+    }
+
+    func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
+        logger.log("record: recording output finished")
+        recordingFinished = true
+        finishContinuation?.resume()
+        finishContinuation = nil
+    }
+
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        recordingError = error
         logger.log("record: stream stopped with error \(error.localizedDescription)")
+        try? writeSignalFile(path: finishedSignalPath, contents: "error:\(error.localizedDescription)\n")
+        startContinuation?.resume(throwing: error)
+        startContinuation = nil
+        finishContinuation?.resume(throwing: error)
+        finishContinuation = nil
         FileHandle.standardError.write(Data("ActionHost stream stopped: \(error.localizedDescription)\n".utf8))
     }
 }
@@ -683,7 +776,8 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         try await recorder.recordAppWindow(
             bundleId: bundleId,
             outputPath: outputPath,
-            stopSignalPath: options.options["stop-file"]
+            stopSignalPath: options.options["stop-file"],
+            finishedSignalPath: options.options["finished-file"]
         )
     case .recordRegion:
         guard #available(macOS 15.0, *) else {
@@ -697,6 +791,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             rect: rect,
             outputPath: outputPath,
             stopSignalPath: options.options["stop-file"],
+            finishedSignalPath: options.options["finished-file"],
             fps: options.double("fps", default: 15),
             scale: options.double("scale", default: 1)
         )

@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { extname, resolve } from "node:path";
 
 import { compileScenario, parseScenarioDocument } from "@action/compiler";
 import type { EngineDiagnostics, GuidedSessionEvent, HudSnapshot } from "@action/protocol";
@@ -249,6 +249,22 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
   res.end(JSON.stringify(body));
 }
 
+function contentType(path: string): string {
+  switch (extname(path).toLowerCase()) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".mov":
+      return "video/quicktime";
+    case ".json":
+      return "application/json; charset=utf-8";
+    default:
+      return "application/octet-stream";
+  }
+}
+
 function html(): string {
   return `<!doctype html>
 <html lang="en">
@@ -368,6 +384,14 @@ function html(): string {
         margin-top: 20px;
       }
 
+      .timer {
+        margin-left: auto;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.14);
+      }
+
       .status {
         display: inline-flex;
         align-items: center;
@@ -384,6 +408,245 @@ function html(): string {
       .stack {
         display: grid;
         gap: 18px;
+      }
+
+      .stage-meta {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .stage-card {
+        padding: 14px;
+        border-radius: 18px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.1);
+      }
+
+      .stage-card strong {
+        display: block;
+        margin-top: 8px;
+        color: white;
+        font-family: "Syne", sans-serif;
+        font-size: 1.1rem;
+      }
+
+      .stage-canvas {
+        position: relative;
+        margin-top: 22px;
+        aspect-ratio: 16 / 10;
+        border-radius: 22px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 20% 18%, rgba(255, 145, 56, 0.45), transparent 30%),
+          linear-gradient(140deg, #1d1914 0%, #0f0f10 58%, #141b20 100%);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+      }
+
+      .stage-canvas[data-backdrop="studio"] {
+        background:
+          radial-gradient(circle at 18% 18%, rgba(255, 124, 53, 0.45), transparent 30%),
+          radial-gradient(circle at 80% 84%, rgba(255, 232, 182, 0.15), transparent 24%),
+          linear-gradient(140deg, #1e1c16 0%, #111112 58%, #10171d 100%);
+      }
+
+      .stage-canvas[data-backdrop="gradient"] {
+        background:
+          radial-gradient(circle at 20% 18%, rgba(255, 153, 102, 0.28), transparent 30%),
+          linear-gradient(145deg, #42210d 0%, #111214 52%, #123444 100%);
+      }
+
+      .stage-canvas[data-backdrop="spotlight"] {
+        background:
+          radial-gradient(circle at 50% 50%, rgba(245, 238, 223, 0.16), transparent 18%),
+          linear-gradient(145deg, #171717 0%, #101214 100%);
+      }
+
+      .viewport-frame {
+        position: absolute;
+        left: var(--viewport-left, 18%);
+        top: var(--viewport-top, 15%);
+        width: var(--viewport-width, 64%);
+        height: var(--viewport-height, 70%);
+        border-radius: 20px;
+        overflow: hidden;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.18);
+        box-shadow:
+          0 24px 90px rgba(0,0,0,0.44),
+          0 0 0 1px rgba(255,255,255,0.08) inset;
+      }
+
+      .viewport-frame[data-active="true"] {
+        border-color: rgba(255, 137, 77, 0.9);
+        box-shadow:
+          0 24px 90px rgba(0,0,0,0.44),
+          0 0 0 1px rgba(255,255,255,0.08) inset,
+          0 0 0 3px rgba(255, 120, 54, 0.22);
+      }
+
+      .viewport-mask {
+        position: absolute;
+        background: rgba(7, 7, 9, 0.56);
+        transition: opacity 160ms ease;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .stage-canvas[data-dimmed="true"] .viewport-mask {
+        opacity: 1;
+      }
+
+      .mask-top {
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: var(--viewport-top, 15%);
+      }
+
+      .mask-bottom {
+        left: 0;
+        top: calc(var(--viewport-top, 15%) + var(--viewport-height, 70%));
+        width: 100%;
+        bottom: 0;
+      }
+
+      .mask-left {
+        left: 0;
+        top: var(--viewport-top, 15%);
+        width: var(--viewport-left, 18%);
+        height: var(--viewport-height, 70%);
+      }
+
+      .mask-right {
+        right: 0;
+        top: var(--viewport-top, 15%);
+        width: calc(100% - var(--viewport-left, 18%) - var(--viewport-width, 64%));
+        height: var(--viewport-height, 70%);
+      }
+
+      .recording-pill {
+        position: absolute;
+        top: 18px;
+        right: 18px;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(8, 8, 10, 0.72);
+        border: 1px solid rgba(255,255,255,0.14);
+        color: white;
+        z-index: 2;
+      }
+
+      .recording-pill[hidden] {
+        display: none;
+      }
+
+      .record-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #ff5f3f;
+        box-shadow: 0 0 0 8px rgba(255, 95, 63, 0.18);
+      }
+
+      .countdown {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        font-family: "Syne", sans-serif;
+        font-size: clamp(5rem, 12vw, 10rem);
+        line-height: 1;
+        color: rgba(255, 244, 224, 0.94);
+        text-shadow: 0 18px 60px rgba(0,0,0,0.45);
+        z-index: 2;
+      }
+
+      .countdown[hidden] {
+        display: none;
+      }
+
+      .window-skin {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-rows: 48px 1fr;
+        background: linear-gradient(180deg, rgba(34,34,38,0.92), rgba(14,14,16,0.96));
+      }
+
+      .window-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 18px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        background: rgba(255,255,255,0.04);
+      }
+
+      .traffic {
+        display: inline-flex;
+        gap: 8px;
+      }
+
+      .traffic span {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.18);
+      }
+
+      .traffic span:nth-child(1) { background: #ff5f57; }
+      .traffic span:nth-child(2) { background: #febb2f; }
+      .traffic span:nth-child(3) { background: #28c840; }
+
+      .window-title {
+        color: rgba(255,255,255,0.88);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .window-body {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .window-body img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .window-placeholder {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 28px;
+        color: rgba(255,255,255,0.85);
+        text-align: center;
+        background:
+          radial-gradient(circle at top, rgba(255,255,255,0.06), transparent 36%),
+          linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+      }
+
+      .window-placeholder strong {
+        display: block;
+        font-family: "Syne", sans-serif;
+        font-size: clamp(1.8rem, 5vw, 3.3rem);
+        margin-bottom: 10px;
+      }
+
+      .window-placeholder small {
+        display: block;
+        max-width: 30ch;
+        color: rgba(255,255,255,0.64);
+        line-height: 1.6;
       }
 
       .panel {
@@ -475,6 +738,11 @@ function html(): string {
         background: rgba(255,255,255,0.65);
       }
 
+      .artifact a {
+        color: inherit;
+        text-decoration: none;
+      }
+
       .meta {
         display: flex;
         justify-content: space-between;
@@ -489,6 +757,10 @@ function html(): string {
 
         .hero {
           min-height: auto;
+        }
+
+        .stage-meta {
+          grid-template-columns: 1fr;
         }
       }
     </style>
@@ -506,6 +778,50 @@ function html(): string {
             <div class="status"><span>Status</span><strong id="status">idle</strong></div>
             <div class="status"><span>Phase</span><strong id="phase">created</strong></div>
             <div class="status"><span>Target</span><strong id="target">Calculator</strong></div>
+            <div class="timer"><strong id="timer">00:00.0</strong></div>
+          </div>
+          <div class="stage-meta">
+            <div class="stage-card">
+              <small>Backdrop</small>
+              <strong id="backdrop">studio</strong>
+            </div>
+            <div class="stage-card">
+              <small>Viewport</small>
+              <strong id="viewport-bounds">320,180 960x720</strong>
+            </div>
+            <div class="stage-card">
+              <small>Capture</small>
+              <strong id="capture-state">idle</strong>
+            </div>
+          </div>
+          <div class="stage-canvas" id="stage-canvas" data-backdrop="studio" data-dimmed="false">
+            <div class="recording-pill" id="recording-pill" hidden>
+              <span class="record-dot"></span>
+              <span id="recording-label">Recording</span>
+            </div>
+            <div class="countdown" id="countdown" hidden>3</div>
+            <div class="viewport-mask mask-top"></div>
+            <div class="viewport-mask mask-bottom"></div>
+            <div class="viewport-mask mask-left"></div>
+            <div class="viewport-mask mask-right"></div>
+            <div class="viewport-frame" id="viewport-frame" data-active="false">
+              <div class="window-skin">
+                <div class="window-bar">
+                  <div class="traffic"><span></span><span></span><span></span></div>
+                  <div class="window-title" id="window-title">Calculator</div>
+                  <div class="eyebrow" id="window-phase">Staging</div>
+                </div>
+                <div class="window-body">
+                  <img id="screenshot-preview" alt="Latest viewport screenshot" hidden />
+                  <div class="window-placeholder" id="window-placeholder">
+                    <div>
+                      <strong id="placeholder-target">Calculator</strong>
+                      <small id="placeholder-copy">Stage the target app, count into recording, and keep the viewport crisp while artifacts and logs update on the side.</small>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -547,6 +863,20 @@ function html(): string {
         status: document.getElementById("status"),
         phase: document.getElementById("phase"),
         target: document.getElementById("target"),
+        timer: document.getElementById("timer"),
+        backdrop: document.getElementById("backdrop"),
+        viewportBounds: document.getElementById("viewport-bounds"),
+        captureState: document.getElementById("capture-state"),
+        stageCanvas: document.getElementById("stage-canvas"),
+        viewportFrame: document.getElementById("viewport-frame"),
+        recordingPill: document.getElementById("recording-pill"),
+        recordingLabel: document.getElementById("recording-label"),
+        countdown: document.getElementById("countdown"),
+        windowTitle: document.getElementById("window-title"),
+        windowPhase: document.getElementById("window-phase"),
+        screenshotPreview: document.getElementById("screenshot-preview"),
+        windowPlaceholder: document.getElementById("window-placeholder"),
+        placeholderTarget: document.getElementById("placeholder-target"),
         access: document.getElementById("access-chip"),
         screen: document.getElementById("screen-chip"),
         notes: document.getElementById("diagnostic-notes"),
@@ -554,6 +884,8 @@ function html(): string {
         artifacts: document.getElementById("artifacts"),
         logs: document.getElementById("logs")
       };
+
+      let lastPreviewPath = "";
 
       async function post(path) {
         await fetch(path, { method: "POST" });
@@ -564,15 +896,90 @@ function html(): string {
         el.textContent = label + ": " + (state || "unknown");
       }
 
+      function formatElapsed(ms) {
+        const totalSeconds = Math.max(ms || 0, 0) / 1000;
+        const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
+        const seconds = Math.floor(totalSeconds % 60).toString().padStart(2, "0");
+        const tenths = Math.floor((totalSeconds % 1) * 10).toString();
+        return minutes + ":" + seconds + "." + tenths;
+      }
+
+      function updateStageLayout(viewport) {
+        if (!viewport || !viewport.bounds) {
+          els.viewportFrame.style.removeProperty("--viewport-left");
+          els.viewportFrame.style.removeProperty("--viewport-top");
+          els.viewportFrame.style.removeProperty("--viewport-width");
+          els.viewportFrame.style.removeProperty("--viewport-height");
+          els.stageCanvas.style.removeProperty("--viewport-left");
+          els.stageCanvas.style.removeProperty("--viewport-top");
+          els.stageCanvas.style.removeProperty("--viewport-width");
+          els.stageCanvas.style.removeProperty("--viewport-height");
+          return;
+        }
+
+        const bounds = viewport.bounds;
+        const stageWidth = bounds.width + 320;
+        const stageHeight = bounds.height + 220;
+        const left = ((stageWidth - bounds.width) / 2 / stageWidth) * 100;
+        const top = ((stageHeight - bounds.height) / 2 / stageHeight) * 100;
+        const width = (bounds.width / stageWidth) * 100;
+        const height = (bounds.height / stageHeight) * 100;
+
+        for (const el of [els.viewportFrame, els.stageCanvas]) {
+          el.style.setProperty("--viewport-left", left.toFixed(2) + "%");
+          el.style.setProperty("--viewport-top", top.toFixed(2) + "%");
+          el.style.setProperty("--viewport-width", width.toFixed(2) + "%");
+          el.style.setProperty("--viewport-height", height.toFixed(2) + "%");
+        }
+      }
+
+      function latestCountdown(state) {
+        const tick = [...(state.events || [])].reverse().find((event) => event.type === "countdown.tick");
+        return tick && tick.payload ? tick.payload.remaining : null;
+      }
+
       function render(state) {
+        const snapshot = state.snapshot || {};
+        const phase = snapshot.phase || "created";
+        const viewport = snapshot.stage && snapshot.stage.viewport;
+        const screenshot = (snapshot.artifacts || []).find((artifact) => artifact.kind === "screenshot");
+
         els.mode.textContent = state.engineMode;
         els.status.textContent = state.status;
-        els.phase.textContent = state.snapshot?.phase || "created";
-        els.target.textContent = state.snapshot?.targetApp || "Calculator";
-        setChip(els.access, "Accessibility", state.snapshot?.diagnostics?.accessibility);
-        setChip(els.screen, "Screen Recording", state.snapshot?.diagnostics?.screenRecording);
+        els.phase.textContent = phase;
+        els.target.textContent = snapshot.targetApp || "Calculator";
+        els.timer.textContent = formatElapsed(snapshot.elapsedMs || 0);
+        els.backdrop.textContent = snapshot.stage?.backdrop || "neutral";
+        els.captureState.textContent = snapshot.isRecording ? "recording" : phase;
+        els.windowTitle.textContent = snapshot.targetApp || "Calculator";
+        els.windowPhase.textContent = phase;
+        els.placeholderTarget.textContent = snapshot.targetApp || "Calculator";
+        setChip(els.access, "Accessibility", snapshot.diagnostics?.accessibility);
+        setChip(els.screen, "Screen Recording", snapshot.diagnostics?.screenRecording);
+        els.stageCanvas.dataset.backdrop = snapshot.stage?.backdrop || "neutral";
+        els.stageCanvas.dataset.dimmed = (phase === "countdown" || snapshot.isRecording) ? "true" : "false";
+        els.viewportFrame.dataset.active = snapshot.isRecording ? "true" : "false";
+        els.recordingPill.hidden = !(snapshot.isRecording || phase === "paused" || phase === "completing");
+        els.recordingLabel.textContent = phase === "paused" ? "Paused" : "Recording";
+        const countdown = latestCountdown(state);
+        els.countdown.hidden = phase !== "countdown";
+        els.countdown.textContent = countdown ? String(countdown) : "";
+        updateStageLayout(viewport);
+        els.viewportBounds.textContent = viewport
+          ? viewport.bounds.x + "," + viewport.bounds.y + " " + viewport.bounds.width + "x" + viewport.bounds.height
+          : "not set";
+
+        if (screenshot && screenshot.path !== lastPreviewPath) {
+          els.screenshotPreview.src = "/api/file?path=" + encodeURIComponent(screenshot.path) + "&v=" + Date.now();
+          lastPreviewPath = screenshot.path;
+        }
+
+        const hasScreenshot = Boolean(screenshot);
+        els.screenshotPreview.hidden = !hasScreenshot;
+        els.windowPlaceholder.hidden = hasScreenshot;
+
         els.notes.innerHTML = "";
-        for (const note of state.snapshot?.diagnostics?.notes || []) {
+        for (const note of snapshot.diagnostics?.notes || []) {
           const node = document.createElement("div");
           node.className = "artifact";
           node.innerHTML = "<small>" + note + "</small>";
@@ -581,15 +988,15 @@ function html(): string {
         els.error.textContent = state.error || "";
 
         els.artifacts.innerHTML = "";
-        for (const artifact of state.snapshot?.artifacts || []) {
+        for (const artifact of snapshot.artifacts || []) {
           const node = document.createElement("div");
           node.className = "artifact";
-          node.innerHTML = "<strong>" + artifact.kind + "</strong><br><small>" + artifact.path + "</small>";
+          node.innerHTML = "<a href='/api/file?path=" + encodeURIComponent(artifact.path) + "' target='_blank' rel='noreferrer'><strong>" + artifact.kind + "</strong><br><small>" + artifact.path + "</small></a>";
           els.artifacts.appendChild(node);
         }
 
         els.logs.innerHTML = "";
-        for (const log of state.snapshot?.logs || []) {
+        for (const log of snapshot.logs || []) {
           const node = document.createElement("div");
           node.className = "log";
           node.innerHTML = "<div><strong>" + log.message + "</strong></div><div class='meta'><span>" + log.eventType + "</span><span>" + new Date(log.at).toLocaleTimeString() + "</span></div>";
@@ -627,6 +1034,33 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   if (req.method === "GET" && url.pathname === "/api/state") {
     sendJson(res, 200, controller.getState());
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/file") {
+    const path = url.searchParams.get("path");
+    const artifactsRoot = resolve(process.cwd(), "artifacts");
+
+    if (!path) {
+      sendJson(res, 400, { error: "Missing file path" });
+      return;
+    }
+
+    const resolvedPath = resolve(path);
+    if (!resolvedPath.startsWith(artifactsRoot)) {
+      sendJson(res, 403, { error: "Only artifact files can be served" });
+      return;
+    }
+
+    try {
+      const data = await readFile(resolvedPath);
+      res.writeHead(200, { "content-type": contentType(resolvedPath) });
+      res.end(data);
+    } catch (error) {
+      sendJson(res, 404, {
+        error: error instanceof Error ? error.message : "Artifact not found",
+      });
+    }
     return;
   }
 

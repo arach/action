@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -39,6 +39,7 @@ export class MacOSCommandEngine implements CaptureEngine {
   private readonly surfaces = new Map<string, TargetApp>();
   private activeCapturePath?: string;
   private activeCaptureStopPath?: string;
+  private activeCaptureFinishedPath?: string;
   private activeViewport?: StageViewport;
   private focusedSurfaceId?: string;
 
@@ -139,8 +140,16 @@ export class MacOSCommandEngine implements CaptureEngine {
     await rm(request.outputPath, { force: true });
     this.activeCapturePath = request.outputPath;
     this.activeCaptureStopPath = `${request.outputPath}.stop`;
+    this.activeCaptureFinishedPath = `${request.outputPath}.finished`;
     await rm(this.activeCaptureStopPath, { force: true });
-    await this.startRecordingSession(viewport, request.outputPath, this.activeCaptureStopPath, request.profile ?? "draft");
+    await rm(this.activeCaptureFinishedPath, { force: true });
+    await this.startRecordingSession(
+      viewport,
+      request.outputPath,
+      this.activeCaptureStopPath,
+      this.activeCaptureFinishedPath,
+      request.profile ?? "draft",
+    );
   }
 
   async pauseCapture(): Promise<void> {}
@@ -150,6 +159,7 @@ export class MacOSCommandEngine implements CaptureEngine {
   async stopCapture(): Promise<RuntimeArtifact> {
     const path = this.activeCapturePath ?? resolve(process.cwd(), "artifacts", "sessions", "macos", "capture.mov");
     const stopPath = this.activeCaptureStopPath;
+    const finishedPath = this.activeCaptureFinishedPath;
 
     if (!stopPath) {
       await mkdir(dirname(path), { recursive: true });
@@ -166,9 +176,13 @@ export class MacOSCommandEngine implements CaptureEngine {
     }
 
     await writeFile(stopPath, "stop\n");
-    await this.waitForCaptureFile(path);
+    await this.waitForCaptureCompletion(path, finishedPath);
     await rm(stopPath, { force: true });
+    if (finishedPath) {
+      await rm(finishedPath, { force: true });
+    }
     this.activeCaptureStopPath = undefined;
+    this.activeCaptureFinishedPath = undefined;
 
     return {
       kind: "raw-capture",
@@ -247,6 +261,7 @@ export class MacOSCommandEngine implements CaptureEngine {
     viewport: StageViewport,
     outputPath: string,
     stopPath: string,
+    finishedPath: string,
     profile: CaptureProfile,
   ): Promise<void> {
     const fps = profile === "draft" ? "15" : "30";
@@ -270,10 +285,20 @@ export class MacOSCommandEngine implements CaptureEngine {
       outputPath,
       "--stop-file",
       stopPath,
+      "--finished-file",
+      finishedPath,
     );
   }
 
-  private async waitForCaptureFile(path: string): Promise<void> {
+  private async waitForCaptureCompletion(path: string, finishedPath?: string): Promise<void> {
+    if (finishedPath) {
+      await this.waitForFile(finishedPath, 1);
+      const status = (await readFile(finishedPath, "utf8")).trim();
+      if (status.startsWith("error:")) {
+        throw new Error(`Native capture failed: ${status.slice("error:".length).trim()}`);
+      }
+    }
+
     await this.waitForFile(path, 1);
   }
 
