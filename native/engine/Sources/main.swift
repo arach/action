@@ -988,8 +988,8 @@ final class StageOverlayView: NSView {
 
     private func drawHudPill(state: StageOverlayState, viewport: CGRect) {
         let reservedRightInset: CGFloat = 340
-        let width: CGFloat = min(420, max(260, viewport.width + 88))
-        let height: CGFloat = 96
+        let width: CGFloat = min(440, max(320, viewport.width + 84))
+        let height: CGFloat = 110
         let maxX = max(24, bounds.width - reservedRightInset - width)
         let x = min(maxX, max(24, viewport.minX))
         let yAbove = viewport.maxY + 14
@@ -1001,73 +1001,107 @@ final class StageOverlayView: NSView {
             y = max(24, yBelow)
         }
         let rect = CGRect(x: x, y: y, width: width, height: height)
-        let path = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
 
-        NSColor(calibratedWhite: 0.06, alpha: 0.76).setFill()
+        NSColor(calibratedWhite: 0.055, alpha: 0.9).setFill()
         path.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.12).setStroke()
+        NSColor(calibratedWhite: 1, alpha: 0.16).setStroke()
         path.lineWidth = 1
         path.stroke()
 
-        let indicatorRect = CGRect(x: rect.minX + 16, y: rect.maxY - 26, width: 10, height: 10)
+        let phaseLabel = state.isRecording ? "RECORDING" : state.phase.uppercased()
+        let contentInset: CGFloat = 14
+        let contentWidth = rect.width - (contentInset * 2)
+        let topY = rect.maxY - contentInset
+
+        let divider = NSBezierPath()
+        divider.move(to: CGPoint(x: rect.minX + contentInset, y: topY - 22))
+        divider.line(to: CGPoint(x: rect.maxX - contentInset, y: topY - 22))
+        NSColor(calibratedWhite: 1, alpha: 0.12).setStroke()
+        divider.lineWidth = 1
+        divider.stroke()
+
+        let indicatorRect = CGRect(x: rect.minX + contentInset, y: topY - 13, width: 6, height: 6)
         let indicatorPath = NSBezierPath(ovalIn: indicatorRect)
         let indicatorColor = state.isRecording
-            ? NSColor(calibratedWhite: 0.92, alpha: 1)
-            : NSColor(calibratedWhite: 0.75, alpha: 1)
+            ? NSColor(calibratedWhite: 0.95, alpha: 1.0)
+            : NSColor(calibratedWhite: 0.7, alpha: 0.95)
         indicatorColor.setFill()
         indicatorPath.fill()
 
         drawText(
-            text: state.isRecording ? "Recording" : state.phase.capitalized,
-            in: CGRect(x: rect.minX + 34, y: rect.maxY - 34, width: 140, height: 18),
-            font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
-            color: NSColor.white
+            text: phaseLabel,
+            in: CGRect(x: rect.minX + contentInset + 12, y: topY - 17, width: 210, height: 12),
+            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
+            color: NSColor(calibratedWhite: 1, alpha: 0.88)
         )
         drawText(
             text: state.targetApp ?? "Action",
-            in: CGRect(x: rect.maxX - 120, y: rect.maxY - 34, width: 96, height: 18),
+            in: CGRect(x: rect.maxX - contentInset - 132, y: topY - 17, width: 132, height: 12),
             font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            color: NSColor(calibratedWhite: 1, alpha: 0.72),
+            color: NSColor(calibratedWhite: 1, alpha: 0.68),
             alignment: .right
         )
-        if let current = state.stepCurrent, let total = state.stepTotal, total > 0 {
-            drawText(
-                text: "Step \(current)/\(total)",
-                in: CGRect(x: rect.maxX - 120, y: rect.minY + 14, width: 96, height: 16),
-                font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-                color: NSColor(calibratedWhite: 1, alpha: 0.78),
-                alignment: .right
-            )
-        }
+
+        let headline = state.summary
         drawText(
-            text: state.summary,
-            in: CGRect(x: rect.minX + 16, y: rect.minY + 48, width: rect.width - 32, height: 20),
-            font: NSFont.monospacedSystemFont(ofSize: 14, weight: .semibold),
-            color: NSColor(calibratedWhite: 0.98, alpha: 1)
+            text: headline,
+            in: CGRect(x: rect.minX + contentInset, y: rect.maxY - 56, width: contentWidth, height: 18),
+            font: NSFont.monospacedSystemFont(ofSize: 15, weight: .semibold),
+            color: NSColor(calibratedWhite: 0.98, alpha: 0.96)
         )
-        if state.phase == "countdown", let remaining = state.countdownRemaining {
-            drawText(
-                text: "Recording starts in \(remaining)s",
-                in: CGRect(x: rect.minX + 16, y: rect.minY + 30, width: rect.width - 32, height: 14),
-                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
-                color: NSColor(calibratedWhite: 1, alpha: 0.7)
-            )
+
+        let context: String
+        if let label = state.stepLabel, !label.isEmpty {
+            context = label
+        } else if let detail = state.detail, !detail.isEmpty {
+            context = detail
+        } else {
+            context = phaseDetail(for: state)
         }
         drawText(
-            text: state.stepLabel ?? state.detail ?? phaseDetail(for: state),
-            in: CGRect(x: rect.minX + 16, y: rect.minY + 26, width: rect.width - 32, height: 16),
+            text: context,
+            in: CGRect(x: rect.minX + contentInset, y: rect.maxY - 74, width: contentWidth, height: 14),
             font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
             color: NSColor(calibratedWhite: 1, alpha: 0.62)
         )
 
-        let logs = state.recentLogs ?? []
-        if !logs.isEmpty {
+        var chipX = rect.minX + contentInset
+        let chipY = rect.minY + 12
+
+        func drawChip(_ text: String) {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+            ]
+            let textSize = text.size(withAttributes: attrs)
+            let chipWidth = textSize.width + 18
+            if chipX + chipWidth > rect.maxX - contentInset {
+                return
+            }
+            let chipRect = CGRect(x: chipX, y: chipY, width: chipWidth, height: 20)
+            let chipPath = NSBezierPath(roundedRect: chipRect, xRadius: 4, yRadius: 4)
+            NSColor(calibratedWhite: 1, alpha: 0.08).setFill()
+            chipPath.fill()
+            NSColor(calibratedWhite: 1, alpha: 0.14).setStroke()
+            chipPath.lineWidth = 1
+            chipPath.stroke()
             drawText(
-                text: logs[logs.count - 1],
-                in: CGRect(x: rect.minX + 16, y: rect.minY + 10, width: rect.width - 32, height: 14),
+                text: text,
+                in: CGRect(x: chipRect.minX + 9, y: chipRect.minY + 4, width: chipRect.width - 12, height: 12),
                 font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
-                color: NSColor(calibratedWhite: 1, alpha: 0.55)
+                color: NSColor(calibratedWhite: 1, alpha: 0.72)
             )
+            chipX += chipWidth + 8
+        }
+
+        if state.phase == "countdown", let remaining = state.countdownRemaining {
+            drawChip("START IN \(remaining)S")
+        }
+        if let current = state.stepCurrent, let total = state.stepTotal, total > 0 {
+            drawChip("STEP \(current)/\(total)")
+        }
+        if let logs = state.recentLogs, let last = logs.last, !last.isEmpty {
+            drawChip(last.uppercased())
         }
     }
 
