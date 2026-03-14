@@ -1,0 +1,26 @@
+{
+  "name": "action",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Agentic macOS demo automation runtime",
+  "packageManager": "bun@1.3.5",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "demo:calculator": "bun packages/cli/src/main.ts calculator-demo mock",
+    "demo:calculator:macos": "bun packages/cli/src/main.ts calculator-demo macos",
+    "scenario:calculator": "bun packages/cli/src/main.ts scenario calculator-demo",
+    "hud": "bun packages/hud/src/server.ts",
+    "native:permissions:status": "swift run --package-path native/engine ActionHost status",
+    "native:permissions:request": "swift run --package-path native/engine ActionHost request",
+    "native:permissions:open:accessibility": "swift run --package-path native/engine ActionHost open-accessibility-settings",
+    "native:permissions:open:screen-recording": "swift run --package-path native/engine ActionHost open-screen-recording-settings"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.3"
+  }
+}
