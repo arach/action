@@ -7,7 +7,7 @@ enum ActionAgentCLIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingMethod:
-            return "Missing method. Try: ping, status, permissions.snapshot, app.activate"
+            return "Missing method. Try: ping, status, app.launch, app.activate, calculator.buttons, calculator.clickButton, calculator.displayValue"
         }
     }
 }
@@ -52,7 +52,37 @@ struct ActionAgentCLIMain {
                 continue
             }
 
+            if argument == "--text", let value = iterator.next() {
+                params["text"] = value
+                continue
+            }
+
+            if argument == "--label", let value = iterator.next() {
+                params["label"] = value
+                continue
+            }
+
+            if argument == "--output", let value = iterator.next() {
+                params["output"] = value
+                continue
+            }
+
+            if ["--stop-file", "--finished-file", "--debug-log"].contains(argument), let value = iterator.next() {
+                let key = switch argument {
+                case "--stop-file": "stopFile"
+                case "--finished-file": "finishedFile"
+                default: "debugLog"
+                }
+                params[key] = value
+                continue
+            }
+
             if ["--x", "--y", "--width", "--height"].contains(argument), let value = iterator.next() {
+                params[String(argument.dropFirst(2))] = value
+                continue
+            }
+
+            if ["--fps", "--scale"].contains(argument), let value = iterator.next() {
                 params[String(argument.dropFirst(2))] = value
                 continue
             }

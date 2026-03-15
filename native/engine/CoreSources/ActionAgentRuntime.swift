@@ -170,6 +170,14 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         case .openScreenRecordingSettings:
             actionAgentOpenSettingsPane(anchor: "Privacy_ScreenCapture")
             return ["status": "opened"]
+        case .launchApp:
+            guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 18, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])
+            }
+            try await MainActor.run {
+                try ActionNativeAutomation.launchApplication(bundleId: bundleId)
+            }
+            return ["bundleId": bundleId, "status": "launched"]
         case .activateApp:
             guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
                 throw NSError(domain: "ActionAgent", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])
@@ -177,6 +185,12 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
 
             try ActionNativeAutomation.activateApplication(bundleId: bundleId)
             return ["bundleId": bundleId, "status": "activated"]
+        case .typeText:
+            guard let text = request.params["text"], !text.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 19, userInfo: [NSLocalizedDescriptionKey: "Missing text"])
+            }
+            try ActionNativeAutomation.typeText(text)
+            return ["status": "typed", "detail": text]
         case .setWindowFrame:
             guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
                 throw NSError(domain: "ActionAgent", code: 4, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])
@@ -205,6 +219,20 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 "height": String(describing: rect.size.height),
                 "status": "window-frame",
             ]
+        case .calculatorButtons:
+            let buttons = try ActionNativeAutomation.calculatorButtons()
+            let data = try JSONEncoder().encode(buttons)
+            let text = String(decoding: data, as: UTF8.self)
+            return ["status": "calculator-buttons", "buttons": text]
+        case .clickCalculatorButton:
+            guard let label = request.params["label"], !label.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 20, userInfo: [NSLocalizedDescriptionKey: "Missing label"])
+            }
+            try ActionNativeAutomation.clickCalculatorButton(label: label)
+            return ["status": "clicked", "detail": label]
+        case .calculatorDisplayValue:
+            let value = try ActionNativeAutomation.calculatorDisplayValue()
+            return ["status": "calculator-display", "value": value]
         case .recordAppWindow:
             guard #available(macOS 15.0, *) else {
                 throw NSError(domain: "ActionAgent", code: 7, userInfo: [NSLocalizedDescriptionKey: "Window recording requires macOS 15.0 or newer."])

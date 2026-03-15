@@ -136,18 +136,37 @@ public enum ActionRecordingProbeLauncher {
 
     private static func resolveAppBundleURL() throws -> URL {
         let bundleURL = Bundle.main.bundleURL
-        if bundleURL.pathExtension == "app" {
-            return bundleURL
+        var fallbackAppBundleURL: URL?
+
+        func inspect(candidate: URL) -> URL? {
+            guard candidate.pathExtension == "app" else {
+                return nil
+            }
+            if fallbackAppBundleURL == nil {
+                fallbackAppBundleURL = candidate
+            }
+            if candidate.lastPathComponent == "Action.app" {
+                return candidate
+            }
+            return nil
+        }
+
+        if let resolved = inspect(candidate: bundleURL) {
+            return resolved
         }
 
         if let executableURL = Bundle.main.executableURL {
             var candidate = executableURL.deletingLastPathComponent()
             while candidate.path != "/" {
-                if candidate.pathExtension == "app" {
-                    return candidate
+                if let resolved = inspect(candidate: candidate) {
+                    return resolved
                 }
                 candidate.deleteLastPathComponent()
             }
+        }
+
+        if let fallbackAppBundleURL {
+            return fallbackAppBundleURL
         }
 
         throw NSError(

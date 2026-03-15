@@ -29,11 +29,13 @@ enum ActionHostCommand: String {
     case agent
     case launcher
     case webkitSmoke = "webkit-smoke"
+    case guidedCalculatorDemo = "guided-calculator-demo"
     case status
     case request
     case openAccessibilitySettings = "open-accessibility-settings"
     case openScreenRecordingSettings = "open-screen-recording-settings"
     case stageOverlay = "stage-overlay"
+    case launchApp = "launch-app"
     case recordAppWindow = "record-app-window"
     case recordAppWindowLocal = "record-app-window-local"
     case screenshotAppWindow = "screenshot-app-window"
@@ -42,6 +44,8 @@ enum ActionHostCommand: String {
     case pressKey = "press-key"
     case clickCalculatorButton = "click-calculator-button"
     case inspectCalculatorButtons = "inspect-calculator-buttons"
+    case inspectCalculatorUI = "inspect-calculator-ui"
+    case getCalculatorDisplay = "get-calculator-display"
     case setWindowFrame = "set-window-frame"
     case getWindowFrame = "get-window-frame"
     case recordRegion = "record-region"
@@ -899,6 +903,7 @@ final class StageOverlayView: NSView {
 
         drawBackdrop(state: state, viewport: viewport)
         drawViewportFrame(state: state, viewport: viewport)
+        drawHudPill(state: state, viewport: viewport)
 
         if state.phase == "countdown", let countdown = state.countdownRemaining {
             drawCountdown(String(countdown), viewport: viewport)
@@ -1199,8 +1204,6 @@ final class StageOverlayController: NSObject {
         app.setActivationPolicy(.regular)
         configureAppIcon()
         app.activate(ignoringOtherApps: true)
-
-        try refreshState(force: true)
         try writer.write(
             ActionHostResponse(
                 status: "overlay-running",
@@ -1208,6 +1211,7 @@ final class StageOverlayController: NSObject {
                 detail: String(ProcessInfo.processInfo.processIdentifier)
             )
         )
+        try refreshState(force: true)
         startPolling()
         app.run()
     }
@@ -1282,6 +1286,12 @@ final class StageOverlayController: NSObject {
         overlayWindow.contentView = overlayView
         self.overlayWindow = overlayWindow
         self.overlayView = overlayView
+
+        guard controlFile != nil else {
+            self.controlWindow = nil
+            self.controlViewModel = nil
+            return
+        }
 
         let controlSize = CGSize(width: 312, height: 428)
         let controlWindow = StageHUDPanel(
@@ -1438,6 +1448,9 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         throw ActionHostError.unsupportedOS("launcher should be started via runUICommand")
     case .webkitSmoke:
         throw ActionHostError.unsupportedOS("webkit-smoke should be started via runUICommand")
+    case .guidedCalculatorDemo:
+        let runner = GuidedCaptureSessionRunner(writer: writer, logger: logger, options: options)
+        try await runner.run()
     case .status:
         try writer.write(snapshot(promptAccessibility: false, requestScreenRecordingPermission: false))
     case .request:
@@ -1605,14 +1618,14 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         )
     case .activateApp:
         let bundleId = try options.required("bundle-id")
-        let response = try await agentBridge.send(method: .activateApp, params: ["bundleId": bundleId])
-        try writer.write(
-            ActionHostResponse(
-                status: response.ok ? "activated" : "error",
-                outputPath: nil,
-                detail: response.error ?? bundleId
-            )
-        )
+        try ActionNativeAutomation.activateApplication(bundleId: bundleId)
+        try writer.write(ActionHostResponse(status: "activated", outputPath: nil, detail: bundleId))
+    case .launchApp:
+        let bundleId = try options.required("bundle-id")
+        try await MainActor.run {
+            try ActionNativeAutomation.launchApplication(bundleId: bundleId)
+        }
+        try writer.write(ActionHostResponse(status: "launched", outputPath: nil, detail: bundleId))
     case .typeText:
         let text = try options.required("text")
         try postText(text)
@@ -1627,45 +1640,33 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         try writer.write(ActionHostResponse(status: "clicked", outputPath: nil, detail: button))
     case .inspectCalculatorButtons:
         try writer.write(calculatorButtons())
+    case .inspectCalculatorUI:
+        try writer.write(ActionNativeAutomation.calculatorAccessibilityNodes())
+    case .getCalculatorDisplay:
+        try writer.write(
+            ActionHostResponse(
+                status: "calculator-display",
+                outputPath: nil,
+                detail: try ActionNativeAutomation.calculatorDisplayValue()
+            )
+        )
     case .setWindowFrame:
         let bundleId = try options.required("bundle-id")
         let rect = try rectFromOptions(options)
-        let params: [String: String] = [
-            "bundleId": bundleId,
-            "x": String(describing: rect.origin.x),
-            "y": String(describing: rect.origin.y),
-            "width": String(describing: rect.size.width),
-            "height": String(describing: rect.size.height),
-        ]
-        let response = try await agentBridge.send(method: .setWindowFrame, params: params)
-        try writer.write(
-            ActionHostResponse(
-                status: response.ok ? "window-framed" : "error",
-                outputPath: nil,
-                detail: response.error ?? bundleId
-            )
-        )
+        try ActionNativeAutomation.setWindowFrame(bundleId: bundleId, rect: rect)
+        try writer.write(ActionHostResponse(status: "window-framed", outputPath: nil, detail: bundleId))
     case .getWindowFrame:
         let bundleId = try options.required("bundle-id")
-        let response = try await agentBridge.send(method: .getWindowFrame, params: ["bundleId": bundleId])
-        guard
-            let result = response.result,
-            let x = result["x"].flatMap(Double.init),
-            let y = result["y"].flatMap(Double.init),
-            let width = result["width"].flatMap(Double.init),
-            let height = result["height"].flatMap(Double.init)
-        else {
-            throw ActionHostError.accessibilityLookupFailed(response.error ?? "Agent did not return a window frame for \(bundleId)")
-        }
+        let rect = try ActionNativeAutomation.getWindowFrame(bundleId: bundleId)
         try writer.write(
             WindowFrameResponse(
                 status: "window-frame",
                 bundleId: bundleId,
                 frame: OverlayBounds(
-                    x: x,
-                    y: y,
-                    width: width,
-                    height: height
+                    x: rect.origin.x,
+                    y: rect.origin.y,
+                    width: rect.size.width,
+                    height: rect.size.height
                 )
             )
         )

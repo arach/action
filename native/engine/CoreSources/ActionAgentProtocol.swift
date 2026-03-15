@@ -29,13 +29,18 @@ public struct ActionAgentResponse: Codable, Sendable {
 public enum ActionAgentMethod: String, CaseIterable, Sendable {
     case ping
     case status
+    case launchApp = "app.launch"
     case permissionsSnapshot = "permissions.snapshot"
     case permissionsRequest = "permissions.request"
     case openAccessibilitySettings = "settings.openAccessibility"
     case openScreenRecordingSettings = "settings.openScreenRecording"
     case activateApp = "app.activate"
+    case typeText = "input.typeText"
     case setWindowFrame = "window.setFrame"
     case getWindowFrame = "window.getFrame"
+    case calculatorButtons = "calculator.buttons"
+    case clickCalculatorButton = "calculator.clickButton"
+    case calculatorDisplayValue = "calculator.displayValue"
     case recordAppWindow = "capture.recordAppWindow"
     case recordRegion = "capture.recordRegion"
     case screenshotAppWindow = "capture.screenshotAppWindow"
