@@ -17,6 +17,7 @@
     "demo:calculator:macos": "bun packages/cli/src/main.ts calculator-demo macos",
     "scenario:calculator": "bun packages/cli/src/main.ts scenario calculator-demo",
     "hud": "bun packages/hud/src/server.ts",
+    "native:dev": "./scripts/action-dev",
     "native:app:build": "native/engine/scripts/build-app.sh",
     "native:doctor": "native/engine/scripts/doctor.sh",
     "native:verify": "native/engine/scripts/verify-app.sh",

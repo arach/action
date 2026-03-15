@@ -60,9 +60,31 @@ See [docs/PRECEDENT_REVIEW.md](/Users/arach/dev/action/docs/PRECEDENT_REVIEW.md)
 Use the native wrappers when working on the macOS host:
 
 - `bun run native:doctor`
+- `bun run native:dev -- help`
 - `bun run native:permissions:status`
 - `bun run native:test:screenshot`
 - `bun run native:test:record`
+
+For a tighter local dev loop, use the repo-local developer CLI:
+
+```bash
+alias action-dev='/Users/arach/dev/action/scripts/action-dev'
+action-dev relaunch
+action-dev host guided-calculator-demo
+action-dev logs
+```
+
+Useful subcommands:
+
+- `action-dev build`
+- `action-dev rebuild`
+- `action-dev launch`
+- `action-dev relaunch`
+- `action-dev status`
+- `action-dev host <args...>`
+- `action-dev agent <args...>`
+- `action-dev agent-cli <args...>`
+- `action-dev logs`
 
 `native:doctor` is the clean-state wrapper:
 
