@@ -13,7 +13,7 @@ final class ActionWebConsoleWindowController: NSWindowController, NSWindowDelega
     private var requestedURL: URL?
     var onStatusChange: (@MainActor (String) -> Void)?
 
-    init(initialURL: URL = URL(string: "https://www.apple.com")!) {
+    init(initialURL: URL = URL(string: "http://127.0.0.1:4318/")!) {
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = nil
@@ -69,7 +69,7 @@ final class ActionWebConsoleWindowController: NSWindowController, NSWindowDelega
             backing: .buffered,
             defer: false
         )
-        window.title = "Action Web Console"
+        window.title = "Action Embedded Console"
         window.center()
         window.tabbingMode = .disallowed
         window.collectionBehavior = [.managed, .fullScreenNone, .moveToActiveSpace]

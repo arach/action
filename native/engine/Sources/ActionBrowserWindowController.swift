@@ -16,7 +16,7 @@ final class ActionBrowserWindowController: NSWindowController, NSWindowDelegate 
             backing: .buffered,
             defer: false
         )
-        window.title = "Action Browser"
+        window.title = "Action Embedded Console"
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.managed, .fullScreenNone, .moveToActiveSpace]
@@ -65,7 +65,7 @@ final class ActionBrowserWindowController: NSWindowController, NSWindowDelegate 
     }
 
     func updateWindowTitle(with url: URL) {
-        window?.title = "Action Browser - \(url.host(percentEncoded: false) ?? url.absoluteString)"
+        window?.title = "Action Embedded Console - \(url.host(percentEncoded: false) ?? url.absoluteString)"
     }
 
     func windowWillClose(_ notification: Notification) {

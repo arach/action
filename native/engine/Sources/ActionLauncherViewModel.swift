@@ -42,7 +42,7 @@ private struct GuidedCaptureLauncherResult: Decodable {
 @MainActor
 final class ActionLauncherViewModel: ObservableObject {
     private let logger = Logger(subsystem: "dev.action.Action", category: "Launcher")
-    private let demoSiteURL = URL(string: "https://www.apple.com")!
+    private let demoSiteURL = URL(string: "https://example.com")!
     private let localConsoleURL = URL(string: "http://127.0.0.1:4318/")!
     private let agentProcess = ActionAgentProcessController()
     private let agentClient = ActionAgentClient()
@@ -53,13 +53,14 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var screenRecordingStatus: String = "Unknown"
     @Published var notes: [String] = []
     @Published var consoleURL: URL
-    @Published var consoleStatus: String = "Embedded console ready"
+    @Published var consoleStatus: String = "Local console ready"
     @Published var guidedDemoStatus: String = "Ready"
     @Published var recentSessions: [ActionSessionSummary] = []
     @Published var isRunningGuidedDemo: Bool = false
+    @Published var selectedSessionID: String?
 
     init() {
-        self.consoleURL = demoSiteURL
+        self.consoleURL = localConsoleURL
         refreshSessions()
     }
 
@@ -89,6 +90,11 @@ final class ActionLauncherViewModel: ObservableObject {
 
     func openWebConsoleInBrowser() {
         NSWorkspace.shared.open(consoleURL)
+    }
+
+    func openEmbeddedConsole() {
+        consoleURL = localConsoleURL
+        openBrowserWindow()
     }
 
     func showDemoSite() {
@@ -147,9 +153,18 @@ final class ActionLauncherViewModel: ObservableObject {
 
     func refreshSessions() {
         recentSessions = loadRecentSessions()
+        if let selectedSessionID, recentSessions.contains(where: { $0.id == selectedSessionID }) {
+            self.selectedSessionID = selectedSessionID
+        } else {
+            self.selectedSessionID = recentSessions.first?.id
+        }
         if recentSessions.isEmpty {
             guidedDemoStatus = isRunningGuidedDemo ? guidedDemoStatus : "No recorded sessions yet"
         }
+    }
+
+    func selectSession(_ session: ActionSessionSummary) {
+        selectedSessionID = session.id
     }
 
     func replaySession(_ session: ActionSessionSummary) {
@@ -170,6 +185,14 @@ final class ActionLauncherViewModel: ObservableObject {
         } else if let stageScreenshotURL = session.stageScreenshotURL {
             NSWorkspace.shared.open(stageScreenshotURL)
         }
+    }
+
+    var selectedSession: ActionSessionSummary? {
+        if let selectedSessionID,
+           let selected = recentSessions.first(where: { $0.id == selectedSessionID }) {
+            return selected
+        }
+        return recentSessions.first
     }
 
     func startAgent() {

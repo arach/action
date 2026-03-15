@@ -21,7 +21,7 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         viewModel.startAgent()
-        viewModel.openBrowserWindow()
+        viewModel.openEmbeddedConsole()
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
@@ -178,7 +178,7 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
 
     @objc
     private func openBrowserWindow() {
-        viewModel.openBrowserWindow()
+        viewModel.openEmbeddedConsole()
     }
 
     @objc

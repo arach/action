@@ -33,12 +33,12 @@ struct ActionLauncherRootView: View {
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(StageHUDTheme.textPrimary)
 
-                    Text("Native launcher for staging, utilities, and quick access to the console.")
+                    Text("Native launcher for staging, capture, replay, and quick access to the local console.")
                         .font(.system(size: 13, weight: .regular, design: .default))
                         .foregroundStyle(StageHUDTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text("UI stays in AppKit. Runtime capability is moving behind a local agent.")
+                    Text("Action is the native app. The embedded console is just a local WebKit surface inside it.")
                         .font(.system(size: 12, weight: .regular, design: .default))
                         .foregroundStyle(StageHUDTheme.textMuted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -95,11 +95,11 @@ struct ActionLauncherRootView: View {
                     }
                 }
 
-                utilityCard(title: "Web View") {
+                utilityCard(title: "Embedded Console") {
                     VStack(spacing: 10) {
-                        launcherButton("Open Embedded Console", action: model.openBrowserWindow)
-                        launcherButton("Load Apple.com", action: model.showDemoSite)
+                        launcherButton("Open Embedded Console", action: model.openEmbeddedConsole)
                         launcherButton("Load Local Console", action: model.showLocalConsole)
+                        launcherButton("Load Demo Site", action: model.showDemoSite)
                         launcherButton("Reload Embedded Console", action: model.reloadConsole)
                         launcherButton("Open Current URL in Browser", action: model.openWebConsoleInBrowser)
                     }
@@ -144,7 +144,7 @@ struct ActionLauncherRootView: View {
                 }
 
                 utilityCard(title: "Latest Session") {
-                    if let latest = model.recentSessions.first {
+                    if let latest = model.selectedSession {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(alignment: .top) {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -166,6 +166,9 @@ struct ActionLauncherRootView: View {
                                 .font(.system(size: 12, weight: .regular, design: .default))
                                 .foregroundStyle(StageHUDTheme.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
+
+                            ActionSessionPreviewView(videoURL: latest.videoURL)
+                                .frame(minHeight: 280, maxHeight: 320)
 
                             HStack(spacing: 10) {
                                 launcherButton("Replay", action: { model.replaySession(latest) })
@@ -196,11 +199,11 @@ struct ActionLauncherRootView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Browser Window")
+                    Text("Embedded Console")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(StageHUDTheme.textPrimary)
 
-                    Text("Embedded WebKit is enabled with the same minimal AppKit pattern proven in the tutorial app: one window, one web view, one URL field.")
+                    Text("This is a utility surface inside Action for local web tooling. It is not the main review experience.")
                         .font(.system(size: 14, weight: .regular, design: .default))
                         .foregroundStyle(StageHUDTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -306,15 +309,19 @@ struct ActionLauncherRootView: View {
                 compactSessionButton("Reveal") { model.revealSession(session) }
             }
         }
+        .contentShape(Rectangle())
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.03))
+                .fill(model.selectedSession?.id == session.id ? Color.white.opacity(0.08) : Color.white.opacity(0.03))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                .stroke(model.selectedSession?.id == session.id ? Color.white.opacity(0.16) : Color.white.opacity(0.06), lineWidth: 1)
         )
+        .onTapGesture {
+            model.selectSession(session)
+        }
     }
 
     private func sessionDetailRow(_ session: ActionSessionSummary) -> some View {
@@ -335,6 +342,7 @@ struct ActionLauncherRootView: View {
             }
 
             HStack(spacing: 10) {
+                launcherButton("Select", action: { model.selectSession(session) })
                 launcherButton("Replay", action: { model.replaySession(session) })
                 launcherButton("Reveal", action: { model.revealSession(session) })
                 launcherButton("Trace", action: { model.openSessionTrace(session) })
