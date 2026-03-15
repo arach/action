@@ -1,10 +1,12 @@
 import AppKit
+import ActionCore
 @preconcurrency import ApplicationServices
 import AVFoundation
 import CoreGraphics
 import CoreMedia
 import Foundation
 @preconcurrency import ScreenCaptureKit
+import SwiftUI
 
 enum PermissionState: String, Encodable {
     case granted
@@ -24,12 +26,16 @@ struct ActionHostResponse: Encodable {
 }
 
 enum ActionHostCommand: String {
+    case agent
+    case launcher
+    case webkitSmoke = "webkit-smoke"
     case status
     case request
     case openAccessibilitySettings = "open-accessibility-settings"
     case openScreenRecordingSettings = "open-screen-recording-settings"
     case stageOverlay = "stage-overlay"
     case recordAppWindow = "record-app-window"
+    case recordAppWindowLocal = "record-app-window-local"
     case screenshotAppWindow = "screenshot-app-window"
     case activateApp = "activate-app"
     case typeText = "type-text"
@@ -39,6 +45,8 @@ enum ActionHostCommand: String {
     case setWindowFrame = "set-window-frame"
     case getWindowFrame = "get-window-frame"
     case recordRegion = "record-region"
+    case recordRegionLocal = "record-region-local"
+    case recordingProbe = "recording-probe"
     case screenshotRegion = "screenshot-region"
     case screenshotScreen = "screenshot-screen"
 }
@@ -50,6 +58,7 @@ enum ActionHostError: LocalizedError {
     case unableToEncodeImage
     case missingOutputPath
     case missingStopSignalPath
+    case captureFailed(String)
     case appleScriptFailed(String)
     case applicationNotRunning(String)
     case accessibilityLookupFailed(String)
@@ -69,6 +78,8 @@ enum ActionHostError: LocalizedError {
             return "Capture command did not receive an output path"
         case .missingStopSignalPath:
             return "Capture command did not receive a stop signal path"
+        case .captureFailed(let detail):
+            return detail
         case .appleScriptFailed(let detail):
             return detail
         case .applicationNotRunning(let bundleId):
@@ -82,12 +93,16 @@ enum ActionHostError: LocalizedError {
 }
 
 struct CommandOptions {
-    let command: ActionHostCommand
+    let command: ActionHostCommand?
     let options: [String: String]
 
     init(arguments: [String]) {
-        let commandName = arguments.dropFirst().first
-        self.command = commandName.flatMap(ActionHostCommand.init(rawValue:)) ?? .status
+        let commandName = arguments.dropFirst().first(where: { !$0.hasPrefix("-psn_") })
+        if let commandName {
+            self.command = ActionHostCommand(rawValue: commandName) ?? .status
+        } else {
+            self.command = nil
+        }
 
         var parsed: [String: String] = [:]
         var iterator = arguments.dropFirst(2).makeIterator()
@@ -1157,383 +1172,6 @@ final class StageOverlayView: NSView {
 
 }
 
-final class StageControlDockView: NSView {
-    private struct ButtonDef {
-        let id: String
-        let title: String
-        var rect: CGRect
-        var enabled: Bool
-    }
-
-    private var defs: [ButtonDef] = [
-        ButtonDef(id: "start", title: "Start", rect: .zero, enabled: true),
-        ButtonDef(id: "stop", title: "Stop", rect: .zero, enabled: false),
-        ButtonDef(id: "replay", title: "Replay", rect: .zero, enabled: false),
-        ButtonDef(id: "clear", title: "Clear", rect: .zero, enabled: true),
-        ButtonDef(id: "quit", title: "Quit", rect: .zero, enabled: true),
-    ]
-    private var hoveredId: String?
-    var onCommand: ((String) -> Void)?
-
-    var phase: String = "staging" {
-        didSet {
-            updateButtonState()
-            needsDisplay = true
-        }
-    }
-    var targetApp: String = "Action" {
-        didSet { needsDisplay = true }
-    }
-    var summary: String = "Guided capture session" {
-        didSet { needsDisplay = true }
-    }
-    var detail: String? {
-        didSet { needsDisplay = true }
-    }
-    var stepLabel: String? {
-        didSet { needsDisplay = true }
-    }
-    var recentLogs: [String] = [] {
-        didSet { needsDisplay = true }
-    }
-    var elapsedMs: Double? {
-        didSet { needsDisplay = true }
-    }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
-        layoutButtons()
-        updateButtonState()
-        addTrackingArea(
-            NSTrackingArea(
-                rect: bounds,
-                options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                owner: self,
-                userInfo: nil
-            )
-        )
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
-        NSColor(calibratedWhite: 0.04, alpha: 0.94).setFill()
-        path.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.1).setStroke()
-        path.lineWidth = 1
-        path.stroke()
-
-        let insets: CGFloat = 14
-        let top: CGFloat = bounds.height - insets
-        let headerHeight: CGFloat = 64
-        let headerRect = CGRect(x: insets, y: top - headerHeight, width: bounds.width - (insets * 2), height: headerHeight)
-        let controlsHeight: CGFloat = 80
-        let controlsRect = CGRect(
-            x: insets,
-            y: headerRect.minY - 10 - controlsHeight,
-            width: headerRect.width,
-            height: controlsHeight
-        )
-        let logsRect = CGRect(
-            x: insets,
-            y: insets,
-            width: headerRect.width,
-            height: max(120, controlsRect.minY - insets - 12)
-        )
-
-        drawHeader(in: headerRect)
-        drawControlStrip(in: controlsRect)
-        drawLogPanel(in: logsRect)
-    }
-
-    private func drawHeader(in rect: CGRect) {
-        let phaseColor: NSColor = phase == "recording"
-            ? NSColor(calibratedRed: 0.98, green: 0.38, blue: 0.38, alpha: 0.98)
-            : NSColor(calibratedWhite: 1, alpha: 0.86)
-
-        drawText(
-            text: phase.uppercased(),
-            in: CGRect(x: rect.minX + 18, y: rect.maxY - 24, width: 160, height: 14),
-            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
-            color: phaseColor,
-            alignment: .left,
-            lineBreak: .byTruncatingTail
-        )
-        drawText(
-            text: targetApp,
-            in: CGRect(x: rect.maxX - 150, y: rect.maxY - 24, width: 140, height: 14),
-            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            color: NSColor(calibratedWhite: 1, alpha: 0.6),
-            alignment: .right,
-            lineBreak: .byTruncatingTail
-        )
-        drawText(
-            text: summary,
-            in: CGRect(x: rect.minX + 18, y: rect.maxY - 42, width: rect.width - 36, height: 14),
-            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium),
-            color: NSColor(calibratedWhite: 1, alpha: 0.88),
-            alignment: .left,
-            lineBreak: .byTruncatingTail
-        )
-        if let detail, !detail.isEmpty {
-            drawText(
-                text: detail,
-                in: CGRect(x: rect.minX + 18, y: rect.maxY - 57, width: rect.width - 36, height: 13),
-                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
-                color: NSColor(calibratedWhite: 1, alpha: 0.52),
-                alignment: .left,
-                lineBreak: .byTruncatingTail
-            )
-        }
-    }
-
-    private func drawControlStrip(in rect: CGRect) {
-        let container = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
-        NSColor(calibratedWhite: 1, alpha: 0.04).setFill()
-        container.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.08).setStroke()
-        container.lineWidth = 1
-        container.stroke()
-
-        if let stepLabel, !stepLabel.isEmpty {
-            drawText(
-                text: stepLabel,
-                in: CGRect(x: rect.minX + 12, y: rect.maxY - 18, width: rect.width - 24, height: 12),
-                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
-                color: NSColor(calibratedWhite: 1, alpha: 0.5),
-                alignment: .left,
-                lineBreak: .byTruncatingTail
-            )
-        }
-
-        for def in defs {
-            let buttonPath = NSBezierPath(roundedRect: def.rect, xRadius: 4, yRadius: 4)
-            var fill = def.enabled
-                ? NSColor(calibratedWhite: 1, alpha: 0.11)
-                : NSColor(calibratedWhite: 1, alpha: 0.05)
-            let stroke = def.enabled
-                ? NSColor(calibratedWhite: 1, alpha: 0.18)
-                : NSColor(calibratedWhite: 1, alpha: 0.08)
-
-            if hoveredId == def.id && def.enabled {
-                fill = NSColor(calibratedWhite: 1, alpha: 0.2)
-            }
-
-            fill.setFill()
-            buttonPath.fill()
-            stroke.setStroke()
-            buttonPath.lineWidth = 1
-            buttonPath.stroke()
-
-            drawText(
-                text: def.title,
-                in: CGRect(x: def.rect.minX, y: def.rect.minY + 9, width: def.rect.width, height: 15),
-                font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
-                color: def.enabled ? NSColor.white : NSColor(calibratedWhite: 1, alpha: 0.34),
-                alignment: .center,
-                lineBreak: .byTruncatingTail
-            )
-        }
-    }
-
-    private func drawLogPanel(in rect: CGRect) {
-        let panel = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
-        NSColor(calibratedWhite: 1, alpha: 0.03).setFill()
-        panel.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.08).setStroke()
-        panel.lineWidth = 1
-        panel.stroke()
-
-        drawText(
-            text: "LOG",
-            in: CGRect(x: rect.minX + 12, y: rect.maxY - 20, width: 60, height: 12),
-            font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
-            color: NSColor(calibratedWhite: 1, alpha: 0.45),
-            alignment: .left
-        )
-        if let elapsedMs {
-            drawText(
-                text: elapsedText(elapsedMs),
-                in: CGRect(x: rect.maxX - 110, y: rect.maxY - 20, width: 98, height: 12),
-                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
-                color: NSColor(calibratedWhite: 1, alpha: 0.45),
-                alignment: .right
-            )
-        }
-
-        let lineHeight: CGFloat = 15
-        let topY = rect.maxY - 36
-        let maxLines = max(1, Int((rect.height - 48) / lineHeight))
-        let lines = Array(recentLogs.suffix(maxLines))
-        if lines.isEmpty {
-            drawText(
-                text: "No events yet.",
-                in: CGRect(x: rect.minX + 12, y: rect.minY + 10, width: rect.width - 24, height: 14),
-                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
-                color: NSColor(calibratedWhite: 1, alpha: 0.34),
-                alignment: .left
-            )
-            return
-        }
-
-        for (index, line) in lines.reversed().enumerated() {
-            let y = topY - (CGFloat(index) * lineHeight)
-            if y < rect.minY + 8 {
-                break
-            }
-            let alpha = max(0.32, 0.78 - (CGFloat(index) * 0.08))
-            drawText(
-                text: line,
-                in: CGRect(x: rect.minX + 12, y: y, width: rect.width - 24, height: lineHeight),
-                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
-                color: NSColor(calibratedWhite: 1, alpha: alpha),
-                alignment: .left,
-                lineBreak: .byTruncatingTail
-            )
-        }
-    }
-
-    private func layoutButtons() {
-        let insets: CGFloat = 14
-        let headerHeight: CGFloat = 64
-        let controlsHeight: CGFloat = 80
-        let controlsRect = CGRect(
-            x: insets + 10,
-            y: bounds.height - insets - headerHeight - 10 - controlsHeight + 10,
-            width: bounds.width - ((insets + 10) * 2),
-            height: controlsHeight - 22
-        )
-        let rowCount = 2
-        let colCount = 3
-        let spacingX: CGFloat = 8
-        let spacingY: CGFloat = 8
-        let buttonWidth = floor((controlsRect.width - (CGFloat(colCount - 1) * spacingX)) / CGFloat(colCount))
-        let buttonHeight = floor((controlsRect.height - spacingY) / CGFloat(rowCount))
-        let slots: [(Int, Int)] = [
-            (0, 0), (1, 0), (2, 0),
-            (0, 1), (1, 1)
-        ]
-
-        for (index, slot) in slots.enumerated() {
-            guard index < defs.count else {
-                break
-            }
-            let x = controlsRect.minX + CGFloat(slot.0) * (buttonWidth + spacingX)
-            let y = controlsRect.maxY - buttonHeight - CGFloat(slot.1) * (buttonHeight + spacingY)
-            defs[index].rect = CGRect(x: x, y: y, width: buttonWidth, height: buttonHeight)
-        }
-    }
-
-    private func enabled(for id: String, phase: String) -> Bool {
-        switch id {
-        case "start":
-            return phase == "staging" || phase == "completed" || phase == "failed" || phase == "paused" || phase == "created"
-        case "stop":
-            return phase == "countdown" || phase == "recording" || phase == "paused"
-        case "replay":
-            return phase == "completed"
-        default:
-            return true
-        }
-    }
-
-    private func updateButtonState() {
-        for index in defs.indices {
-            defs[index].enabled = enabled(for: defs[index].id, phase: phase)
-        }
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        guard let button = defs.first(where: { $0.enabled && $0.rect.contains(point) }) else {
-            return
-        }
-        onCommand?(button.id)
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        let hovered = defs.first(where: { $0.enabled && $0.rect.contains(point) })?.id
-        if hoveredId != hovered {
-            hoveredId = hovered
-            needsDisplay = true
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        if hoveredId != nil {
-            hoveredId = nil
-            needsDisplay = true
-        }
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        for area in trackingAreas {
-            removeTrackingArea(area)
-        }
-        addTrackingArea(
-            NSTrackingArea(
-                rect: bounds,
-                options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                owner: self,
-                userInfo: nil
-            )
-        )
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard defs.contains(where: { $0.enabled && $0.rect.contains(point) }) else {
-            return nil
-        }
-        return self
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        layoutButtons()
-        needsDisplay = true
-    }
-
-    private func drawText(
-        text: String,
-        in rect: CGRect,
-        font: NSFont,
-        color: NSColor,
-        alignment: NSTextAlignment,
-        lineBreak: NSLineBreakMode = .byWordWrapping
-    ) {
-        let style = NSMutableParagraphStyle()
-        style.alignment = alignment
-        style.lineBreakMode = lineBreak
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color,
-            .paragraphStyle: style,
-        ]
-        text.draw(in: rect, withAttributes: attrs)
-    }
-
-    private func elapsedText(_ ms: Double) -> String {
-        let totalSeconds = Int(max(0, ms) / 1000)
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-}
-
-final class StageControlDockWindow: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
-}
-
 @MainActor
 final class StageOverlayController: NSObject {
     private let stateFile: String
@@ -1542,9 +1180,9 @@ final class StageOverlayController: NSObject {
     private let logger: DebugLogger
     private let controlFile: String?
     private var overlayWindow: NSWindow?
-    private var controlWindow: StageControlDockWindow?
+    private var controlWindow: StageHUDPanel?
     private var overlayView: StageOverlayView?
-    private var controlView: StageControlDockView?
+    private var controlViewModel: StageHUDViewModel?
     private var lastStateData: Data?
     private var pollTimer: Timer?
 
@@ -1610,14 +1248,14 @@ final class StageOverlayController: NSObject {
 
         overlayWindow?.setFrame(screen.frame, display: true)
         overlayView?.state = state
-        controlView?.phase = state.phase
-        controlView?.targetApp = state.targetApp ?? "Action"
-        controlView?.summary = state.summary
-        controlView?.detail = state.detail
-        controlView?.stepLabel = state.stepLabel
-        controlView?.recentLogs = state.recentLogs ?? []
-        controlView?.elapsedMs = state.elapsedMs
-        if let dockFrame = controlPanelFrame(screenFrame: screen.frame) {
+        controlViewModel?.phase = state.phase
+        controlViewModel?.targetApp = state.targetApp ?? "Action"
+        controlViewModel?.summary = state.summary
+        controlViewModel?.detail = state.detail
+        controlViewModel?.stepLabel = state.stepLabel
+        controlViewModel?.recentLogs = state.recentLogs ?? []
+        controlViewModel?.elapsedMs = state.elapsedMs
+        if let dockFrame = controlPanelFrame(screenFrame: screen.frame, viewportRect: viewportRect) {
             controlWindow?.setFrame(dockFrame, display: true)
         }
         overlayWindow?.orderFrontRegardless()
@@ -1645,14 +1283,8 @@ final class StageOverlayController: NSObject {
         self.overlayWindow = overlayWindow
         self.overlayView = overlayView
 
-        let sidebarWidth: CGFloat = 300
-        let sidebarTopPadding: CGFloat = 30
-        let sidebarBottomPadding: CGFloat = 8
-        let controlSize = CGSize(
-            width: sidebarWidth,
-            height: max(360, screen.frame.height - sidebarTopPadding - sidebarBottomPadding)
-        )
-        let controlWindow = StageControlDockWindow(
+        let controlSize = CGSize(width: 312, height: 428)
+        let controlWindow = StageHUDPanel(
             contentRect: CGRect(origin: .zero, size: controlSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -1665,14 +1297,20 @@ final class StageOverlayController: NSObject {
         controlWindow.hasShadow = true
         controlWindow.ignoresMouseEvents = false
         controlWindow.isMovable = false
+        controlWindow.isFloatingPanel = true
+        controlWindow.hidesOnDeactivate = false
         controlWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        let controlView = StageControlDockView(frame: CGRect(origin: .zero, size: controlSize))
-        controlView.onCommand = { [weak self] command in
+        controlWindow.isReleasedWhenClosed = false
+        let controlViewModel = StageHUDViewModel()
+        controlViewModel.onCommand = { [weak self] command in
             self?.appendControlCommand(command)
         }
+        let controlView = NSHostingView(rootView: StageHUDRootView(model: controlViewModel))
+        controlView.frame = CGRect(origin: .zero, size: controlSize)
+        controlView.autoresizingMask = [.width, .height]
         controlWindow.contentView = controlView
         self.controlWindow = controlWindow
-        self.controlView = controlView
+        self.controlViewModel = controlViewModel
     }
 
     private func startPolling() {
@@ -1707,14 +1345,26 @@ final class StageOverlayController: NSObject {
         NSApplication.shared.stop(nil)
     }
 
-    private func controlPanelFrame(screenFrame: CGRect) -> CGRect? {
-        let sideMargin: CGFloat = 16
-        let topPadding: CGFloat = 30
-        let bottomPadding: CGFloat = 8
-        let panelWidth: CGFloat = 300
-        let panelHeight = max(360, screenFrame.height - topPadding - bottomPadding)
-        let x = screenFrame.maxX - panelWidth - sideMargin
-        let y = screenFrame.minY + bottomPadding
+    private func controlPanelFrame(screenFrame: CGRect, viewportRect: CGRect) -> CGRect? {
+        let sideGap: CGFloat = 14
+        let edgePadding: CGFloat = 16
+        let topPadding: CGFloat = 18
+        let bottomPadding: CGFloat = 16
+        let panelWidth: CGFloat = 312
+        let panelHeight: CGFloat = min(428, screenFrame.height - topPadding - bottomPadding)
+        let preferredRightX = viewportRect.maxX + sideGap
+        let preferredLeftX = viewportRect.minX - sideGap - panelWidth
+        let hasRoomOnRight = preferredRightX + panelWidth <= screenFrame.maxX - edgePadding
+        let unclampedX = hasRoomOnRight ? preferredRightX : preferredLeftX
+        let x = min(
+            screenFrame.maxX - edgePadding - panelWidth,
+            max(screenFrame.minX + edgePadding, unclampedX)
+        )
+        let preferredTopAlignedY = viewportRect.maxY - panelHeight
+        let y = min(
+            screenFrame.maxY - topPadding - panelHeight,
+            max(screenFrame.minY + bottomPadding, preferredTopAlignedY)
+        )
         return CGRect(x: x, y: y, width: panelWidth, height: panelHeight)
     }
 
@@ -1759,8 +1409,35 @@ func rectFromOptions(_ options: CommandOptions) throws -> CGRect {
     return CGRect(x: x, y: y, width: width, height: height)
 }
 
+func resolvedFinishedSignalPath(from options: CommandOptions) -> String {
+    if let path = options.options["finished-file"], !path.isEmpty {
+        return path
+    }
+
+    let outputBase = options.options["output"] ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString).path
+    return "\(outputBase).finished"
+}
+
+func waitForFinishedSignal(at path: String) throws {
+    while !FileManager.default.fileExists(atPath: path) {
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+
+    let contents = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+    if contents.hasPrefix("error:") {
+        throw ActionHostError.captureFailed(String(contents.dropFirst("error:".count)).trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+}
+
 func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWriter, logger: DebugLogger) async throws {
+    let agentBridge = ActionAgentCommandBridge()
     switch command {
+    case .agent:
+        throw ActionHostError.unsupportedOS("agent should be started before command dispatch")
+    case .launcher:
+        throw ActionHostError.unsupportedOS("launcher should be started via runUICommand")
+    case .webkitSmoke:
+        throw ActionHostError.unsupportedOS("webkit-smoke should be started via runUICommand")
     case .status:
         try writer.write(snapshot(promptAccessibility: false, requestScreenRecordingPermission: false))
     case .request:
@@ -1792,6 +1469,31 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
 
         let bundleId = try options.required("bundle-id")
         let outputPath = try options.required("output")
+        let finishedSignalPath = resolvedFinishedSignalPath(from: options)
+        try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
+        var params: [String: String] = [
+            "bundleId": bundleId,
+            "output": outputPath,
+            "finishedFile": finishedSignalPath,
+        ]
+        if let debugLog = options.options["debug-log"] {
+            params["debugLog"] = debugLog
+        }
+        if let stopFile = options.options["stop-file"] {
+            params["stopFile"] = stopFile
+        }
+        let response = try await agentBridge.send(method: .recordAppWindow, params: params)
+        if !response.ok {
+            throw ActionHostError.captureFailed(response.error ?? "Failed to start app-window recording")
+        }
+        try waitForFinishedSignal(at: finishedSignalPath)
+    case .recordAppWindowLocal:
+        guard #available(macOS 15.0, *) else {
+            throw ActionHostError.unsupportedOS("Window recording requires macOS 15.0 or newer.")
+        }
+
+        let bundleId = try options.required("bundle-id")
+        let outputPath = try options.required("output")
         let recorder = WindowRecorder(writer: writer, logger: logger)
         try await recorder.recordAppWindow(
             bundleId: bundleId,
@@ -1800,6 +1502,36 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             finishedSignalPath: options.options["finished-file"]
         )
     case .recordRegion:
+        guard #available(macOS 15.0, *) else {
+            throw ActionHostError.unsupportedOS("Region recording requires macOS 15.0 or newer.")
+        }
+
+        let outputPath = try options.required("output")
+        let rect = try rectFromOptions(options)
+        let finishedSignalPath = resolvedFinishedSignalPath(from: options)
+        try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
+        var params: [String: String] = [
+            "output": outputPath,
+            "finishedFile": finishedSignalPath,
+            "x": String(describing: rect.origin.x),
+            "y": String(describing: rect.origin.y),
+            "width": String(describing: rect.size.width),
+            "height": String(describing: rect.size.height),
+            "fps": String(describing: options.double("fps", default: 15)),
+            "scale": String(describing: options.double("scale", default: 1)),
+        ]
+        if let debugLog = options.options["debug-log"] {
+            params["debugLog"] = debugLog
+        }
+        if let stopFile = options.options["stop-file"] {
+            params["stopFile"] = stopFile
+        }
+        let response = try await agentBridge.send(method: .recordRegion, params: params)
+        if !response.ok {
+            throw ActionHostError.captureFailed(response.error ?? "Failed to start region recording")
+        }
+        try waitForFinishedSignal(at: finishedSignalPath)
+    case .recordRegionLocal:
         guard #available(macOS 15.0, *) else {
             throw ActionHostError.unsupportedOS("Region recording requires macOS 15.0 or newer.")
         }
@@ -1815,6 +1547,8 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             fps: options.double("fps", default: 15),
             scale: options.double("scale", default: 1)
         )
+    case .recordingProbe:
+        throw ActionHostError.unsupportedOS("recording-probe must be started through the UI command path")
     case .screenshotAppWindow:
         guard #available(macOS 14.0, *) else {
             throw ActionHostError.unsupportedOS("Window screenshots require macOS 14.0 or newer.")
@@ -1822,18 +1556,63 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
 
         let bundleId = try options.required("bundle-id")
         let outputPath = try options.required("output")
-        try await captureAppWindowScreenshot(bundleId: bundleId, outputPath: outputPath, writer: writer)
+        let response = try await agentBridge.send(
+            method: .screenshotAppWindow,
+            params: [
+                "bundleId": bundleId,
+                "output": outputPath,
+            ]
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: response.result?["status"] ?? (response.ok ? "screenshot" : "error"),
+                outputPath: response.result?["outputPath"] ?? outputPath,
+                detail: response.error
+            )
+        )
     case .screenshotRegion:
         let outputPath = try options.required("output")
         let rect = try rectFromOptions(options)
-        try await captureRegionScreenshot(rect: rect, outputPath: outputPath, writer: writer)
+        let response = try await agentBridge.send(
+            method: .screenshotRegion,
+            params: [
+                "output": outputPath,
+                "x": String(describing: rect.origin.x),
+                "y": String(describing: rect.origin.y),
+                "width": String(describing: rect.size.width),
+                "height": String(describing: rect.size.height),
+            ]
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: response.result?["status"] ?? (response.ok ? "screenshot" : "error"),
+                outputPath: response.result?["outputPath"] ?? outputPath,
+                detail: response.error
+            )
+        )
     case .screenshotScreen:
         let outputPath = try options.required("output")
-        try await captureScreenScreenshot(outputPath: outputPath, writer: writer)
+        let response = try await agentBridge.send(
+            method: .screenshotScreen,
+            params: ["output": outputPath]
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: response.result?["status"] ?? (response.ok ? "screenshot" : "error"),
+                outputPath: response.result?["outputPath"] ?? outputPath,
+                detail: response.result?["detail"] ?? response.error
+            )
+        )
     case .activateApp:
         let bundleId = try options.required("bundle-id")
-        try activateApplication(bundleId: bundleId)
-        try writer.write(ActionHostResponse(status: "activated", outputPath: nil, detail: bundleId))
+        let response = try await agentBridge.send(method: .activateApp, params: ["bundleId": bundleId])
+        try writer.write(
+            ActionHostResponse(
+                status: response.ok ? "activated" : "error",
+                outputPath: nil,
+                detail: response.error ?? bundleId
+            )
+        )
     case .typeText:
         let text = try options.required("text")
         try postText(text)
@@ -1851,20 +1630,42 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
     case .setWindowFrame:
         let bundleId = try options.required("bundle-id")
         let rect = try rectFromOptions(options)
-        try setWindowFrame(bundleId: bundleId, rect: rect)
-        try writer.write(ActionHostResponse(status: "window-framed", outputPath: nil, detail: bundleId))
+        let params: [String: String] = [
+            "bundleId": bundleId,
+            "x": String(describing: rect.origin.x),
+            "y": String(describing: rect.origin.y),
+            "width": String(describing: rect.size.width),
+            "height": String(describing: rect.size.height),
+        ]
+        let response = try await agentBridge.send(method: .setWindowFrame, params: params)
+        try writer.write(
+            ActionHostResponse(
+                status: response.ok ? "window-framed" : "error",
+                outputPath: nil,
+                detail: response.error ?? bundleId
+            )
+        )
     case .getWindowFrame:
         let bundleId = try options.required("bundle-id")
-        let rect = try getWindowFrame(bundleId: bundleId)
+        let response = try await agentBridge.send(method: .getWindowFrame, params: ["bundleId": bundleId])
+        guard
+            let result = response.result,
+            let x = result["x"].flatMap(Double.init),
+            let y = result["y"].flatMap(Double.init),
+            let width = result["width"].flatMap(Double.init),
+            let height = result["height"].flatMap(Double.init)
+        else {
+            throw ActionHostError.accessibilityLookupFailed(response.error ?? "Agent did not return a window frame for \(bundleId)")
+        }
         try writer.write(
             WindowFrameResponse(
                 status: "window-frame",
                 bundleId: bundleId,
                 frame: OverlayBounds(
-                    x: rect.origin.x,
-                    y: rect.origin.y,
-                    width: rect.size.width,
-                    height: rect.size.height
+                    x: x,
+                    y: y,
+                    width: width,
+                    height: height
                 )
             )
         )
@@ -1873,26 +1674,111 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
 
 @main
 struct ActionHostMain {
-    static func main() async {
+    static func main() {
         let options = CommandOptions(arguments: CommandLine.arguments)
         let writer = ResponseWriter(replyFile: options.options["reply-file"])
         let logger = DebugLogger(path: options.options["debug-log"])
+        let command = options.command ?? .launcher
 
-        do {
-            try await run(command: options.command, options: options, writer: writer, logger: logger)
-        } catch {
-            logger.log("error: \(error.localizedDescription)")
-            if options.options["reply-file"] != nil {
-                try? writer.write(
-                    ActionHostResponse(
-                        status: "error",
-                        outputPath: options.options["output"],
-                        detail: error.localizedDescription
-                    )
-                )
+        if command == .agent {
+            MainActor.assumeIsolated {
+                ActionAgentRuntime.run(arguments: CommandLine.arguments)
             }
-            FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
-            exit(1)
+        }
+
+        if runUICommandIfNeeded(command: command, options: options) {
+            return
+        }
+
+        let terminationReason = "ActionHost command in progress"
+        ProcessInfo.processInfo.disableAutomaticTermination(terminationReason)
+        ProcessInfo.processInfo.disableSuddenTermination()
+
+        Task {
+            do {
+                defer {
+                    ProcessInfo.processInfo.enableSuddenTermination()
+                    ProcessInfo.processInfo.enableAutomaticTermination(terminationReason)
+                }
+                try await run(command: command, options: options, writer: writer, logger: logger)
+                Darwin.exit(0)
+            } catch {
+                defer {
+                    ProcessInfo.processInfo.enableSuddenTermination()
+                    ProcessInfo.processInfo.enableAutomaticTermination(terminationReason)
+                }
+                logger.log("error: \(error.localizedDescription)")
+                if options.options["reply-file"] != nil {
+                    try? writer.write(
+                        ActionHostResponse(
+                            status: "error",
+                            outputPath: options.options["output"],
+                            detail: error.localizedDescription
+                        )
+                    )
+                }
+                FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                Darwin.exit(1)
+            }
+        }
+
+        dispatchMain()
+    }
+
+    private static func runUICommandIfNeeded(command: ActionHostCommand, options: CommandOptions) -> Bool {
+        switch command {
+        case .launcher:
+            MainActor.assumeIsolated {
+                ActionLauncherController.shared.run()
+            }
+            return true
+        case .webkitSmoke:
+            let urlString = options.options["url"] ?? "https://www.apple.com"
+            guard let url = URL(string: urlString) else {
+                FileHandle.standardError.write(Data("ActionHost failed: missing or invalid --url\n".utf8))
+                Darwin.exit(1)
+            }
+            MainActor.assumeIsolated {
+                let runner = WebKitSmokeAppRunner(url: url)
+                runner.run()
+            }
+            return true
+        case .recordingProbe:
+            guard #available(macOS 15.0, *) else {
+                FileHandle.standardError.write(Data("ActionHost failed: recording-probe requires macOS 15.0 or newer.\n".utf8))
+                Darwin.exit(1)
+            }
+            let writer = ResponseWriter(replyFile: options.options["reply-file"])
+            let logger = DebugLogger(path: options.options["debug-log"])
+            let target: RecordingProbeAppRunner.Target
+            if let bundleId = options.options["bundle-id"], !bundleId.isEmpty {
+                target = .appWindow(bundleId)
+            } else {
+                let rect: CGRect
+                do {
+                    rect = try rectFromOptions(options)
+                } catch {
+                    FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                    Darwin.exit(1)
+                }
+                target = .region(rect)
+            }
+            let outputPath = options.options["output"] ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("recording-probe-\(UUID().uuidString).mov").path
+            let config = RecordingProbeAppRunner.Configuration(
+                target: target,
+                outputPath: outputPath,
+                stopSignalPath: options.options["stop-file"],
+                finishedSignalPath: options.options["finished-file"],
+                fps: options.double("fps", default: 15),
+                scale: options.double("scale", default: 1)
+            )
+            MainActor.assumeIsolated {
+                let runner = RecordingProbeAppRunner(configuration: config, writer: writer, debugLogger: logger)
+                runner.run()
+            }
+            return true
+        default:
+            return false
         }
     }
 }

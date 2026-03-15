@@ -44,6 +44,15 @@ Swift-based macOS engine responsible for:
 
 The engine should be treated as a capability provider, not the place where product workflows live.
 
+The native layer should be split into separate processes:
+
+- `Action.app`: normal AppKit lifecycle, WebKit, menus, settings, permissions UX
+- `ActionAgent`: headless local service exposing WebSocket and local IPC surfaces
+- `ActionCLI`: thin operational client that talks to the agent, not directly to UI
+
+This separation is not optional. UI lifecycle and agent lifecycle have different
+constraints, and combining them leads to brittle behavior.
+
 ### 2. Runtime
 
 The runtime is the heart of the system. It owns:
