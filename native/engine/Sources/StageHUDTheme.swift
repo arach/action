@@ -20,6 +20,10 @@ enum StageHUDTheme {
         light: NSColor(calibratedRed: 0.95, green: 0.95, blue: 0.93, alpha: 1),
         dark: NSColor(calibratedWhite: 0.07, alpha: 1)
     )
+    static let footerBackground = dynamic(
+        light: NSColor(calibratedWhite: 0.985, alpha: 1),
+        dark: NSColor(calibratedWhite: 0.075, alpha: 1)
+    )
     static let panelBackgroundTop = dynamic(
         light: NSColor.white,
         dark: NSColor(calibratedWhite: 0.07, alpha: 1)

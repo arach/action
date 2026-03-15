@@ -41,36 +41,40 @@ struct ActionLauncherRootView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            VStack(spacing: 0) {
-                sidebarHeader
+        VStack(spacing: 0) {
+            NavigationSplitView {
+                VStack(spacing: 0) {
+                    sidebarHeader
 
-                List(selection: $selectedSection) {
-                    Section(sidebarIconsOnly ? "" : "Workspace") {
-                        ForEach([LauncherSection.review, .library, .console], id: \.self) { section in
-                            sidebarRow(for: section)
-                                .tag(Optional(section))
+                    List(selection: $selectedSection) {
+                        Section(sidebarIconsOnly ? "" : "Workspace") {
+                            ForEach([LauncherSection.review, .library, .console], id: \.self) { section in
+                                sidebarRow(for: section)
+                                    .tag(Optional(section))
+                            }
                         }
                     }
-                }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
                 .background(StageHUDTheme.railBackground)
+                    .listStyle(.sidebar)
+                    .scrollContentBackground(.hidden)
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
 
-                settingsRow
-                    .padding(.horizontal, sidebarIconsOnly ? 4 : 8)
-                    .padding(.bottom, 8)
+                    settingsRow
+                        .padding(.horizontal, sidebarIconsOnly ? 4 : 8)
+                        .padding(.bottom, 8)
+                }
+                .background(StageHUDTheme.railBackground)
+                .navigationSplitViewColumnWidth(min: sidebarWidth.min, ideal: sidebarWidth.ideal, max: sidebarWidth.max)
+            } detail: {
+                mainPane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(StageHUDTheme.appBackground)
             }
-            .background(StageHUDTheme.railBackground)
-            .navigationSplitViewColumnWidth(min: sidebarWidth.min, ideal: sidebarWidth.ideal, max: sidebarWidth.max)
-        } detail: {
-            mainPane
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(StageHUDTheme.appBackground)
+            .navigationSplitViewStyle(.balanced)
+
+            footerBar
         }
-        .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 1180, minHeight: 760)
         .background(StageHUDTheme.appBackground)
     }
@@ -143,6 +147,48 @@ struct ActionLauncherRootView: View {
         .scrollIndicators(.hidden)
     }
 
+    private var footerBar: some View {
+        HStack(spacing: 16) {
+            footerSlot(
+                icon: model.consoleIsReachable ? "dot.radiowaves.left.and.right" : "bolt.slash",
+                label: "Console",
+                value: footerConsoleValue
+            )
+
+            footerDivider
+
+            footerSlot(
+                icon: "brain",
+                label: "Agent",
+                value: model.agentStatus
+            )
+
+            footerDivider
+
+            footerSlot(
+                icon: "hand.raised",
+                label: "Permissions",
+                value: permissionSummary
+            )
+
+            Spacer()
+
+            footerSlot(
+                icon: "rectangle.stack",
+                label: "View",
+                value: selectedSection?.rawValue ?? LauncherSection.review.rawValue
+            )
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 32)
+        .background(StageHUDTheme.footerBackground)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(StageHUDTheme.cardBorder)
+                .frame(height: 1)
+        }
+    }
+
     private var appHeader: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
@@ -213,6 +259,17 @@ struct ActionLauncherRootView: View {
         }
         .buttonStyle(.plain)
         .help(sidebarIconsOnly ? LauncherSection.settings.rawValue : "")
+    }
+
+    private var footerConsoleValue: String {
+        if model.consoleAutoEnsureEnabled {
+            return model.consoleIsReachable ? "Watchdog online" : "Bootstrapping"
+        }
+        return model.consoleIsReachable ? "Manual online" : "Paused"
+    }
+
+    private var permissionSummary: String {
+        "\(shortPermission(model.accessibilityStatus)) / \(shortPermission(model.screenRecordingStatus))"
     }
 
     private var reviewSection: some View {
@@ -419,6 +476,43 @@ struct ActionLauncherRootView: View {
             return "terminal"
         case .settings:
             return "slider.horizontal.3"
+        }
+    }
+
+    private var footerDivider: some View {
+        Rectangle()
+            .fill(StageHUDTheme.cardBorder)
+            .frame(width: 1, height: 14)
+    }
+
+    private func footerSlot(icon: String, label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(StageHUDTheme.textMuted)
+                .frame(width: 12)
+
+            Text(label)
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .foregroundStyle(StageHUDTheme.textMuted)
+
+            Text(value)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(StageHUDTheme.textPrimary)
+                .lineLimit(1)
+        }
+    }
+
+    private func shortPermission(_ status: String) -> String {
+        switch status.lowercased() {
+        case "granted":
+            return "Ready"
+        case "denied":
+            return "Denied"
+        case "unknown":
+            return "Unknown"
+        default:
+            return status
         }
     }
 
