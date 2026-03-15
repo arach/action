@@ -141,6 +141,11 @@ struct ActionLauncherRootView: View {
                         .font(.system(size: 14, weight: .regular, design: .default))
                         .foregroundStyle(StageHUDTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    Text("Feedback saved here is intended for your agent, not another human editor.")
+                        .font(.system(size: 14, weight: .regular, design: .default))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 utilityCard(title: "Latest Session") {
@@ -162,18 +167,18 @@ struct ActionLauncherRootView: View {
                                     .foregroundStyle(StageHUDTheme.textMuted)
                             }
 
-                            Text("Next step: attach agent-readable feedback directly to this playback timeline or marked regions.")
+                            Text("Review the capture inline, then leave machine-readable feedback anchored to time ranges or marked regions for your agent.")
                                 .font(.system(size: 12, weight: .regular, design: .default))
                                 .foregroundStyle(StageHUDTheme.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
 
-                            ActionSessionPreviewView(videoURL: latest.videoURL)
-                                .frame(minHeight: 280, maxHeight: 320)
+                            ActionSessionPreviewView(session: latest, model: model)
 
                             HStack(spacing: 10) {
                                 launcherButton("Replay", action: { model.replaySession(latest) })
                                 launcherButton("Reveal", action: { model.revealSession(latest) })
                                 launcherButton("Trace", action: { model.openSessionTrace(latest) })
+                                launcherButton("Feedback", action: { model.openSessionFeedback(latest) })
                                 launcherButton("Screenshot", action: { model.openSessionScreenshot(latest) })
                             }
                         }
@@ -297,6 +302,11 @@ struct ActionLauncherRootView: View {
                     Text("Result \(session.actualResult)")
                         .font(.system(size: 12, weight: .regular, design: .default))
                         .foregroundStyle(StageHUDTheme.textSecondary)
+                    if session.feedbackCount > 0 {
+                        Text("\(session.feedbackCount) feedback")
+                            .font(.system(size: 10, weight: .regular, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                    }
                 }
                 Spacer()
                 Text(sessionTimestamp(session))
@@ -305,12 +315,13 @@ struct ActionLauncherRootView: View {
             }
 
             HStack(spacing: 8) {
+                compactSessionButton("Select") { model.selectSession(session) }
                 compactSessionButton("Replay") { model.replaySession(session) }
                 compactSessionButton("Reveal") { model.revealSession(session) }
             }
         }
-        .contentShape(Rectangle())
         .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(model.selectedSession?.id == session.id ? Color.white.opacity(0.08) : Color.white.opacity(0.03))
@@ -319,9 +330,6 @@ struct ActionLauncherRootView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(model.selectedSession?.id == session.id ? Color.white.opacity(0.16) : Color.white.opacity(0.06), lineWidth: 1)
         )
-        .onTapGesture {
-            model.selectSession(session)
-        }
     }
 
     private func sessionDetailRow(_ session: ActionSessionSummary) -> some View {
@@ -334,6 +342,11 @@ struct ActionLauncherRootView: View {
                     Text("Expected \(session.expectedResult) • Actual \(session.actualResult)")
                         .font(.system(size: 12, weight: .regular, design: .default))
                         .foregroundStyle(StageHUDTheme.textSecondary)
+                    if session.feedbackCount > 0 {
+                        Text("\(session.feedbackCount) feedback item\(session.feedbackCount == 1 ? "" : "s")")
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                    }
                 }
                 Spacer()
                 Text(sessionTimestamp(session))
@@ -346,6 +359,7 @@ struct ActionLauncherRootView: View {
                 launcherButton("Replay", action: { model.replaySession(session) })
                 launcherButton("Reveal", action: { model.revealSession(session) })
                 launcherButton("Trace", action: { model.openSessionTrace(session) })
+                launcherButton("Feedback", action: { model.openSessionFeedback(session) })
                 launcherButton("Screenshot", action: { model.openSessionScreenshot(session) })
             }
         }

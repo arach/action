@@ -9,6 +9,7 @@ struct ActionSessionSummary: Identifiable {
     let artifactDirectoryURL: URL
     let videoURL: URL
     let traceURL: URL
+    let feedbackURL: URL
     let stageScreenshotURL: URL?
     let resultScreenshotURL: URL?
     let expression: String
@@ -16,6 +17,7 @@ struct ActionSessionSummary: Identifiable {
     let actualResult: String
     let startedAt: Date?
     let finishedAt: Date?
+    let feedbackCount: Int
 }
 
 private struct ActionSessionTrace: Decodable {
@@ -179,6 +181,13 @@ final class ActionLauncherViewModel: ObservableObject {
         NSWorkspace.shared.open(session.traceURL)
     }
 
+    func openSessionFeedback(_ session: ActionSessionSummary) {
+        guard FileManager.default.fileExists(atPath: session.feedbackURL.path) else {
+            return
+        }
+        NSWorkspace.shared.open(session.feedbackURL)
+    }
+
     func openSessionScreenshot(_ session: ActionSessionSummary) {
         if let resultScreenshotURL = session.resultScreenshotURL {
             NSWorkspace.shared.open(resultScreenshotURL)
@@ -288,6 +297,23 @@ final class ActionLauncherViewModel: ObservableObject {
             .appendingPathComponent("Library/Application Support/Action/sessions", isDirectory: true)
     }
 
+    func loadFeedback(for session: ActionSessionSummary) -> ActionSessionFeedbackDocument {
+        let feedbackURL = session.feedbackURL
+        guard let data = try? Data(contentsOf: feedbackURL),
+              let document = try? JSONDecoder().decode(ActionSessionFeedbackDocument.self, from: data) else {
+            return .empty(for: session.sessionId)
+        }
+        return document
+    }
+
+    func saveFeedback(_ document: ActionSessionFeedbackDocument, for session: ActionSessionSummary) throws {
+        var updatedDocument = document
+        updatedDocument.updatedAt = ISO8601DateFormatter().string(from: Date())
+        let data = try JSONEncoder.pretty.encode(updatedDocument)
+        try data.write(to: session.feedbackURL, options: .atomic)
+        refreshSessions()
+    }
+
     private func loadRecentSessions(limit: Int = 8) -> [ActionSessionSummary] {
         let sessionsURL = sessionsDirectoryURL()
         let isoFormatter = ISO8601DateFormatter()
@@ -308,6 +334,7 @@ final class ActionLauncherViewModel: ObservableObject {
 
         return sortedURLs.prefix(limit).compactMap { sessionURL in
             let traceURL = sessionURL.appendingPathComponent("trace.json")
+            let feedbackURL = sessionURL.appendingPathComponent("feedback.json")
             guard let data = try? Data(contentsOf: traceURL),
                   let trace = try? JSONDecoder().decode(ActionSessionTrace.self, from: data) else {
                 return nil
@@ -316,6 +343,8 @@ final class ActionLauncherViewModel: ObservableObject {
             let screenshots = trace.screenshots.map(URL.init(fileURLWithPath:))
             let stageScreenshotURL = screenshots.first(where: { $0.lastPathComponent == "stage.png" }) ?? screenshots.first
             let resultScreenshotURL = screenshots.first(where: { $0.lastPathComponent == "result.png" })
+            let feedbackCount = ((try? Data(contentsOf: feedbackURL))
+                .flatMap { try? JSONDecoder().decode(ActionSessionFeedbackDocument.self, from: $0) })?.items.count ?? 0
 
             return ActionSessionSummary(
                 id: trace.sessionId,
@@ -323,13 +352,15 @@ final class ActionLauncherViewModel: ObservableObject {
                 artifactDirectoryURL: sessionURL,
                 videoURL: URL(fileURLWithPath: trace.videoPath),
                 traceURL: traceURL,
+                feedbackURL: feedbackURL,
                 stageScreenshotURL: stageScreenshotURL,
                 resultScreenshotURL: resultScreenshotURL,
                 expression: trace.expression,
                 expectedResult: trace.expectedResult,
                 actualResult: trace.actualResult,
                 startedAt: isoFormatter.date(from: trace.startedAt),
-                finishedAt: isoFormatter.date(from: trace.finishedAt)
+                finishedAt: isoFormatter.date(from: trace.finishedAt),
+                feedbackCount: feedbackCount
             )
         }
     }
@@ -382,5 +413,13 @@ final class ActionLauncherViewModel: ObservableObject {
             code: 3,
             userInfo: [NSLocalizedDescriptionKey: "Guided demo did not write a reply file"]
         )
+    }
+}
+
+private extension JSONEncoder {
+    static var pretty: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
     }
 }
