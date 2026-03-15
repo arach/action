@@ -282,22 +282,75 @@ struct ActionLauncherRootView: View {
     }
 
     private var consoleSection: some View {
-        surfaceCard(title: "Console") {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(model.consoleURL.absoluteString)
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textPrimary)
-                    .textSelection(.enabled)
+        VStack(alignment: .leading, spacing: 18) {
+            surfaceCard(title: "Runtime") {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(model.consoleIsReachable ? Color.green : Color.gray.opacity(0.6))
+                                    .frame(width: 8, height: 8)
+                                Text(model.consoleStatus)
+                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(StageHUDTheme.textPrimary)
+                            }
 
-                Text(model.consoleStatus)
-                    .font(.system(size: 12, weight: .regular, design: .default))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
+                            Text(model.consoleDetail)
+                                .font(.system(size: 12, weight: .regular, design: .default))
+                                .foregroundStyle(StageHUDTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
 
-                HStack(spacing: 10) {
-                    launcherButton("Load Local Console", tone: .primary, action: model.showLocalConsole)
-                    launcherButton("Reload", action: model.reloadConsole)
-                    launcherButton("Browser", action: model.openWebConsoleInBrowser)
-                    launcherButton("Embedded", action: model.openEmbeddedConsole)
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 8) {
+                            metric(label: "Reachable", value: model.consoleIsReachable ? "Yes" : "No")
+                            metric(label: "Managed", value: model.consoleIsManagedByAction ? "Action" : "External")
+                        }
+                    }
+
+                    Text(model.consoleURL.absoluteString)
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                        .textSelection(.enabled)
+
+                    HStack(spacing: 10) {
+                        launcherButton("Start", tone: .primary, action: model.startLocalConsole)
+                        launcherButton("Stop", action: model.stopLocalConsole)
+                        launcherButton("Restart", action: model.restartLocalConsole)
+                        launcherButton("Refresh", action: model.refreshConsoleState)
+                    }
+                }
+            }
+
+            surfaceCard(title: "Open") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Use the embedded window for the normal loop, or open supporting artifacts directly when the console misbehaves.")
+                        .font(.system(size: 12, weight: .regular, design: .default))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 10) {
+                        launcherButton("Embedded", tone: .primary, action: model.openEmbeddedConsole)
+                        launcherButton("Browser", action: model.openWebConsoleInBrowser)
+                        launcherButton("Reload", action: model.reloadConsole)
+                        launcherButton("Inspector", action: model.showWebInspector)
+                    }
+                }
+            }
+
+            surfaceCard(title: "Recovery") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("If you need to debug outside the embedded view, copy the launch command or inspect the captured log.")
+                        .font(.system(size: 12, weight: .regular, design: .default))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 10) {
+                        launcherButton("Copy Launch Command", action: model.copyLocalConsoleCommand)
+                        launcherButton("Open Log", action: model.openConsoleLog)
+                    }
                 }
             }
         }

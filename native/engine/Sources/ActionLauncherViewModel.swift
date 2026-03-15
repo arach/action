@@ -69,6 +69,7 @@ final class ActionLauncherViewModel: ObservableObject {
     private let agentClient = ActionAgentClient()
     private var browserWindowController: ActionBrowserWindowController?
     private var localConsoleProcess: Process?
+    private var consoleReachabilityTask: Task<Void, Never>?
 
     @Published var agentStatus: String = "Offline"
     @Published var accessibilityStatus: String = "Unknown"
@@ -76,6 +77,9 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var notes: [String] = []
     @Published var consoleURL: URL
     @Published var consoleStatus: String = "Local console ready"
+    @Published var consoleDetail: String = "Use the local HUD console without leaving Action."
+    @Published var consoleIsReachable: Bool = false
+    @Published var consoleIsManagedByAction: Bool = false
     @Published var guidedDemoStatus: String = "Ready"
     @Published var recentSessions: [ActionSessionSummary] = []
     @Published var isRunningGuidedDemo: Bool = false
@@ -86,6 +90,7 @@ final class ActionLauncherViewModel: ObservableObject {
         self.consoleURL = localConsoleURL
         self.appearanceMode = ActionAppearanceStore.shared.mode
         refreshSessions()
+        refreshConsoleState()
     }
 
     func refreshPermissions() {
@@ -122,6 +127,12 @@ final class ActionLauncherViewModel: ObservableObject {
     }
 
     func startLocalConsole() {
+        if consoleIsReachable && localConsoleProcess == nil {
+            consoleStatus = "Local console already running"
+            consoleDetail = localConsoleURL.absoluteString
+            return
+        }
+
         if let localConsoleProcess, localConsoleProcess.isRunning {
             consoleStatus = "Local console already running on \(localConsoleURL.absoluteString)"
             return
@@ -131,25 +142,92 @@ final class ActionLauncherViewModel: ObservableObject {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["bun", "run", "hud"]
         process.currentDirectoryURL = repositoryRootURL()
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        let logURL = consoleLogURL()
+        FileManager.default.createFile(atPath: logURL.path, contents: Data())
+        let logHandle = try? FileHandle(forWritingTo: logURL)
+        process.standardOutput = logHandle
+        process.standardError = logHandle
         process.terminationHandler = { [weak self] proc in
             Task { @MainActor in
                 guard let self else { return }
                 self.localConsoleProcess = nil
+                self.consoleIsManagedByAction = false
                 self.consoleStatus = "Local console exited (\(proc.terminationStatus))"
+                self.consoleDetail = "Inspect logs if it exited unexpectedly."
+                self.refreshConsoleState()
             }
         }
 
         do {
             try process.run()
             localConsoleProcess = process
-            consoleStatus = "Starting local console on \(localConsoleURL.absoluteString)…"
+            consoleIsManagedByAction = true
+            consoleStatus = "Starting local console…"
+            consoleDetail = "Launching `bun run hud` and waiting for \(localConsoleURL.absoluteString)"
             logger.notice("Started local console process (pid=\(process.processIdentifier, privacy: .public))")
+            scheduleConsoleProbeBurst()
         } catch {
             consoleStatus = "Failed to start local console: \(error.localizedDescription)"
+            consoleDetail = "Could not spawn the local HUD process."
             logger.error("Failed to start local console: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    func stopLocalConsole() {
+        guard let localConsoleProcess, localConsoleProcess.isRunning else {
+            if consoleIsReachable {
+                consoleStatus = "Console is reachable, but not owned by this Action window"
+                consoleDetail = "Stop it from the process that launched it, or restart it here."
+            } else {
+                consoleStatus = "Local console is not running"
+                consoleDetail = "Start it here when you want the embedded console available."
+            }
+            return
+        }
+
+        localConsoleProcess.terminate()
+        self.localConsoleProcess = nil
+        consoleIsManagedByAction = false
+        consoleStatus = "Stopping local console…"
+        consoleDetail = "Waiting for the local HUD process to exit."
+        scheduleConsoleProbeBurst()
+    }
+
+    func restartLocalConsole() {
+        if let localConsoleProcess, localConsoleProcess.isRunning {
+            localConsoleProcess.terminate()
+            self.localConsoleProcess = nil
+        }
+        consoleIsManagedByAction = false
+        consoleStatus = "Restarting local console…"
+        consoleDetail = "Re-launching `bun run hud`."
+        startLocalConsole()
+    }
+
+    func refreshConsoleState() {
+        consoleReachabilityTask?.cancel()
+        consoleReachabilityTask = Task { @MainActor in
+            await self.updateConsoleReachability()
+        }
+    }
+
+    func copyLocalConsoleCommand() {
+        let command = "cd \(repositoryRootURL().path.quotedForShell()) && bun run hud"
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(command, forType: .string)
+        consoleStatus = "Copied console launch command"
+        consoleDetail = command
+    }
+
+    func openConsoleLog() {
+        let logURL = consoleLogURL()
+        guard FileManager.default.fileExists(atPath: logURL.path) else {
+            consoleStatus = "No console log yet"
+            consoleDetail = "Start the console from Action to generate a log."
+            return
+        }
+        NSWorkspace.shared.open(logURL)
     }
 
     func showDemoSite() {
@@ -164,6 +242,7 @@ final class ActionLauncherViewModel: ObservableObject {
 
     func reloadConsole() {
         browserController().reload()
+        refreshConsoleState()
     }
 
     func setConsoleStatus(_ status: String) {
@@ -173,6 +252,7 @@ final class ActionLauncherViewModel: ObservableObject {
     func openBrowserWindow() {
         logger.notice("openBrowserWindow called with URL: \(self.consoleURL.absoluteString, privacy: .public)")
         browserController().show(url: self.consoleURL)
+        refreshConsoleState()
     }
 
     func showWebInspector() {
@@ -275,6 +355,7 @@ final class ActionLauncherViewModel: ObservableObject {
         if let localConsoleProcess, localConsoleProcess.isRunning {
             localConsoleProcess.terminate()
             self.localConsoleProcess = nil
+            consoleIsManagedByAction = false
         }
     }
 
@@ -324,6 +405,68 @@ final class ActionLauncherViewModel: ObservableObject {
         }
 
         return FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    private func consoleLogURL() -> URL {
+        let directory = sessionsDirectoryURL().deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("console.log")
+    }
+
+    private func scheduleConsoleProbeBurst() {
+        consoleReachabilityTask?.cancel()
+        consoleReachabilityTask = Task { @MainActor in
+            for index in 0..<8 {
+                await updateConsoleReachability()
+                if Task.isCancelled {
+                    return
+                }
+                if consoleIsReachable && index >= 1 {
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+        }
+    }
+
+    private func updateConsoleReachability() async {
+        let reachable = await probeConsoleReachability()
+        consoleIsReachable = reachable
+
+        if reachable {
+            if let localConsoleProcess, localConsoleProcess.isRunning {
+                consoleStatus = "Local console running"
+                consoleDetail = "Managed by Action at \(localConsoleURL.absoluteString)"
+                consoleIsManagedByAction = true
+            } else {
+                consoleStatus = "Local console reachable"
+                consoleDetail = "Another process is already serving \(localConsoleURL.absoluteString)"
+            }
+        } else if let localConsoleProcess, localConsoleProcess.isRunning {
+            consoleStatus = "Waiting for local console…"
+            consoleDetail = "The process is running, but the web surface has not responded yet."
+            consoleIsManagedByAction = true
+        } else {
+            consoleStatus = "Local console offline"
+            consoleDetail = "Start it here, then open it embedded or in your browser."
+            consoleIsManagedByAction = false
+        }
+    }
+
+    private func probeConsoleReachability() async -> Bool {
+        var request = URLRequest(url: localConsoleURL)
+        request.timeoutInterval = 1.0
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse {
+                return (200..<500).contains(httpResponse.statusCode)
+            }
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func refreshAgentStatus() async {
@@ -514,5 +657,11 @@ private extension JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
+    }
+}
+
+private extension String {
+    func quotedForShell() -> String {
+        "'" + self.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
