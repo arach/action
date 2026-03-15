@@ -2,7 +2,16 @@ import AppKit
 import SwiftUI
 
 struct ActionLauncherRootView: View {
+    private enum LauncherSection: String, CaseIterable, Identifiable {
+        case review = "Review"
+        case library = "Library"
+        case console = "Console"
+
+        var id: String { rawValue }
+    }
+
     @ObservedObject var model: ActionLauncherViewModel
+    @State private var selectedSection: LauncherSection = .review
     private let sessionDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
@@ -30,6 +39,7 @@ struct ActionLauncherRootView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 brandHeader
+                navigationBlock
 
                 utilityCard(title: "Primary Run") {
                     VStack(alignment: .leading, spacing: 10) {
@@ -133,49 +143,56 @@ struct ActionLauncherRootView: View {
     private var browserSummaryPane: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                reviewHero
+                appHeader
 
-                if let latest = model.selectedSession {
-                    reviewHeroSurface(for: latest)
-                    ActionSessionPreviewView(session: latest, model: model)
-                } else {
-                    utilityCard(title: "Active Review") {
-                        Text("Run the guided calculator capture to seed the review loop.")
-                            .font(.system(size: 12, weight: .regular, design: .default))
-                            .foregroundStyle(StageHUDTheme.textSecondary)
-                    }
-                }
+                switch selectedSection {
+                case .review:
+                    reviewHero
 
-                utilityCard(title: "Session Library") {
-                    if model.recentSessions.isEmpty {
-                        Text("Generated runs will appear here with replay and artifact actions.")
-                            .font(.system(size: 12, weight: .regular, design: .default))
-                            .foregroundStyle(StageHUDTheme.textSecondary)
+                    if let latest = model.selectedSession {
+                        reviewHeroSurface(for: latest)
+                        ActionSessionPreviewView(session: latest, model: model)
                     } else {
-                        VStack(alignment: .leading, spacing: 14) {
-                            ForEach(model.recentSessions) { session in
-                                sessionDetailRow(session)
+                        utilityCard(title: "Active Review") {
+                            Text("Run the guided calculator capture to seed the review loop.")
+                                .font(.system(size: 12, weight: .regular, design: .default))
+                                .foregroundStyle(StageHUDTheme.textSecondary)
+                        }
+                    }
+
+                case .library:
+                    utilityCard(title: "Session Library") {
+                        if model.recentSessions.isEmpty {
+                            Text("Generated runs will appear here with replay and artifact actions.")
+                                .font(.system(size: 12, weight: .regular, design: .default))
+                                .foregroundStyle(StageHUDTheme.textSecondary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 14) {
+                                ForEach(model.recentSessions) { session in
+                                    sessionDetailRow(session)
+                                }
                             }
                         }
                     }
-                }
 
-                utilityCard(title: "Console Surface") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(model.consoleURL.absoluteString)
-                            .font(.system(size: 12, weight: .regular, design: .monospaced))
-                            .foregroundStyle(StageHUDTheme.textPrimary)
-                            .textSelection(.enabled)
+                case .console:
+                    utilityCard(title: "Console Surface") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(model.consoleURL.absoluteString)
+                                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                .foregroundStyle(StageHUDTheme.textPrimary)
+                                .textSelection(.enabled)
 
-                        Text(model.consoleStatus)
-                            .font(.system(size: 12, weight: .regular, design: .default))
-                            .foregroundStyle(StageHUDTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            Text(model.consoleStatus)
+                                .font(.system(size: 12, weight: .regular, design: .default))
+                                .foregroundStyle(StageHUDTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
 
-                        HStack(spacing: 10) {
-                            launcherButton("Load Local Console", action: model.showLocalConsole)
-                            launcherButton("Reload", action: model.reloadConsole)
-                            launcherButton("Browser", action: model.openWebConsoleInBrowser)
+                            HStack(spacing: 10) {
+                                launcherButton("Load Local Console", tone: .primary, action: model.showLocalConsole)
+                                launcherButton("Reload", action: model.reloadConsole)
+                                launcherButton("Browser", action: model.openWebConsoleInBrowser)
+                            }
                         }
                     }
                 }
@@ -210,10 +227,85 @@ struct ActionLauncherRootView: View {
                 .font(.system(size: 40, weight: .bold, design: .monospaced))
                 .foregroundStyle(StageHUDTheme.textPrimary)
 
-            Text("Validate captures, inspect playback quality, and leave machine-readable feedback without breaking concentration.")
+            Text("Validate captures and leave machine-readable feedback.")
                 .font(.system(size: 15, weight: .regular, design: .default))
                 .foregroundStyle(StageHUDTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var navigationBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Navigation")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(StageHUDTheme.textMuted)
+
+            VStack(spacing: 6) {
+                ForEach(LauncherSection.allCases) { section in
+                    Button {
+                        selectedSection = section
+                    } label: {
+                        HStack {
+                            Text(section.rawValue)
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            Spacer()
+                            if selectedSection == section {
+                                Text("Open")
+                                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                            }
+                        }
+                        .foregroundStyle(selectedSection == section ? StageHUDTheme.textPrimary : StageHUDTheme.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(selectedSection == section ? StageHUDTheme.buttonSecondaryHover : Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(selectedSection == section ? StageHUDTheme.panelBorder : Color.clear, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var appHeader: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(selectedSection.rawValue)
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .foregroundStyle(StageHUDTheme.textPrimary)
+                Text(headerSubtitle)
+                    .font(.system(size: 12, weight: .regular, design: .default))
+                    .foregroundStyle(StageHUDTheme.textMuted)
+            }
+            Spacer()
+            HStack(spacing: 10) {
+                ForEach(LauncherSection.allCases) { section in
+                    Button {
+                        selectedSection = section
+                    } label: {
+                        Text(section.rawValue)
+                    }
+                    .buttonStyle(StageHUDButtonStyle(tone: selectedSection == section ? .primary : .secondary))
+                    .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    private var headerSubtitle: String {
+        switch selectedSection {
+        case .review:
+            return "Playback and feedback"
+        case .library:
+            return "Recorded sessions"
+        case .console:
+            return "Local web surface"
         }
     }
 
