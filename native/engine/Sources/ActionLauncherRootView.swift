@@ -95,7 +95,10 @@ struct ActionLauncherRootView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Expand Sidebar")
-                .frame(maxWidth: .infinity)
+                .frame(width: 28, height: 28)
+
+                ActionWindowDragHandle()
+                    .frame(maxWidth: .infinity, minHeight: 28)
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Action")
@@ -106,7 +109,8 @@ struct ActionLauncherRootView: View {
                         .foregroundStyle(StageHUDTheme.textMuted)
                 }
 
-                Spacer()
+                ActionWindowDragHandle()
+                    .frame(maxWidth: .infinity, minHeight: 28)
 
                 Button {
                     withAnimation(.easeInOut(duration: 0.16)) {
@@ -128,24 +132,31 @@ struct ActionLauncherRootView: View {
     }
 
     private var mainPane: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                appHeader
+        VStack(spacing: 0) {
+            appHeader
+                .padding(.horizontal, 30)
+                .padding(.top, 18)
+                .padding(.bottom, 20)
 
-                switch selectedSection ?? .review {
-                case .review:
-                    reviewSection
-                case .library:
-                    librarySection
-                case .console:
-                    consoleSection
-                case .settings:
-                    settingsSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    switch selectedSection ?? .review {
+                    case .review:
+                        reviewSection
+                    case .library:
+                        librarySection
+                    case .console:
+                        consoleSection
+                    case .settings:
+                        settingsSection
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 30)
+                .padding(.bottom, 30)
             }
-            .padding(30)
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
     }
 
     private var footerBar: some View {
@@ -204,7 +215,8 @@ struct ActionLauncherRootView: View {
                     .foregroundStyle(StageHUDTheme.textMuted)
             }
 
-            Spacer()
+            ActionWindowDragHandle()
+                .frame(maxWidth: .infinity, minHeight: 30)
 
             headerActions
         }
@@ -566,29 +578,34 @@ struct ActionLauncherRootView: View {
     }
 
     private func sessionRow(_ session: ActionSessionSummary) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(session.expression)
-                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(StageHUDTheme.textPrimary)
-                    Text("Expected \(session.expectedResult)  Actual \(session.actualResult)")
-                        .font(.system(size: 12, weight: .regular, design: .default))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                }
-                Spacer()
-                Text(sessionTimestamp(session))
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-            }
+        HStack(alignment: .top, spacing: 16) {
+            ActionSessionThumbnailView(session: session)
 
-            HStack(spacing: 10) {
-                launcherButton("Select", tone: .primary, action: { model.selectSession(session) })
-                launcherButton("Replay", action: { model.replaySession(session) })
-                launcherButton("Reveal", action: { model.revealSession(session) })
-                launcherButton("Trace", action: { model.openSessionTrace(session) })
-                launcherButton("Feedback", action: { model.openSessionFeedback(session) })
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(session.expression)
+                            .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textPrimary)
+                        Text("Expected \(session.expectedResult)  Actual \(session.actualResult)")
+                            .font(.system(size: 12, weight: .regular, design: .default))
+                            .foregroundStyle(StageHUDTheme.textSecondary)
+                    }
+                    Spacer()
+                    Text(sessionTimestamp(session))
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                }
+
+                HStack(spacing: 10) {
+                    launcherButton("Select", tone: .primary, action: { model.selectSession(session) })
+                    launcherButton("Replay", action: { model.replaySession(session) })
+                    launcherButton("Reveal", action: { model.revealSession(session) })
+                    launcherButton("Trace", action: { model.openSessionTrace(session) })
+                    launcherButton("Feedback", action: { model.openSessionFeedback(session) })
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
         .background(

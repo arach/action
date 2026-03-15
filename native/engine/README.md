@@ -1,82 +1,100 @@
 # Native Engine
 
-The native macOS layer is now split into three direct-native pieces:
+The native layer is the core of the current product.
 
-- `ActionHost`: the real AppKit app bundle
-- `ActionAgent`: the headless local automation service
-- `ActionAgentCLI`: a thin native client that talks to the agent over WebSocket
+It builds the signed `Action.app` bundle, the local `ActionAgent` helper, and the native command surfaces used for capture, permissions, WebKit, and guided review flows.
 
-This split is deliberate. AppKit and WebKit need a clean UI lifecycle, while
-agentic automation and external integrations need a separate long-lived service.
+## Native Pieces
 
-## Commands
+- `ActionHost` — the real AppKit app bundle
+- `ActionAgent` — the local background automation service
+- `ActionAgentCLI` — a thin native client that talks to the agent over WebSocket
 
-### App UI
+This split is deliberate:
+
+- AppKit and WebKit need a clean UI lifecycle
+- capture and recording need lifecycle-safe native execution
+- the local agent needs a durable orchestration process
+
+## Build
+
+From the repo root:
 
 ```bash
-swift run --package-path native/engine ActionHost status
+bun run native:app:build
 ```
 
-### Start the agent
+Or directly:
 
 ```bash
-swift run --package-path native/engine ActionAgent --port 4319
+native/engine/scripts/build-app.sh
 ```
 
-Or via script:
+The built bundle lands at:
+
+`/Users/arach/dev/action/native/dist/Action.app`
+
+## Health Check
+
+Use the doctor wrapper before debugging anything capture-related:
+
+```bash
+bun run native:doctor
+```
+
+It:
+
+- builds if needed
+- signs the app
+- verifies the signature
+- reports Accessibility and Screen Recording status
+
+## Native Commands
+
+App host:
+
+```bash
+native/engine/scripts/run-app-host.sh status
+```
+
+Agent:
 
 ```bash
 native/engine/scripts/run-agent.sh --port 4319
 ```
 
-### Call the agent from the native CLI
-
-```bash
-swift run --package-path native/engine ActionAgentCLI status
-swift run --package-path native/engine ActionAgentCLI ping
-swift run --package-path native/engine ActionAgentCLI permissions.snapshot
-swift run --package-path native/engine ActionAgentCLI app.activate --bundle-id com.apple.Calculator
-```
-
-Or via script:
+Agent CLI:
 
 ```bash
 native/engine/scripts/run-agent-cli.sh status
+native/engine/scripts/run-agent-cli.sh ping
+native/engine/scripts/run-agent-cli.sh permissions.snapshot
 ```
 
-### Current agent methods
+## What The Native Layer Owns
 
-- `ping`
-- `status`
-- `permissions.snapshot`
-- `permissions.request`
-- `settings.openAccessibility`
-- `settings.openScreenRecording`
-- `app.activate`
-- `window.setFrame`
-- `window.getFrame`
+- AppKit lifecycle
+- launcher window and menus
+- embedded WebKit surfaces
+- permission UX
+- ScreenCaptureKit capture and recording probe lifecycle
+- native overlays / HUD
+- window management and app activation
 
-### Bundled outputs
+## Important Architectural Rule
 
-`native/engine/scripts/build-app.sh` now builds the app bundle and embeds the
-headless agent binary into `Action.app/Contents/Resources/ActionAgent`.
+Do not collapse the app and agent back into one fake headless runtime.
 
-## Why This Exists
+The current stability comes from keeping:
 
-The long-term native architecture is:
+- UI-owned lifecycle in `Action.app`
+- orchestration / transport in the local agent
+- recording execution in lifecycle-safe probe mode
 
-- AppKit app for windows, WebKit, menus, permissions UX
-- local agent service for WebSocket, automation orchestration, and durable state
-- thin CLI client for native operational control
+## Relevant Files
 
-The native layer will own:
-
-- ScreenCaptureKit capture
-- Accessibility inspection
-- input synthesis
-- window management
-- overlays and HUD windows
-- local agent transport
-
-The important part is the process boundary: UI and agent transport no longer
-need to live in the same runtime model.
+- `/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift`
+- `/Users/arach/dev/action/native/engine/Sources/ActionLauncherController.swift`
+- `/Users/arach/dev/action/native/engine/Sources/ActionLauncherViewModel.swift`
+- `/Users/arach/dev/action/native/engine/CoreSources/ActionAgentRuntime.swift`
+- `/Users/arach/dev/action/native/engine/Sources/RecordingProbeAppRunner.swift`

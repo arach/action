@@ -68,7 +68,7 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         window.title = "Action"
         window.titlebarAppearsTransparent = false
         window.titleVisibility = .hidden
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.toolbarStyle = .unifiedCompact
         window.backgroundColor = NSColor.windowBackgroundColor
         window.tabbingMode = .disallowed

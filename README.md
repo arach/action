@@ -1,71 +1,83 @@
 # action
 
-Working-name rewrite for agentic macOS demo automation.
+Native-first macOS capture and demo workstation.
 
-`action` is intended to be a native-first runtime for:
+`action` is an AppKit-based macOS app for staging flows, recording them, reviewing the output, and handing the result to an agent or post-production toolchain.
 
-- observing apps, windows, and browser surfaces
-- resolving stable targets before acting
-- recording raw capture plus structured execution traces
-- compiling scene intent into deterministic timelines
-- composing polished promo/demo videos with pluggable render backends
+Today the project is centered on a signed `Action.app`, a local agent runtime, an embedded web console, and a guided review loop for captured sessions.
 
-## Principles
+## What Exists Today
 
-- Runtime first, scene DSL second
-- macOS native fidelity over premature cross-platform support
-- Explicit sessions and lifecycle
-- Deterministic target resolution with confidence, not hidden guesswork
-- Composition as a backend boundary, not the core architecture
+- Signed `Action.app` bundle with a real AppKit lifecycle
+- Local agent process for orchestration and automation-facing methods
+- Guided capture flow that records playable session artifacts
+- Session library and inline replay / review UI
+- Embedded local console inside the app shell
+- Native developer CLI for build / launch / relaunch / host commands
 
-## Monorepo Layout
+## Why This Project Exists
 
-- `packages/protocol`: shared runtime and manifest types
-- `packages/runtime`: session state machine and execution primitives
-- `packages/compiler`: scene-to-timeline compilation
-- `packages/composer-core`: render manifest and composition contracts
-- `packages/composer-remotion`: Remotion backend adapter
-- `packages/cli`: CLI frontend
-- `packages/mcp`: MCP frontend
-- `native/engine`: Swift engine for macOS-native capture and automation
-- `docs`: architecture and v0 notes
+The goal is not just “screen recording.”
 
-## Near-Term Goal
+The goal is a native runtime where a human or an agent can:
 
-Build a solid v0 around:
+- stage a scene
+- run deterministic actions
+- capture raw media plus structured trace data
+- review the result immediately
+- feed that output into editing, composition, or another agent
 
-- sessions
-- observe / resolve / act
-- raw capture + metadata trace
-- chapters, labels, subtitles
-- auto-zoom and click emphasis
-- Remotion-backed finishing export
+That is why the project is split between:
 
-## Working Method
+- `Action.app` for AppKit, WebKit, permissions UX, launcher UI, and recording-probe lifecycle
+- the local agent for transport, orchestration, and automation-facing methods
 
-This repo is a rewrite informed by earlier projects, not a clean-room exercise.
+## Current Product Loop
 
-Before implementing a substantial feature, do a short precedent review against
-the relevant prior work and capture:
+The strongest loop in the repo right now is:
 
-- what to keep
-- what to avoid
-- what to adapt
-- what decision `action` is taking now
+1. Launch `Action.app`
+2. Ensure the local console is running
+3. Run a guided capture
+4. Save a playable session with trace + screenshots
+5. Review the result in-app
+6. Leave machine-readable feedback for the next iteration
 
-See [docs/PRECEDENT_REVIEW.md](/Users/arach/dev/action/docs/PRECEDENT_REVIEW.md).
+## Quick Start
 
-## Native Dev Loop
+Requirements:
 
-Use the native wrappers when working on the macOS host:
+- macOS on Apple Silicon
+- Bun
+- Xcode command line tools / Swift toolchain
 
-- `bun run native:doctor`
-- `bun run native:dev -- help`
-- `bun run native:permissions:status`
-- `bun run native:test:screenshot`
-- `bun run native:test:record`
+Install dependencies:
 
-For a tighter local dev loop, use the repo-local developer CLI:
+```bash
+bun install
+```
+
+Build the app:
+
+```bash
+bun run native:app:build
+```
+
+Verify native health:
+
+```bash
+bun run native:doctor
+```
+
+Launch the app:
+
+```bash
+./scripts/action-dev launch
+```
+
+## Developer CLI
+
+For the tightest local loop, use the repo-local dev CLI:
 
 ```bash
 alias action-dev='/Users/arach/dev/action/scripts/action-dev'
@@ -74,43 +86,45 @@ action-dev host guided-calculator-demo
 action-dev logs
 ```
 
-Useful subcommands:
+Useful commands:
 
 - `action-dev build`
 - `action-dev rebuild`
 - `action-dev launch`
 - `action-dev relaunch`
-- `action-dev status`
+- `action-dev quit`
+- `action-dev doctor`
+- `action-dev hud`
 - `action-dev host <args...>`
 - `action-dev agent <args...>`
 - `action-dev agent-cli <args...>`
-- `action-dev logs`
 
-`native:doctor` is the clean-state wrapper:
+## Repository Layout
 
-- builds `Action.app`
-- signs it
-- verifies the signature is not ad-hoc
-- prints the current Accessibility and Screen Recording state
+- `native/engine` — Swift app host, agent runtime, embedded console, native scripts
+- `packages/hud` — local web console / HUD surface
+- `packages/cli` — JS CLI entrypoints
+- `packages/runtime` — runtime primitives and session logic
+- `packages/protocol` — shared runtime protocol types
+- `packages/compiler` — scenario / compilation layer
+- `packages/composer-*` — composition backends and contracts
+- `docs` — architecture, milestones, runtime notes, and capture docs
+- `scripts/action-dev` — developer-facing native CLI wrapper
 
-This avoids guessing whether the current native app bundle is in a trustworthy
-state before debugging capture or automation behavior.
+## Important Runtime Notes
 
-The smoke tests default to the Calculator demo viewport:
+- Recording is asynchronous.
+- A start response means recording was accepted, not completed.
+- Completion is represented by the artifact plus a finished marker file.
+- The recording path is currently stabilized by launching a fresh `Action.app` instance in `recording-probe` mode.
 
-- `x=320`
-- `y=180`
-- `width=960`
-- `height=720`
+## Read Next
 
-Override them with:
+- [Getting Started](/Users/arach/dev/action/docs/getting-started.md)
+- [Native Runtime](/Users/arach/dev/action/docs/native-runtime.md)
+- [Recording](/Users/arach/dev/action/docs/recording.md)
+- [Architecture](/Users/arach/dev/action/docs/ARCHITECTURE.md)
 
-- `ACTION_CAPTURE_X`
-- `ACTION_CAPTURE_Y`
-- `ACTION_CAPTURE_WIDTH`
-- `ACTION_CAPTURE_HEIGHT`
+## Status
 
-Draft recording defaults:
-
-- `ACTION_RECORD_FPS=15`
-- `ACTION_RECORD_SCALE=0.75`
+This repo is still early, but it is no longer just architecture notes. The native app, guided capture loop, embedded console, session review flow, and local developer tooling are all real and in active use.
