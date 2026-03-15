@@ -25,76 +25,102 @@ struct ActionSessionPreviewView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ZStack(alignment: .topLeading) {
-                ActionInlinePlayerView(player: playback.player)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-                    )
-
-                overlayChrome
-            }
-            .frame(minHeight: 280, maxHeight: 320)
-            .overlay(regionSelectionOverlay)
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
-                    Text("Time \(formattedTime(playback.currentTimeSeconds)) / \(formattedTime(playback.durationSeconds))")
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Playback Workstation")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                        Text("Review the capture, scrub precisely, and place feedback anchors without leaving the frame.")
+                            .font(.system(size: 13, weight: .regular, design: .default))
+                            .foregroundStyle(StageHUDTheme.textSecondary)
+                    }
                     Spacer()
-
                     Text(draftAnchorSummary)
                         .font(.system(size: 12, weight: .regular, design: .monospaced))
                         .foregroundStyle(StageHUDTheme.textMuted)
                 }
 
-                ActionSessionTimelineView(
-                    currentTimeSeconds: playback.currentTimeSeconds,
-                    durationSeconds: playback.durationSeconds,
-                    draftStartTimeSeconds: draftStartTimeSeconds,
-                    draftEndTimeSeconds: draftEndTimeSeconds,
-                    feedbackItems: feedbackDocument.items,
-                    onSeek: { playback.seek(to: $0) }
-                )
+                ZStack(alignment: .topLeading) {
+                    ActionInlinePlayerView(player: playback.player)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+                        )
 
-                HStack(spacing: 10) {
-                    transportButton(playback.isPlaying ? "Pause" : "Play", action: playback.togglePlayback)
-                    transportButton("Stop", action: playback.stop)
-                    transportButton("Back 5s") { playback.skip(by: -5) }
-                    transportButton("Forward 5s") { playback.skip(by: 5) }
+                    overlayChrome
                 }
+                .frame(minHeight: 280, maxHeight: 340)
+                .overlay(regionSelectionOverlay)
 
-                HStack(spacing: 10) {
-                    feedbackButton("Mark Time", action: markCurrentTime)
-                    feedbackButton("Set In", action: setInPoint)
-                    feedbackButton("Set Out", action: setOutPoint)
-                    feedbackButton(isSelectingRegion ? "Dragging Region…" : "Mark Region", action: toggleRegionSelection)
-                    feedbackButton("Clear", action: clearDraftAnchors)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        Text("Time \(formattedTime(playback.currentTimeSeconds)) / \(formattedTime(playback.durationSeconds))")
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textSecondary)
+                        Spacer()
+                    }
+
+                    ActionSessionTimelineView(
+                        currentTimeSeconds: playback.currentTimeSeconds,
+                        durationSeconds: playback.durationSeconds,
+                        draftStartTimeSeconds: draftStartTimeSeconds,
+                        draftEndTimeSeconds: draftEndTimeSeconds,
+                        feedbackItems: feedbackDocument.items,
+                        onSeek: { playback.seek(to: $0) }
+                    )
+
+                    HStack(spacing: 10) {
+                        transportButton(playback.isPlaying ? "Pause" : "Play", tone: .primary, action: playback.togglePlayback)
+                        transportButton("Stop", action: playback.stop)
+                        transportButton("Back 5s") { playback.skip(by: -5) }
+                        transportButton("Forward 5s") { playback.skip(by: 5) }
+                    }
+
+                    HStack(spacing: 10) {
+                        feedbackButton("Mark Time", action: markCurrentTime)
+                        feedbackButton("Set In", action: setInPoint)
+                        feedbackButton("Set Out", action: setOutPoint)
+                        feedbackButton(isSelectingRegion ? "Dragging Region..." : "Mark Region", action: toggleRegionSelection)
+                        feedbackButton("Clear", action: clearDraftAnchors)
+                    }
                 }
             }
+            .padding(18)
+            .background(reviewCardBackground)
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("Agent Feedback")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
+                HStack {
+                    Text("Agent Feedback")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                    Spacer()
+                    Text(feedbackStatus)
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                }
 
                 TextField("Tell the agent what to change here", text: $draftInstruction, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .lineLimit(3...6)
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(StageHUDTheme.appBackground)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+                    )
 
                 HStack(spacing: 10) {
-                    feedbackButton("Save Feedback", action: saveFeedback)
+                    feedbackButton("Save Feedback", tone: .primary, action: saveFeedback)
                     if !feedbackDocument.items.isEmpty {
                         feedbackButton("Open feedback.json", action: { model.openSessionFeedback(session) })
                     }
                     Spacer()
-                    Text(feedbackStatus)
-                        .font(.system(size: 11, weight: .regular, design: .default))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
                 }
             }
             .padding(14)
@@ -213,14 +239,18 @@ struct ActionSessionPreviewView: View {
     }
 
     private func feedbackButton(_ title: String, action: @escaping () -> Void) -> some View {
+        feedbackButton(title, tone: .secondary, action: action)
+    }
+
+    private func feedbackButton(_ title: String, tone: StageHUDViewModel.ButtonTone, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
-            .buttonStyle(StageHUDButtonStyle(tone: .secondary))
+            .buttonStyle(StageHUDButtonStyle(tone: tone))
             .controlSize(.small)
     }
 
-    private func transportButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func transportButton(_ title: String, tone: StageHUDViewModel.ButtonTone = .secondary, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
-            .buttonStyle(StageHUDButtonStyle(tone: .secondary))
+            .buttonStyle(StageHUDButtonStyle(tone: tone))
             .controlSize(.small)
     }
 
@@ -254,12 +284,12 @@ struct ActionSessionPreviewView: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.03))
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(StageHUDTheme.appBackground)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
         )
     }
 
