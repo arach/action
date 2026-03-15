@@ -97,6 +97,7 @@ struct ActionLauncherRootView: View {
 
                 utilityCard(title: "Embedded Console") {
                     VStack(spacing: 10) {
+                        launcherButton("Start Local Console", action: model.startLocalConsole)
                         launcherButton("Open Embedded Console", action: model.openEmbeddedConsole)
                         launcherButton("Load Local Console", action: model.showLocalConsole)
                         launcherButton("Load Demo Site", action: model.showDemoSite)

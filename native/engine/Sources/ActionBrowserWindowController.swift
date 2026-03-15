@@ -8,6 +8,10 @@ final class ActionBrowserWindowController: NSWindowController, NSWindowDelegate 
         get { webController.onStatusChange }
         set { webController.onStatusChange = newValue }
     }
+    var onCommand: ((ActionWebViewCommand) -> Void)? {
+        get { webController.onCommand }
+        set { webController.onCommand = newValue }
+    }
 
     init() {
         let window = NSWindow(

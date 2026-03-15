@@ -49,6 +49,7 @@ final class ActionLauncherViewModel: ObservableObject {
     private let agentProcess = ActionAgentProcessController()
     private let agentClient = ActionAgentClient()
     private var browserWindowController: ActionBrowserWindowController?
+    private var localConsoleProcess: Process?
 
     @Published var agentStatus: String = "Offline"
     @Published var accessibilityStatus: String = "Unknown"
@@ -97,6 +98,37 @@ final class ActionLauncherViewModel: ObservableObject {
     func openEmbeddedConsole() {
         consoleURL = localConsoleURL
         openBrowserWindow()
+    }
+
+    func startLocalConsole() {
+        if let localConsoleProcess, localConsoleProcess.isRunning {
+            consoleStatus = "Local console already running on \(localConsoleURL.absoluteString)"
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["bun", "run", "hud"]
+        process.currentDirectoryURL = repositoryRootURL()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { [weak self] proc in
+            Task { @MainActor in
+                guard let self else { return }
+                self.localConsoleProcess = nil
+                self.consoleStatus = "Local console exited (\(proc.terminationStatus))"
+            }
+        }
+
+        do {
+            try process.run()
+            localConsoleProcess = process
+            consoleStatus = "Starting local console on \(localConsoleURL.absoluteString)…"
+            logger.notice("Started local console process (pid=\(process.processIdentifier, privacy: .public))")
+        } catch {
+            consoleStatus = "Failed to start local console: \(error.localizedDescription)"
+            logger.error("Failed to start local console: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     func showDemoSite() {
@@ -219,6 +251,10 @@ final class ActionLauncherViewModel: ObservableObject {
 
     func stopAgent() {
         agentProcess.stopIfNeeded()
+        if let localConsoleProcess, localConsoleProcess.isRunning {
+            localConsoleProcess.terminate()
+            self.localConsoleProcess = nil
+        }
     }
 
     private func browserController() -> ActionBrowserWindowController {
@@ -229,8 +265,34 @@ final class ActionLauncherViewModel: ObservableObject {
         controller.onStatusChange = { [weak self] text in
             self?.consoleStatus = text
         }
+        controller.onCommand = { [weak self] command in
+            guard let self else {
+                return
+            }
+            switch command {
+            case .startLocalConsole:
+                self.startLocalConsole()
+            }
+        }
         browserWindowController = controller
         return controller
+    }
+
+    private func repositoryRootURL() -> URL {
+        let bundleCandidate = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        if FileManager.default.fileExists(atPath: bundleCandidate.appendingPathComponent("package.json").path) {
+            return bundleCandidate
+        }
+
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        if FileManager.default.fileExists(atPath: cwd.appendingPathComponent("package.json").path) {
+            return cwd
+        }
+
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 
     private func refreshAgentStatus() async {

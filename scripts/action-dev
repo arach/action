@@ -25,6 +25,7 @@ Usage:
   action-dev status
   action-dev doctor
   action-dev verify
+  action-dev hud
   action-dev logs
   action-dev host <args...>
   action-dev agent <args...>
@@ -124,6 +125,10 @@ case "$cmd" in
     ;;
   verify)
     "$ENGINE_SCRIPTS_DIR/verify-app.sh"
+    ;;
+  hud)
+    cd "$ROOT_DIR"
+    exec bun run hud
     ;;
   logs)
     exec /usr/bin/log stream --style compact --level debug --predicate 'process == "Action" AND subsystem == "dev.action.Action"'
