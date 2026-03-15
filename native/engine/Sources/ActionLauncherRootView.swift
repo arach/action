@@ -26,28 +26,45 @@ struct ActionLauncherRootView: View {
 
     @ObservedObject var model: ActionLauncherViewModel
     @State private var selectedSection: LauncherSection? = .review
+    @AppStorage("Action.LauncherSidebarIconsOnly") private var sidebarIconsOnly = false
     private let sessionDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter
     }()
 
+    private var sidebarWidth: (min: CGFloat, ideal: CGFloat, max: CGFloat) {
+        if sidebarIconsOnly {
+            return (52, 52, 52)
+        }
+        return (188, 208, 232)
+    }
+
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedSection) {
-                Section("Workspace") {
-                    ForEach(LauncherSection.allCases) { section in
-                        Label(section.rawValue, systemImage: iconName(for: section))
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                            .foregroundStyle(StageHUDTheme.textPrimary)
-                            .tag(Optional(section))
+            VStack(spacing: 0) {
+                sidebarHeader
+
+                List(selection: $selectedSection) {
+                    Section(sidebarIconsOnly ? "" : "Workspace") {
+                        ForEach([LauncherSection.review, .library, .console], id: \.self) { section in
+                            sidebarRow(for: section)
+                                .tag(Optional(section))
+                        }
                     }
                 }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+                .background(StageHUDTheme.railBackground)
+
+                Spacer(minLength: 0)
+
+                settingsRow
+                    .padding(.horizontal, sidebarIconsOnly ? 4 : 8)
+                    .padding(.bottom, 8)
             }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
             .background(StageHUDTheme.railBackground)
-            .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 232)
+            .navigationSplitViewColumnWidth(min: sidebarWidth.min, ideal: sidebarWidth.ideal, max: sidebarWidth.max)
         } detail: {
             mainPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -56,6 +73,53 @@ struct ActionLauncherRootView: View {
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 1180, minHeight: 760)
         .background(StageHUDTheme.appBackground)
+    }
+
+    private var sidebarHeader: some View {
+        HStack(spacing: 8) {
+            if sidebarIconsOnly {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        sidebarIconsOnly = false
+                    }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("Expand Sidebar")
+                .frame(maxWidth: .infinity)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Action")
+                        .font(.system(size: 18, weight: .bold, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textPrimary)
+                    Text("Capture workstation")
+                        .font(.system(size: 11, weight: .regular, design: .default))
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                }
+
+                Spacer()
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        sidebarIconsOnly = true
+                    }
+                } label: {
+                    Image(systemName: "sidebar.squares.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("Collapse Sidebar")
+            }
+        }
+        .padding(.horizontal, sidebarIconsOnly ? 6 : 12)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
     private var mainPane: some View {
@@ -109,6 +173,46 @@ struct ActionLauncherRootView: View {
                 launcherButton("Start Console", action: model.startLocalConsole)
             }
         }
+    }
+
+    @ViewBuilder
+    private func sidebarRow(for section: LauncherSection) -> some View {
+        if sidebarIconsOnly {
+            Image(systemName: iconName(for: section))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(StageHUDTheme.textPrimary)
+                .frame(maxWidth: .infinity, minHeight: 30)
+                .help(section.rawValue)
+        } else {
+            Label(section.rawValue, systemImage: iconName(for: section))
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .foregroundStyle(StageHUDTheme.textPrimary)
+        }
+    }
+
+    private var settingsRow: some View {
+        Button {
+            selectedSection = .settings
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: iconName(for: .settings))
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: sidebarIconsOnly ? nil : 18)
+
+                if !sidebarIconsOnly {
+                    Text(LauncherSection.settings.rawValue)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    Spacer()
+                }
+            }
+            .foregroundStyle(selectedSection == .settings ? StageHUDTheme.textPrimary : StageHUDTheme.textSecondary)
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: sidebarIconsOnly ? .center : .leading)
+            .padding(.horizontal, sidebarIconsOnly ? 0 : 10)
+            .background(selectedSection == .settings ? StageHUDTheme.buttonSecondaryHover : Color.clear)
+            .clipShape(ActionChamferedShape(cornerCut: 4))
+        }
+        .buttonStyle(.plain)
+        .help(sidebarIconsOnly ? LauncherSection.settings.rawValue : "")
     }
 
     private var reviewSection: some View {
