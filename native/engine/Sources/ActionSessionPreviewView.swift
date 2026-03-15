@@ -15,8 +15,6 @@ struct ActionSessionPreviewView: View {
     @State private var dragStartPoint: CGPoint?
     @State private var dragCurrentPoint: CGPoint?
     @State private var isSelectingRegion = false
-    @State private var scrubPosition: Double = 0
-    @State private var isScrubbing = false
     @State private var feedbackStatus = "No agent feedback yet"
 
     init(session: ActionSessionSummary, model: ActionLauncherViewModel) {
@@ -54,20 +52,21 @@ struct ActionSessionPreviewView: View {
                         .foregroundStyle(StageHUDTheme.textMuted)
                 }
 
-                Slider(value: $scrubPosition, in: 0...sliderUpperBound, onEditingChanged: handleScrubChange)
-                    .tint(StageHUDTheme.accentRecording)
-                    .onChange(of: scrubPosition) { _, newValue in
-                        guard isScrubbing else {
-                            return
-                        }
-                        playback.seek(to: newValue)
-                    }
-                    .onChange(of: playback.currentTimeSeconds) { _, newValue in
-                        guard !isScrubbing else {
-                            return
-                        }
-                        scrubPosition = newValue
-                    }
+                ActionSessionTimelineView(
+                    currentTimeSeconds: playback.currentTimeSeconds,
+                    durationSeconds: playback.durationSeconds,
+                    draftStartTimeSeconds: draftStartTimeSeconds,
+                    draftEndTimeSeconds: draftEndTimeSeconds,
+                    feedbackItems: feedbackDocument.items,
+                    onSeek: { playback.seek(to: $0) }
+                )
+
+                HStack(spacing: 10) {
+                    transportButton(playback.isPlaying ? "Pause" : "Play", action: playback.togglePlayback)
+                    transportButton("Stop", action: playback.stop)
+                    transportButton("Back 5s") { playback.skip(by: -5) }
+                    transportButton("Forward 5s") { playback.skip(by: 5) }
+                }
 
                 HStack(spacing: 10) {
                     feedbackButton("Mark Time", action: markCurrentTime)
@@ -204,10 +203,6 @@ struct ActionSessionPreviewView: View {
         return parts.isEmpty ? "No anchors" : parts.joined(separator: " • ")
     }
 
-    private var sliderUpperBound: Double {
-        max(playback.durationSeconds, max(playback.currentTimeSeconds, 1))
-    }
-
     private var reviewCardBackground: some View {
         RoundedRectangle(cornerRadius: 14, style: .continuous)
             .fill(Color.white.opacity(0.04))
@@ -218,6 +213,12 @@ struct ActionSessionPreviewView: View {
     }
 
     private func feedbackButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(StageHUDButtonStyle(tone: .secondary))
+            .controlSize(.small)
+    }
+
+    private func transportButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
             .buttonStyle(StageHUDButtonStyle(tone: .secondary))
             .controlSize(.small)
@@ -260,13 +261,6 @@ struct ActionSessionPreviewView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.white.opacity(0.06), lineWidth: 1)
         )
-    }
-
-    private func handleScrubChange(_ isEditing: Bool) {
-        isScrubbing = isEditing
-        if !isEditing {
-            playback.seek(to: scrubPosition)
-        }
     }
 
     private func markCurrentTime() {
@@ -361,7 +355,6 @@ struct ActionSessionPreviewView: View {
     private func reloadSession() {
         playback.load(url: session.videoURL)
         feedbackDocument = model.loadFeedback(for: session)
-        scrubPosition = 0
         draftInstruction = ""
         clearDraftAnchors()
         feedbackStatus = feedbackDocument.items.isEmpty ? "No agent feedback yet" : "Loaded feedback.json"
