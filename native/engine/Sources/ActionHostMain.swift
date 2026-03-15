@@ -1448,6 +1448,8 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         throw ActionHostError.unsupportedOS("launcher should be started via runUICommand")
     case .webkitSmoke:
         throw ActionHostError.unsupportedOS("webkit-smoke should be started via runUICommand")
+    case .stageOverlay:
+        throw ActionHostError.unsupportedOS("stage-overlay should be started via runUICommand")
     case .guidedCalculatorDemo:
         let runner = GuidedCaptureSessionRunner(writer: writer, logger: logger, options: options)
         try await runner.run()
@@ -1459,22 +1461,6 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         openSettingsPane(anchor: "Privacy_Accessibility")
     case .openScreenRecordingSettings:
         openSettingsPane(anchor: "Privacy_ScreenCapture")
-    case .stageOverlay:
-        let stateFile = try options.required("state-file")
-        let stopFile = try options.required("stop-file")
-        let replyFile = options.options["reply-file"]
-        let debugLogPath = options.options["debug-log"]
-        let controlFile = options.options["control-file"]
-        try await MainActor.run {
-            let controller = StageOverlayController(
-                stateFile: stateFile,
-                stopFile: stopFile,
-                replyFile: replyFile,
-                debugLogPath: debugLogPath,
-                controlFile: controlFile
-            )
-            try controller.run()
-        }
     case .recordAppWindow:
         guard #available(macOS 15.0, *) else {
             throw ActionHostError.unsupportedOS("Window recording requires macOS 15.0 or newer.")
@@ -1728,6 +1714,35 @@ struct ActionHostMain {
 
     private static func runUICommandIfNeeded(command: ActionHostCommand, options: CommandOptions) -> Bool {
         switch command {
+        case .stageOverlay:
+            let stateFile: String
+            let stopFile: String
+            do {
+                stateFile = try options.required("state-file")
+                stopFile = try options.required("stop-file")
+            } catch {
+                FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                Darwin.exit(1)
+            }
+            let replyFile = options.options["reply-file"]
+            let debugLogPath = options.options["debug-log"]
+            let controlFile = options.options["control-file"]
+            MainActor.assumeIsolated {
+                let controller = StageOverlayController(
+                    stateFile: stateFile,
+                    stopFile: stopFile,
+                    replyFile: replyFile,
+                    debugLogPath: debugLogPath,
+                    controlFile: controlFile
+                )
+                do {
+                    try controller.run()
+                } catch {
+                    FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                    Darwin.exit(1)
+                }
+            }
+            return true
         case .launcher:
             MainActor.assumeIsolated {
                 ActionLauncherController.shared.run()
