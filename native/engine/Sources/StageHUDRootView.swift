@@ -36,7 +36,7 @@ struct StageHUDRootView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.summary)
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .font(.system(size: 17, weight: .semibold, design: .monospaced))
                     .foregroundStyle(StageHUDTheme.textPrimary)
                     .lineLimit(2)
 
@@ -126,7 +126,7 @@ struct StageHUDRootView: View {
     }
 
     private var panelBackground: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
             .fill(
                 LinearGradient(
                     colors: [StageHUDTheme.panelBackgroundTop, StageHUDTheme.panelBackgroundBottom],
@@ -135,17 +135,17 @@ struct StageHUDRootView: View {
                 )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(StageHUDTheme.panelBorder, lineWidth: 1)
             )
-            .shadow(color: StageHUDTheme.panelShadow, radius: 28, x: 0, y: 18)
+            .shadow(color: StageHUDTheme.panelShadow, radius: 14, x: 0, y: 8)
     }
 
     private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
             .fill(StageHUDTheme.cardFill)
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
             )
     }
@@ -188,11 +188,11 @@ struct StageHUDButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity, minHeight: 40)
             .background(background(configuration: configuration))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .stroke(borderColor(configuration: configuration), lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.992 : 1)
             .opacity(configuration.isPressed ? 0.94 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }

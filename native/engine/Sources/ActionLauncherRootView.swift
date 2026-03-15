@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ActionLauncherRootView: View {
@@ -15,7 +16,7 @@ struct ActionLauncherRootView: View {
                 .background(railBackground)
 
             Divider()
-                .overlay(Color.white.opacity(0.06))
+                .overlay(Color.primary.opacity(0.14))
 
             browserSummaryPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -24,23 +25,14 @@ struct ActionLauncherRootView: View {
         .frame(minWidth: 1180, minHeight: 760)
         .background(
             ZStack {
-                Color(red: 0.03, green: 0.04, blue: 0.06)
+                Color(nsColor: .windowBackgroundColor)
                 LinearGradient(
                     colors: [
-                        Color(red: 0.09, green: 0.15, blue: 0.26).opacity(0.34),
-                        Color(red: 0.04, green: 0.08, blue: 0.12).opacity(0.08),
+                        Color.primary.opacity(0.08),
+                        Color.clear,
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
-                )
-                RadialGradient(
-                    colors: [
-                        Color(red: 0.25, green: 0.47, blue: 0.95).opacity(0.22),
-                        .clear,
-                    ],
-                    center: .topTrailing,
-                    startRadius: 60,
-                    endRadius: 540
                 )
             }
         )
@@ -51,7 +43,7 @@ struct ActionLauncherRootView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Action")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .font(.system(size: 28, weight: .bold, design: .monospaced))
                         .foregroundStyle(StageHUDTheme.textPrimary)
 
                     Text("Native launcher for staging, capture, replay, and quick access to the local console.")
@@ -160,7 +152,7 @@ struct ActionLauncherRootView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Review Loop")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .font(.system(size: 28, weight: .bold, design: .monospaced))
                         .foregroundStyle(StageHUDTheme.textPrimary)
 
                     Text("The launcher now keeps the latest generated sessions close at hand so you can replay a run, inspect the trace, and hand it off to the next editing tool.")
@@ -231,7 +223,7 @@ struct ActionLauncherRootView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Embedded Console")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .font(.system(size: 28, weight: .bold, design: .monospaced))
                         .foregroundStyle(StageHUDTheme.textPrimary)
 
                     Text("This is a utility surface inside Action for local web tooling. It is not the main review experience.")
@@ -263,8 +255,8 @@ struct ActionLauncherRootView: View {
     private var railBackground: some View {
         LinearGradient(
             colors: [
-                Color(red: 0.09, green: 0.10, blue: 0.13),
-                Color(red: 0.06, green: 0.07, blue: 0.09),
+                Color(nsColor: .windowBackgroundColor),
+                Color(nsColor: .underPageBackgroundColor),
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -274,8 +266,8 @@ struct ActionLauncherRootView: View {
     private var consoleBackground: some View {
         LinearGradient(
             colors: [
-                Color(red: 0.05, green: 0.06, blue: 0.08),
-                Color(red: 0.04, green: 0.05, blue: 0.07),
+                Color(nsColor: .windowBackgroundColor),
+                Color(nsColor: .windowBackgroundColor).opacity(0.96),
             ],
             startPoint: .top,
             endPoint: .bottom
@@ -292,18 +284,18 @@ struct ActionLauncherRootView: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [Color.white.opacity(0.07), Color.white.opacity(0.03)],
+                        colors: [Color.primary.opacity(0.06), Color.primary.opacity(0.025)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color.primary.opacity(0.16), lineWidth: 1)
         )
     }
 
@@ -359,12 +351,12 @@ struct ActionLauncherRootView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(model.selectedSession?.id == session.id ? Color.white.opacity(0.08) : Color.white.opacity(0.03))
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(model.selectedSession?.id == session.id ? Color.primary.opacity(0.10) : Color.primary.opacity(0.04))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(model.selectedSession?.id == session.id ? Color.white.opacity(0.16) : Color.white.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(model.selectedSession?.id == session.id ? Color.primary.opacity(0.24) : Color.primary.opacity(0.12), lineWidth: 1)
         )
     }
 
