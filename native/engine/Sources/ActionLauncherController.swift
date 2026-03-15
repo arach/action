@@ -21,7 +21,6 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         viewModel.startAgent()
-        viewModel.openEmbeddedConsole()
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 

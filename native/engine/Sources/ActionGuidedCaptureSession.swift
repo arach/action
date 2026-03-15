@@ -217,11 +217,12 @@ final class GuidedCaptureSessionRunner {
         try ActionNativeAutomation.activateApplication(bundleId: targetBundleId)
         usleep(220_000)
         let finalFrame = try waitForWindowFrame(bundleId: targetBundleId, timeout: 3)
+        let captureFrame = try await waitForCaptureWindowFrame(bundleId: targetBundleId, fallback: finalFrame)
         let viewportBounds = OverlayBounds(
-            x: finalFrame.origin.x,
-            y: finalFrame.origin.y,
-            width: finalFrame.size.width,
-            height: finalFrame.size.height
+            x: captureFrame.origin.x,
+            y: captureFrame.origin.y,
+            width: captureFrame.size.width,
+            height: captureFrame.size.height
         )
         appendLog("fit Calculator to viewport")
         appendStep("fit Calculator to viewport")
@@ -293,7 +294,7 @@ final class GuidedCaptureSessionRunner {
         }
 
         try await captureRegionScreenshot(
-            rect: finalFrame,
+            rect: captureFrame,
             outputPath: stagedScreenshotPath,
             writer: ResponseWriter(replyFile: artifactDirectory.appendingPathComponent("stage-screenshot.reply.json").path)
         )
@@ -326,10 +327,10 @@ final class GuidedCaptureSessionRunner {
             stepLabel: "capture live"
         )
 
-        let frameX = String(describing: finalFrame.origin.x)
-        let frameY = String(describing: finalFrame.origin.y)
-        let frameWidth = String(describing: finalFrame.size.width)
-        let frameHeight = String(describing: finalFrame.size.height)
+        let frameX = String(describing: captureFrame.origin.x)
+        let frameY = String(describing: captureFrame.origin.y)
+        let frameWidth = String(describing: captureFrame.size.width)
+        let frameHeight = String(describing: captureFrame.size.height)
         let recordingArguments: [String] = [
             "record-region",
             "--x", frameX,
@@ -376,7 +377,7 @@ final class GuidedCaptureSessionRunner {
         appendStep("read result \(actualResult)")
 
         try await captureRegionScreenshot(
-            rect: finalFrame,
+            rect: captureFrame,
             outputPath: resultScreenshotPath,
             writer: ResponseWriter(replyFile: artifactDirectory.appendingPathComponent("result-screenshot.reply.json").path)
         )
@@ -503,6 +504,24 @@ private func waitForWindowFrame(bundleId: String, timeout: TimeInterval) throws 
     }
 
     throw lastError ?? ActionHostError.captureFailed("Timed out waiting for window frame for \(bundleId)")
+}
+
+private func waitForCaptureWindowFrame(bundleId: String, fallback: CGRect, timeout: TimeInterval = 3) async throws -> CGRect {
+    let deadline = Date().addingTimeInterval(timeout)
+    var latestFrame: CGRect?
+
+    while Date() < deadline {
+        if let selection = try? await bestWindowSelection(for: bundleId) {
+            let frame = selection.window.frame.standardized.integral
+            if frame.width > 1, frame.height > 1 {
+                return frame
+            }
+            latestFrame = frame
+        }
+        usleep(120_000)
+    }
+
+    return latestFrame ?? fallback
 }
 
 private func waitForCalculatorResult(expected: String, timeout: TimeInterval) throws -> String {
