@@ -16,26 +16,14 @@ struct ActionLauncherRootView: View {
                 .background(railBackground)
 
             Divider()
-                .overlay(Color.primary.opacity(0.14))
+                .overlay(StageHUDTheme.panelBorder)
 
             browserSummaryPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(consoleBackground)
         }
         .frame(minWidth: 1180, minHeight: 760)
-        .background(
-            ZStack {
-                Color(nsColor: .windowBackgroundColor)
-                LinearGradient(
-                    colors: [
-                        Color.primary.opacity(0.08),
-                        Color.clear,
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-        )
+        .background(StageHUDTheme.appBackground)
     }
 
     private var utilityRail: some View {
@@ -69,6 +57,25 @@ struct ActionLauncherRootView: View {
                 utilityCard(title: "Runtime") {
                     VStack(alignment: .leading, spacing: 10) {
                         statusRow(label: "Agent", value: model.agentStatus)
+                    }
+                }
+
+                utilityCard(title: "Appearance") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("Appearance", selection: Binding(
+                            get: { model.appearanceMode },
+                            set: { model.setAppearanceMode($0) }
+                        )) {
+                            ForEach(ActionAppearanceMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text("Compare system, light, and dark without leaving the launcher.")
+                            .font(.system(size: 12, weight: .regular, design: .default))
+                            .foregroundStyle(StageHUDTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -130,7 +137,7 @@ struct ActionLauncherRootView: View {
 
                         if !model.notes.isEmpty {
                             Divider()
-                                .overlay(Color.white.opacity(0.06))
+                                .overlay(StageHUDTheme.panelBorder)
 
                             ForEach(model.notes, id: \.self) { note in
                                 Text(note)
@@ -253,25 +260,11 @@ struct ActionLauncherRootView: View {
     }
 
     private var railBackground: some View {
-        LinearGradient(
-            colors: [
-                Color(nsColor: .windowBackgroundColor),
-                Color(nsColor: .underPageBackgroundColor),
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        StageHUDTheme.railBackground
     }
 
     private var consoleBackground: some View {
-        LinearGradient(
-            colors: [
-                Color(nsColor: .windowBackgroundColor),
-                Color(nsColor: .windowBackgroundColor).opacity(0.96),
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        StageHUDTheme.appBackground
     }
 
     private func utilityCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -285,17 +278,11 @@ struct ActionLauncherRootView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color.primary.opacity(0.06), Color.primary.opacity(0.025)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(StageHUDTheme.cardFill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(Color.primary.opacity(0.16), lineWidth: 1)
+                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
         )
     }
 
@@ -352,11 +339,11 @@ struct ActionLauncherRootView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(model.selectedSession?.id == session.id ? Color.primary.opacity(0.10) : Color.primary.opacity(0.04))
+                .fill(model.selectedSession?.id == session.id ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.cardFill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(model.selectedSession?.id == session.id ? Color.primary.opacity(0.24) : Color.primary.opacity(0.12), lineWidth: 1)
+                .stroke(model.selectedSession?.id == session.id ? StageHUDTheme.panelBorder : StageHUDTheme.cardBorder, lineWidth: 1)
         )
     }
 

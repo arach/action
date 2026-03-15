@@ -8,11 +8,16 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
     private var window: NSWindow?
     private var settingsWindow: NSWindow?
     private let viewModel = ActionLauncherViewModel()
+    private var appearanceMode: ActionAppearanceMode {
+        get { ActionAppearanceStore.shared.mode }
+        set { ActionAppearanceStore.shared.mode = newValue }
+    }
 
     func run() {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
         app.delegate = self
+        applyAppearanceMode()
         configureMenu()
         showWindow()
         app.activate(ignoringOtherApps: true)
@@ -70,6 +75,7 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         window.center()
         window.setFrameAutosaveName("ActionLauncherWindow")
         window.contentView = hostingView
+        window.appearance = appearanceMode.appearance
         window.delegate = self
         window.makeKeyAndOrderFront(nil)
         self.window = window
@@ -202,20 +208,18 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         }
 
         let content = NSHostingView(
-            rootView: VStack(alignment: .leading, spacing: 12) {
-                Text("Action Settings")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                Text("This app is still being shaped. For now, the important part is that Action behaves like a normal macOS app with standard menu commands and app switching.")
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer()
-            }
-            .padding(20)
-            .frame(width: 440, height: 220, alignment: .topLeading)
-            .background(Color(nsColor: .windowBackgroundColor))
+            rootView: ActionSettingsRootView(
+                appearanceMode: Binding(
+                    get: { self.appearanceMode },
+                    set: { [weak self] mode in
+                        self?.setAppearanceMode(mode)
+                    }
+                )
+            )
         )
 
         let window = NSWindow(
-            contentRect: CGRect(x: 0, y: 0, width: 440, height: 220),
+            contentRect: CGRect(x: 0, y: 0, width: 460, height: 220),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -223,11 +227,25 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         window.title = "Settings"
         window.center()
         window.contentView = content
+        window.appearance = appearanceMode.appearance
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.makeKeyAndOrderFront(nil)
         self.settingsWindow = window
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func setAppearanceMode(_ mode: ActionAppearanceMode) {
+        appearanceMode = mode
+        viewModel.appearanceMode = mode
+        applyAppearanceMode()
+    }
+
+    private func applyAppearanceMode() {
+        NSApplication.shared.appearance = appearanceMode.appearance
+        for window in NSApplication.shared.windows {
+            window.appearance = appearanceMode.appearance
+        }
     }
 
 }

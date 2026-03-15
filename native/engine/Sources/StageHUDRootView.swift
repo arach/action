@@ -109,11 +109,11 @@ struct StageHUDRootView: View {
                                 .padding(.horizontal, 10)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(Color.white.opacity(0.04))
+                                        .fill(Color.primary.opacity(0.04))
                                 )
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
                                 )
                         }
                     }
@@ -127,13 +127,7 @@ struct StageHUDRootView: View {
 
     private var panelBackground: some View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [StageHUDTheme.panelBackgroundTop, StageHUDTheme.panelBackgroundBottom],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .fill(StageHUDTheme.panelBackgroundTop)
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(StageHUDTheme.panelBorder, lineWidth: 1)
@@ -169,11 +163,11 @@ struct StageHUDRootView: View {
             .padding(.vertical, 6)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(StageHUDTheme.buttonSecondary)
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
             )
     }
 }
@@ -183,7 +177,7 @@ struct StageHUDButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .font(.system(size: 12, weight: .regular, design: .monospaced))
             .foregroundStyle(foregroundColor(configuration: configuration))
             .frame(maxWidth: .infinity, minHeight: 40)
             .background(background(configuration: configuration))
@@ -201,25 +195,11 @@ struct StageHUDButtonStyle: ButtonStyle {
         Group {
             switch tone {
             case .primary:
-                LinearGradient(
-                    colors: [
-                        StageHUDTheme.buttonPrimaryTop.opacity(configuration.isPressed ? 0.92 : 1),
-                        StageHUDTheme.buttonPrimaryBottom.opacity(configuration.isPressed ? 0.92 : 1),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+                Color(configuration.isPressed ? StageHUDTheme.buttonPrimaryBottom : StageHUDTheme.buttonPrimaryTop)
             case .secondary:
                 Color(configuration.isPressed ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.buttonSecondary)
             case .destructive:
-                LinearGradient(
-                    colors: [
-                        StageHUDTheme.accentRecording.opacity(configuration.isPressed ? 0.85 : 0.92),
-                        StageHUDTheme.accentRecording.opacity(configuration.isPressed ? 0.70 : 0.78),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+                Color(StageHUDTheme.accentRecording.opacity(configuration.isPressed ? 0.78 : 0.88))
             }
         }
     }
@@ -227,7 +207,7 @@ struct StageHUDButtonStyle: ButtonStyle {
     private func foregroundColor(configuration: Configuration) -> Color {
         switch tone {
         case .primary:
-            return Color.black.opacity(configuration.isPressed ? 0.86 : 0.92)
+            return StageHUDTheme.buttonPrimaryText.opacity(configuration.isPressed ? 0.88 : 1)
         case .secondary, .destructive:
             return StageHUDTheme.textPrimary.opacity(configuration.isPressed ? 0.88 : 1)
         }
@@ -236,11 +216,11 @@ struct StageHUDButtonStyle: ButtonStyle {
     private func borderColor(configuration: Configuration) -> Color {
         switch tone {
         case .primary:
-            return Color.white.opacity(configuration.isPressed ? 0.22 : 0.14)
+            return StageHUDTheme.panelBorder.opacity(configuration.isPressed ? 1 : 0.9)
         case .secondary:
-            return Color.white.opacity(configuration.isPressed ? 0.12 : 0.10)
+            return StageHUDTheme.cardBorder.opacity(configuration.isPressed ? 1 : 0.95)
         case .destructive:
-            return Color.white.opacity(configuration.isPressed ? 0.14 : 0.10)
+            return StageHUDTheme.cardBorder.opacity(configuration.isPressed ? 1 : 0.95)
         }
     }
 }

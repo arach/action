@@ -28,10 +28,10 @@ struct ActionSessionPreviewView: View {
         VStack(alignment: .leading, spacing: 14) {
             ZStack(alignment: .topLeading) {
                 ActionInlinePlayerView(player: playback.player)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
                     )
 
                 overlayChrome
@@ -137,12 +137,12 @@ struct ActionSessionPreviewView: View {
 
     private var overlayChrome: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(formattedTime(playback.currentTimeSeconds))
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textPrimary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.black.opacity(0.55), in: Capsule())
+                Text(formattedTime(playback.currentTimeSeconds))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(StageHUDTheme.textPrimary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.primary.opacity(0.82), in: Capsule())
 
             if isSelectingRegion {
                 Text("Drag over the frame to mark a region for the agent.")
@@ -150,7 +150,7 @@ struct ActionSessionPreviewView: View {
                     .foregroundStyle(StageHUDTheme.textPrimary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .background(Color.primary.opacity(0.82), in: Capsule())
             }
         }
         .padding(12)
@@ -161,22 +161,22 @@ struct ActionSessionPreviewView: View {
             ZStack {
                 if let draftRegion {
                     let frame = denormalize(draftRegion, in: geometry.size)
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color(red: 0.96, green: 0.44, blue: 0.27), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(StageHUDTheme.textPrimary.opacity(0.74), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
                         .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color(red: 0.96, green: 0.44, blue: 0.27).opacity(0.12))
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(StageHUDTheme.textPrimary.opacity(0.08))
                         )
                         .frame(width: frame.width, height: frame.height)
                         .position(x: frame.midX, y: frame.midY)
                 }
 
                 if let previewRect = previewDragRect(in: geometry.size) {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(StageHUDTheme.textPrimary.opacity(0.92), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
                         .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.white.opacity(0.12))
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(StageHUDTheme.textPrimary.opacity(0.10))
                         )
                         .frame(width: previewRect.width, height: previewRect.height)
                         .position(x: previewRect.midX, y: previewRect.midY)
@@ -185,7 +185,7 @@ struct ActionSessionPreviewView: View {
             .contentShape(Rectangle())
             .gesture(regionDragGesture(in: geometry.size))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
     private var draftAnchorSummary: String {
@@ -204,11 +204,11 @@ struct ActionSessionPreviewView: View {
     }
 
     private var reviewCardBackground: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color.white.opacity(0.04))
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(StageHUDTheme.cardFill)
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
             )
     }
 

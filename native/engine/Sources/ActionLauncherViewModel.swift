@@ -3,6 +3,21 @@ import ActionCore
 import Foundation
 import OSLog
 
+@MainActor
+final class ActionAppearanceStore: ObservableObject {
+    static let shared = ActionAppearanceStore()
+
+    @Published var mode: ActionAppearanceMode {
+        didSet {
+            mode.persist()
+        }
+    }
+
+    private init() {
+        self.mode = .load()
+    }
+}
+
 struct ActionSessionSummary: Identifiable {
     let id: String
     let sessionId: String
@@ -61,9 +76,11 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var recentSessions: [ActionSessionSummary] = []
     @Published var isRunningGuidedDemo: Bool = false
     @Published var selectedSessionID: String?
+    @Published var appearanceMode: ActionAppearanceMode
 
     init() {
         self.consoleURL = localConsoleURL
+        self.appearanceMode = ActionAppearanceStore.shared.mode
         refreshSessions()
     }
 
@@ -255,6 +272,11 @@ final class ActionLauncherViewModel: ObservableObject {
             localConsoleProcess.terminate()
             self.localConsoleProcess = nil
         }
+    }
+
+    func setAppearanceMode(_ mode: ActionAppearanceMode) {
+        appearanceMode = mode
+        ActionAppearanceStore.shared.mode = mode
     }
 
     private func browserController() -> ActionBrowserWindowController {

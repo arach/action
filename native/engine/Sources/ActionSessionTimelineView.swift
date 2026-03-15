@@ -15,21 +15,12 @@ struct ActionSessionTimelineView: View {
             let currentX = width * normalizedCurrent
 
             ZStack(alignment: .leading) {
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.08))
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.primary.opacity(0.08))
                     .frame(height: 10)
 
-                Capsule(style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.96, green: 0.44, blue: 0.27),
-                                Color(red: 0.98, green: 0.63, blue: 0.38),
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.primary.opacity(0.85))
                     .frame(width: max(currentX, 8), height: 10)
 
                 if let draftStartTimeSeconds {
@@ -41,9 +32,12 @@ struct ActionSessionTimelineView: View {
                 }
 
                 Circle()
-                    .fill(Color.white)
+                    .fill(Color(nsColor: .windowBackgroundColor))
                     .frame(width: 16, height: 16)
-                    .shadow(color: .black.opacity(0.25), radius: 4)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.primary.opacity(0.32), lineWidth: 1)
+                    )
                     .offset(x: min(max(currentX - 8, -8), width - 8))
             }
             .frame(height: 24)
@@ -78,12 +72,12 @@ struct ActionSessionTimelineView: View {
         if let endTimeSeconds {
             let endX = width * normalized(endTimeSeconds)
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(0.18))
+                .fill(Color.primary.opacity(0.16))
                 .frame(width: max(endX - startX, 4), height: 14)
                 .offset(x: startX)
         } else {
             Rectangle()
-                .fill(Color.white.opacity(0.85))
+                .fill(Color.primary.opacity(0.85))
                 .frame(width: 2, height: 18)
                 .offset(x: min(max(startX, 0), width - 2))
         }
