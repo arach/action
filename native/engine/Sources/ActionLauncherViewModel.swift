@@ -257,6 +257,19 @@ final class ActionLauncherViewModel: ObservableObject {
         consoleStatus = status
     }
 
+    func handleWebViewCommand(_ command: ActionWebViewCommand) {
+        switch command {
+        case .startLocalConsole:
+            startLocalConsole()
+        case .copyText(let value):
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(value, forType: .string)
+            consoleStatus = "Copied to clipboard"
+            consoleDetail = value
+        }
+    }
+
     func openBrowserWindow() {
         logger.notice("openBrowserWindow called with URL: \(self.consoleURL.absoluteString, privacy: .public)")
         browserController().show(url: self.consoleURL)
@@ -383,18 +396,7 @@ final class ActionLauncherViewModel: ObservableObject {
             self?.consoleStatus = text
         }
         controller.onCommand = { [weak self] command in
-            guard let self else {
-                return
-            }
-            switch command {
-            case .startLocalConsole:
-                self.startLocalConsole()
-            case .copyText(let value):
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(value, forType: .string)
-                self.consoleStatus = "Copied to clipboard: \(value)"
-            }
+            self?.handleWebViewCommand(command)
         }
         browserWindowController = controller
         return controller

@@ -27,6 +27,7 @@ struct ActionLauncherRootView: View {
     @ObservedObject var model: ActionLauncherViewModel
     @State private var selectedSection: LauncherSection? = .review
     @AppStorage("Action.LauncherSidebarIconsOnly") private var sidebarIconsOnly = false
+    @StateObject private var consoleBridge = ActionEmbeddedWebConsoleBridge()
     private let sessionDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
@@ -383,18 +384,40 @@ struct ActionLauncherRootView: View {
 
             surfaceCard(title: "Open") {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Use the embedded window for the normal loop, or open supporting artifacts directly when the console misbehaves.")
+                    Text("The console now lives inside Action. Use the browser or pop-out path only when you need to debug it separately.")
                         .font(.system(size: 12, weight: .regular, design: .default))
                         .foregroundStyle(StageHUDTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 10) {
-                        launcherButton("Embedded", tone: .primary, action: model.openEmbeddedConsole)
                         launcherButton("Browser", action: model.openWebConsoleInBrowser)
-                        launcherButton("Reload", action: model.reloadConsole)
-                        launcherButton("Inspector", action: model.showWebInspector)
+                        launcherButton("Pop Out", action: model.openEmbeddedConsole)
+                        launcherButton("Reload", action: {
+                            consoleBridge.reload()
+                            model.refreshConsoleState()
+                        })
+                        launcherButton("Inspector", action: consoleBridge.showInspector)
                     }
                 }
+            }
+
+            surfaceCard(title: "Embedded Console") {
+                ActionEmbeddedWebConsoleView(
+                    url: model.consoleURL,
+                    bridge: consoleBridge,
+                    onStatusChange: { status in
+                        model.setConsoleStatus(status)
+                    },
+                    onCommand: { command in
+                        model.handleWebViewCommand(command)
+                    }
+                )
+                .frame(minHeight: 480)
+                .clipShape(ActionChamferedShape(cornerCut: 6))
+                .overlay(
+                    ActionChamferedShape(cornerCut: 6)
+                        .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+                )
             }
 
             surfaceCard(title: "Recovery") {
