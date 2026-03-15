@@ -37,6 +37,14 @@ struct ActionSessionSummary: Identifiable {
     let startedAt: Date?
     let finishedAt: Date?
     let feedbackCount: Int
+
+    var agentFeedbackMarkdownURL: URL {
+        artifactDirectoryURL.appendingPathComponent("agent-feedback.md")
+    }
+
+    var agentFeedbackJSONURL: URL {
+        artifactDirectoryURL.appendingPathComponent("agent-feedback.json")
+    }
 }
 
 private struct ActionSessionTrace: Decodable {
@@ -86,7 +94,9 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var recentSessions: [ActionSessionSummary] = []
     @Published var isRunningGuidedDemo: Bool = false
     @Published var selectedSessionID: String?
+    @Published var focusedFeedbackItemID: String?
     @Published var appearanceMode: ActionAppearanceMode
+    @Published private(set) var reviewSelectionRequestID = UUID()
 
     init() {
         self.consoleURL = localConsoleURL
@@ -321,6 +331,7 @@ final class ActionLauncherViewModel: ObservableObject {
 
     func selectSession(_ session: ActionSessionSummary) {
         selectedSessionID = session.id
+        focusedFeedbackItemID = nil
     }
 
     func replaySession(_ session: ActionSessionSummary) {
@@ -340,6 +351,67 @@ final class ActionLauncherViewModel: ObservableObject {
             return
         }
         NSWorkspace.shared.open(session.feedbackURL)
+    }
+
+    func openAgentFeedbackMarkdown(_ session: ActionSessionSummary) throws {
+        try writeAgentFeedbackArtifacts(for: session)
+        NSWorkspace.shared.open(session.agentFeedbackMarkdownURL)
+    }
+
+    func openAgentFeedbackJSON(_ session: ActionSessionSummary) throws {
+        try writeAgentFeedbackArtifacts(for: session)
+        NSWorkspace.shared.open(session.agentFeedbackJSONURL)
+    }
+
+    func copyAgentFeedbackMarkdown(_ session: ActionSessionSummary) throws {
+        try writeAgentFeedbackArtifacts(for: session)
+        let value = try String(contentsOf: session.agentFeedbackMarkdownURL, encoding: .utf8)
+        copyToPasteboard(value)
+    }
+
+    func copyAgentFeedbackJSON(_ session: ActionSessionSummary) throws {
+        try writeAgentFeedbackArtifacts(for: session)
+        let value = try String(contentsOf: session.agentFeedbackJSONURL, encoding: .utf8)
+        copyToPasteboard(value)
+    }
+
+    func copyAgentFeedbackLink(_ session: ActionSessionSummary, feedbackItemId: String? = nil) throws {
+        let token = try ActionSessionLinkStore.shared.register(session: session, feedbackItemId: feedbackItemId)
+        copyToPasteboard("action://r/\(token)")
+    }
+
+    func handleIncomingDeepLink(_ url: URL) {
+        guard url.scheme?.lowercased() == "action" else {
+            return
+        }
+
+        let token: String
+        if url.host()?.lowercased() == "r" {
+            token = url.pathComponents.dropFirst().first ?? ""
+        } else {
+            token = url.host() ?? ""
+        }
+
+        guard !token.isEmpty else {
+            return
+        }
+
+        do {
+            guard let target = try ActionSessionLinkStore.shared.resolve(token: token),
+                  let session = try loadSession(at: URL(fileURLWithPath: target.artifactDirectoryPath, isDirectory: true)) else {
+                notes.append("deepLinkMissing=\(token)")
+                return
+            }
+
+            if !recentSessions.contains(where: { $0.id == session.id }) {
+                recentSessions.insert(session, at: 0)
+            }
+            selectedSessionID = session.id
+            focusedFeedbackItemID = target.feedbackItemId
+            reviewSelectionRequestID = UUID()
+        } catch {
+            notes.append("deepLinkError=\(error.localizedDescription)")
+        }
     }
 
     func openSessionScreenshot(_ session: ActionSessionSummary) {
@@ -585,12 +657,29 @@ final class ActionLauncherViewModel: ObservableObject {
         updatedDocument.updatedAt = ISO8601DateFormatter().string(from: Date())
         let data = try JSONEncoder.pretty.encode(updatedDocument)
         try data.write(to: session.feedbackURL, options: .atomic)
+        try writeAgentFeedbackArtifacts(updatedDocument, for: session)
         refreshSessions()
+    }
+
+    private func writeAgentFeedbackArtifacts(for session: ActionSessionSummary) throws {
+        try writeAgentFeedbackArtifacts(loadFeedback(for: session), for: session)
+    }
+
+    private func writeAgentFeedbackArtifacts(_ document: ActionSessionFeedbackDocument, for session: ActionSessionSummary) throws {
+        let export = document.agentExport(for: session)
+        let exportData = try JSONEncoder.pretty.encode(export)
+        try exportData.write(to: session.agentFeedbackJSONURL, options: .atomic)
+        try document.agentMarkdown(for: session).write(to: session.agentFeedbackMarkdownURL, atomically: true, encoding: .utf8)
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(value, forType: .string)
     }
 
     private func loadRecentSessions(limit: Int = 8) -> [ActionSessionSummary] {
         let sessionsURL = sessionsDirectoryURL()
-        let isoFormatter = ISO8601DateFormatter()
 
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: sessionsURL,
@@ -606,37 +695,40 @@ final class ActionLauncherViewModel: ObservableObject {
             return lhsDate > rhsDate
         }
 
-        return sortedURLs.prefix(limit).compactMap { sessionURL in
-            let traceURL = sessionURL.appendingPathComponent("trace.json")
-            let feedbackURL = sessionURL.appendingPathComponent("feedback.json")
-            guard let data = try? Data(contentsOf: traceURL),
-                  let trace = try? JSONDecoder().decode(ActionSessionTrace.self, from: data) else {
-                return nil
-            }
+        return sortedURLs.prefix(limit).compactMap { try? loadSession(at: $0) }
+    }
 
-            let screenshots = trace.screenshots.map(URL.init(fileURLWithPath:))
-            let stageScreenshotURL = screenshots.first(where: { $0.lastPathComponent == "stage.png" }) ?? screenshots.first
-            let resultScreenshotURL = screenshots.first(where: { $0.lastPathComponent == "result.png" })
-            let feedbackCount = ((try? Data(contentsOf: feedbackURL))
-                .flatMap { try? JSONDecoder().decode(ActionSessionFeedbackDocument.self, from: $0) })?.items.count ?? 0
-
-            return ActionSessionSummary(
-                id: trace.sessionId,
-                sessionId: trace.sessionId,
-                artifactDirectoryURL: sessionURL,
-                videoURL: URL(fileURLWithPath: trace.videoPath),
-                traceURL: traceURL,
-                feedbackURL: feedbackURL,
-                stageScreenshotURL: stageScreenshotURL,
-                resultScreenshotURL: resultScreenshotURL,
-                expression: trace.expression,
-                expectedResult: trace.expectedResult,
-                actualResult: trace.actualResult,
-                startedAt: isoFormatter.date(from: trace.startedAt),
-                finishedAt: isoFormatter.date(from: trace.finishedAt),
-                feedbackCount: feedbackCount
-            )
+    private func loadSession(at sessionURL: URL) throws -> ActionSessionSummary? {
+        let isoFormatter = ISO8601DateFormatter()
+        let traceURL = sessionURL.appendingPathComponent("trace.json")
+        let feedbackURL = sessionURL.appendingPathComponent("feedback.json")
+        guard let data = try? Data(contentsOf: traceURL),
+              let trace = try? JSONDecoder().decode(ActionSessionTrace.self, from: data) else {
+            return nil
         }
+
+        let screenshots = trace.screenshots.map(URL.init(fileURLWithPath:))
+        let stageScreenshotURL = screenshots.first(where: { $0.lastPathComponent == "stage.png" }) ?? screenshots.first
+        let resultScreenshotURL = screenshots.first(where: { $0.lastPathComponent == "result.png" })
+        let feedbackCount = ((try? Data(contentsOf: feedbackURL))
+            .flatMap { try? JSONDecoder().decode(ActionSessionFeedbackDocument.self, from: $0) })?.items.count ?? 0
+
+        return ActionSessionSummary(
+            id: trace.sessionId,
+            sessionId: trace.sessionId,
+            artifactDirectoryURL: sessionURL,
+            videoURL: URL(fileURLWithPath: trace.videoPath),
+            traceURL: traceURL,
+            feedbackURL: feedbackURL,
+            stageScreenshotURL: stageScreenshotURL,
+            resultScreenshotURL: resultScreenshotURL,
+            expression: trace.expression,
+            expectedResult: trace.expectedResult,
+            actualResult: trace.actualResult,
+            startedAt: isoFormatter.date(from: trace.startedAt),
+            finishedAt: isoFormatter.date(from: trace.finishedAt),
+            feedbackCount: feedbackCount
+        )
     }
 
     private func launchGuidedDemo() async throws -> GuidedCaptureLauncherResult {

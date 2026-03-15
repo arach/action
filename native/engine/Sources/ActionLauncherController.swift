@@ -47,6 +47,14 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         return true
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        showWindow()
+        for url in urls {
+            viewModel.handleIncomingDeepLink(url)
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
     func windowWillClose(_ notification: Notification) {
         NSApplication.shared.terminate(nil)
     }

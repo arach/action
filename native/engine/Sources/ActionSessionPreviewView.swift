@@ -118,7 +118,11 @@ struct ActionSessionPreviewView: View {
                 HStack(spacing: 10) {
                     feedbackButton("Save Feedback", tone: .primary, action: saveFeedback)
                     if !feedbackDocument.items.isEmpty {
+                        feedbackButton("Copy Link", action: copyAgentFeedbackLink)
                         feedbackButton("Open feedback.json", action: { model.openSessionFeedback(session) })
+                        feedbackButton("Copy MD", action: copyAgentFeedbackMarkdown)
+                        feedbackButton("Copy JSON", action: copyAgentFeedbackJSON)
+                        feedbackButton("Open MD", action: openAgentFeedbackMarkdown)
                     }
                     Spacer()
                 }
@@ -158,6 +162,12 @@ struct ActionSessionPreviewView: View {
         }
         .onChange(of: session.id) { _, _ in
             reloadSession()
+        }
+        .onChange(of: model.focusedFeedbackItemID) { _, _ in
+            applyFocusedFeedbackIfNeeded()
+        }
+        .onAppear {
+            applyFocusedFeedbackIfNeeded()
         }
     }
 
@@ -285,11 +295,11 @@ struct ActionSessionPreviewView: View {
         .padding(12)
         .background(
             ActionChamferedShape(cornerCut: 6)
-                .fill(StageHUDTheme.appBackground)
+                .fill(model.focusedFeedbackItemID == item.id ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.appBackground)
         )
         .overlay(
             ActionChamferedShape(cornerCut: 6)
-                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+                .stroke(model.focusedFeedbackItemID == item.id ? StageHUDTheme.panelBorder : StageHUDTheme.cardBorder, lineWidth: 1)
         )
     }
 
@@ -363,9 +373,45 @@ struct ActionSessionPreviewView: View {
             feedbackDocument = model.loadFeedback(for: session)
             draftInstruction = ""
             clearDraftAnchors()
-            feedbackStatus = "Saved to feedback.json"
+            feedbackStatus = "Saved feedback.json + agent exports"
         } catch {
             feedbackStatus = "Save failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func copyAgentFeedbackMarkdown() {
+        do {
+            try model.copyAgentFeedbackMarkdown(session)
+            feedbackStatus = "Copied agent-feedback.md"
+        } catch {
+            feedbackStatus = "Copy failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func copyAgentFeedbackJSON() {
+        do {
+            try model.copyAgentFeedbackJSON(session)
+            feedbackStatus = "Copied agent-feedback.json"
+        } catch {
+            feedbackStatus = "Copy failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func copyAgentFeedbackLink() {
+        do {
+            try model.copyAgentFeedbackLink(session)
+            feedbackStatus = "Copied compact session link"
+        } catch {
+            feedbackStatus = "Copy failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func openAgentFeedbackMarkdown() {
+        do {
+            try model.openAgentFeedbackMarkdown(session)
+            feedbackStatus = "Opened agent-feedback.md"
+        } catch {
+            feedbackStatus = "Open failed: \(error.localizedDescription)"
         }
     }
 
@@ -388,6 +434,16 @@ struct ActionSessionPreviewView: View {
         draftInstruction = ""
         clearDraftAnchors()
         feedbackStatus = feedbackDocument.items.isEmpty ? "No agent feedback yet" : "Loaded feedback.json"
+        applyFocusedFeedbackIfNeeded()
+    }
+
+    private func applyFocusedFeedbackIfNeeded() {
+        guard let focusedFeedbackItemID = model.focusedFeedbackItemID,
+              let item = feedbackDocument.items.first(where: { $0.id == focusedFeedbackItemID }) else {
+            return
+        }
+        playback.seek(to: item.startTimeSeconds)
+        feedbackStatus = "Focused linked feedback item"
     }
 
     private func regionDragGesture(in size: CGSize) -> some Gesture {

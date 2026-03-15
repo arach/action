@@ -78,6 +78,9 @@ struct ActionLauncherRootView: View {
         }
         .frame(minWidth: 1180, minHeight: 760)
         .background(StageHUDTheme.appBackground)
+        .onChange(of: model.reviewSelectionRequestID) { _, _ in
+            selectedSection = .review
+        }
     }
 
     private var sidebarHeader: some View {
