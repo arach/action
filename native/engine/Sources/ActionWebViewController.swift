@@ -4,6 +4,7 @@ import OSLog
 
 enum ActionWebViewCommand {
     case startLocalConsole
+    case copyText(String)
 }
 
 @MainActor
@@ -169,6 +170,17 @@ final class ActionWebViewController: NSViewController, WKNavigationDelegate {
             return
         }
 
+        if url.scheme == "action", url.host(percentEncoded: false) == "copy-command" {
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            let text = components?.queryItems?.first(where: { $0.name == "text" })?.value ?? ""
+            if !text.isEmpty {
+                onCommand?(.copyText(text))
+                report("Copied command to clipboard")
+            }
+            decisionHandler(.cancel)
+            return
+        }
+
         decisionHandler(.allow)
     }
 
@@ -274,6 +286,13 @@ final class ActionWebViewController: NSViewController, WKNavigationDelegate {
               font-weight: 700;
               cursor: pointer;
               margin-top: 16px;
+              text-decoration: none;
+              display: inline-block;
+            }
+            .cta.secondary {
+              background: rgba(255,255,255,0.12);
+              color: #fff;
+              margin-left: 10px;
             }
           </style>
         </head>
@@ -282,9 +301,9 @@ final class ActionWebViewController: NSViewController, WKNavigationDelegate {
             <h1>Local console is not running</h1>
             <p>Action tried to load <code>\(escapedURL)</code>, but nothing answered on that port.</p>
             <p>You can start it from here, or run a command manually from your dev shell.</p>
-            <a href="action://start-local-console">
-              <button class="cta">Start Local Console</button>
-            </a>
+            <a class="cta" href="action://start-local-console">Start Local Console</a>
+            <a class="cta secondary" href="action://copy-command?text=action-dev%20hud">Copy action-dev command</a>
+            <a class="cta secondary" href="action://copy-command?text=bun%20run%20hud">Copy bun command</a>
             <div class="callout">
               <div class="label">Recommended</div>
               <pre>action-dev hud</pre>

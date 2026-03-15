@@ -272,6 +272,11 @@ final class ActionLauncherViewModel: ObservableObject {
             switch command {
             case .startLocalConsole:
                 self.startLocalConsole()
+            case .copyText(let value):
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(value, forType: .string)
+                self.consoleStatus = "Copied to clipboard: \(value)"
             }
         }
         browserWindowController = controller
