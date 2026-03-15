@@ -201,6 +201,16 @@ final class GuidedCaptureSessionRunner {
             Date().timeIntervalSince(startTime) * 1000
         }
 
+        func clearCalculatorInput() throws {
+            let clearCandidates = ["AllClear", "Clear"]
+            for label in clearCandidates {
+                if (try? clickCalculatorButton(label: label)) != nil {
+                    return
+                }
+            }
+            throw ActionHostError.accessibilityLookupFailed("Could not find Calculator clear button (AllClear/Clear)")
+        }
+
         let overlayViewportId = "calculator-primary"
         let overlayBackdrop = options.options["backdrop"] ?? "gradient"
 
@@ -351,7 +361,7 @@ final class GuidedCaptureSessionRunner {
         appendStep("start region recording")
 
         let demoPlan = CalculatorDemoPlan.random()
-        try clickCalculatorButton(label: "AllClear")
+        try clearCalculatorInput()
         usleep(220_000)
 
         for (index, buttonLabel) in demoPlan.steps.enumerated() {

@@ -22,7 +22,28 @@ struct ActionLauncherRootView: View {
                 .background(consoleBackground)
         }
         .frame(minWidth: 1180, minHeight: 760)
-        .background(Color(red: 0.04, green: 0.05, blue: 0.07))
+        .background(
+            ZStack {
+                Color(red: 0.03, green: 0.04, blue: 0.06)
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.09, green: 0.15, blue: 0.26).opacity(0.34),
+                        Color(red: 0.04, green: 0.08, blue: 0.12).opacity(0.08),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.25, green: 0.47, blue: 0.95).opacity(0.22),
+                        .clear,
+                    ],
+                    center: .topTrailing,
+                    startRadius: 60,
+                    endRadius: 540
+                )
+            }
+        )
     }
 
     private var utilityRail: some View {
@@ -70,7 +91,11 @@ struct ActionLauncherRootView: View {
                                 .foregroundStyle(StageHUDTheme.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        launcherButton(model.isRunningGuidedDemo ? "Running Guided Demo…" : "Run Guided Demo", action: model.runGuidedCalculatorDemo)
+                        launcherButton(
+                            model.isRunningGuidedDemo ? "Running Guided Demo…" : "Run Guided Demo",
+                            tone: .primary,
+                            action: model.runGuidedCalculatorDemo
+                        )
                             .disabled(model.isRunningGuidedDemo)
                         Text(model.guidedDemoStatus)
                             .font(.system(size: 12, weight: .regular, design: .default))
@@ -97,7 +122,7 @@ struct ActionLauncherRootView: View {
 
                 utilityCard(title: "Embedded Console") {
                     VStack(spacing: 10) {
-                        launcherButton("Start Local Console", action: model.startLocalConsole)
+                        launcherButton("Start Local Console", tone: .primary, action: model.startLocalConsole)
                         launcherButton("Open Embedded Console", action: model.openEmbeddedConsole)
                         launcherButton("Load Local Console", action: model.showLocalConsole)
                         launcherButton("Load Demo Site", action: model.showDemoSite)
@@ -268,11 +293,17 @@ struct ActionLauncherRootView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.07), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
         )
     }
 
@@ -288,9 +319,13 @@ struct ActionLauncherRootView: View {
         }
     }
 
-    private func launcherButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func launcherButton(
+        _ title: String,
+        tone: StageHUDViewModel.ButtonTone = .secondary,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(title, action: action)
-            .buttonStyle(StageHUDButtonStyle(tone: .secondary))
+            .buttonStyle(StageHUDButtonStyle(tone: tone))
     }
 
     private func sessionRailRow(_ session: ActionSessionSummary) -> some View {
