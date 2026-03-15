@@ -10,6 +10,10 @@ final class ActionAppearanceStore: ObservableObject {
     @Published var mode: ActionAppearanceMode {
         didSet {
             mode.persist()
+            NSApplication.shared.appearance = mode.appearance
+            for window in NSApplication.shared.windows {
+                window.appearance = mode.appearance
+            }
         }
     }
 

@@ -44,9 +44,9 @@ struct ActionSessionPreviewView: View {
 
                 ZStack(alignment: .topLeading) {
                     ActionInlinePlayerView(player: playback.player)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .clipShape(ActionChamferedShape(cornerCut: 6))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            ActionChamferedShape(cornerCut: 6)
                                 .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
                         )
 
@@ -107,11 +107,11 @@ struct ActionSessionPreviewView: View {
                     .lineLimit(3...6)
                     .padding(12)
                     .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        ActionChamferedShape(cornerCut: 6)
                             .fill(StageHUDTheme.appBackground)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        ActionChamferedShape(cornerCut: 6)
                             .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
                     )
 
@@ -187,10 +187,10 @@ struct ActionSessionPreviewView: View {
             ZStack {
                 if let draftRegion {
                     let frame = denormalize(draftRegion, in: geometry.size)
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    ActionChamferedShape(cornerCut: 6)
                         .stroke(StageHUDTheme.textPrimary.opacity(0.74), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
                         .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            ActionChamferedShape(cornerCut: 6)
                                 .fill(StageHUDTheme.textPrimary.opacity(0.08))
                         )
                         .frame(width: frame.width, height: frame.height)
@@ -198,10 +198,10 @@ struct ActionSessionPreviewView: View {
                 }
 
                 if let previewRect = previewDragRect(in: geometry.size) {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    ActionChamferedShape(cornerCut: 6)
                         .stroke(StageHUDTheme.textPrimary.opacity(0.92), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
                         .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            ActionChamferedShape(cornerCut: 6)
                                 .fill(StageHUDTheme.textPrimary.opacity(0.10))
                         )
                         .frame(width: previewRect.width, height: previewRect.height)
@@ -211,7 +211,7 @@ struct ActionSessionPreviewView: View {
             .contentShape(Rectangle())
             .gesture(regionDragGesture(in: geometry.size))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .clipShape(ActionChamferedShape(cornerCut: 6))
     }
 
     private var draftAnchorSummary: String {
@@ -230,10 +230,10 @@ struct ActionSessionPreviewView: View {
     }
 
     private var reviewCardBackground: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        ActionChamferedShape(cornerCut: 6)
             .fill(StageHUDTheme.cardFill)
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                ActionChamferedShape(cornerCut: 6)
                     .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
             )
     }
@@ -284,11 +284,11 @@ struct ActionSessionPreviewView: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            ActionChamferedShape(cornerCut: 6)
                 .fill(StageHUDTheme.appBackground)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            ActionChamferedShape(cornerCut: 6)
                 .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
         )
     }

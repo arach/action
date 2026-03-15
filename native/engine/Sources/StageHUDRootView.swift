@@ -126,20 +126,20 @@ struct StageHUDRootView: View {
     }
 
     private var panelBackground: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
+        ActionChamferedShape(cornerCut: 8)
             .fill(StageHUDTheme.panelBackgroundTop)
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                ActionChamferedShape(cornerCut: 8)
                     .stroke(StageHUDTheme.panelBorder, lineWidth: 1)
             )
             .shadow(color: StageHUDTheme.panelShadow, radius: 14, x: 0, y: 8)
     }
 
     private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        ActionChamferedShape(cornerCut: 6)
             .fill(StageHUDTheme.cardFill)
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                ActionChamferedShape(cornerCut: 6)
                     .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
             )
     }
@@ -182,10 +182,10 @@ struct StageHUDButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity, minHeight: 40)
             .background(background(configuration: configuration))
             .overlay(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                ActionChamferedShape(cornerCut: 4)
                     .stroke(borderColor(configuration: configuration), lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .clipShape(ActionChamferedShape(cornerCut: 4))
             .scaleEffect(configuration.isPressed ? 0.992 : 1)
             .opacity(configuration.isPressed ? 0.94 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
