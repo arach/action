@@ -70,6 +70,7 @@ final class ActionLauncherViewModel: ObservableObject {
     private var browserWindowController: ActionBrowserWindowController?
     private var localConsoleProcess: Process?
     private var consoleReachabilityTask: Task<Void, Never>?
+    private var consoleWatchdogTask: Task<Void, Never>?
 
     @Published var agentStatus: String = "Offline"
     @Published var accessibilityStatus: String = "Unknown"
@@ -80,6 +81,7 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var consoleDetail: String = "Use the local HUD console without leaving Action."
     @Published var consoleIsReachable: Bool = false
     @Published var consoleIsManagedByAction: Bool = false
+    @Published var consoleAutoEnsureEnabled: Bool = true
     @Published var guidedDemoStatus: String = "Ready"
     @Published var recentSessions: [ActionSessionSummary] = []
     @Published var isRunningGuidedDemo: Bool = false
@@ -91,6 +93,7 @@ final class ActionLauncherViewModel: ObservableObject {
         self.appearanceMode = ActionAppearanceStore.shared.mode
         refreshSessions()
         refreshConsoleState()
+        startConsoleWatchdog()
     }
 
     func refreshPermissions() {
@@ -127,6 +130,8 @@ final class ActionLauncherViewModel: ObservableObject {
     }
 
     func startLocalConsole() {
+        consoleAutoEnsureEnabled = true
+
         if consoleIsReachable && localConsoleProcess == nil {
             consoleStatus = "Local console already running"
             consoleDetail = localConsoleURL.absoluteString
@@ -174,13 +179,15 @@ final class ActionLauncherViewModel: ObservableObject {
     }
 
     func stopLocalConsole() {
+        consoleAutoEnsureEnabled = false
+
         guard let localConsoleProcess, localConsoleProcess.isRunning else {
             if consoleIsReachable {
-                consoleStatus = "Console is reachable, but not owned by this Action window"
-                consoleDetail = "Stop it from the process that launched it, or restart it here."
+                consoleStatus = "Auto-start paused"
+                consoleDetail = "The console is reachable from another process. Action will not auto-start it until you start or restart it here."
             } else {
-                consoleStatus = "Local console is not running"
-                consoleDetail = "Start it here when you want the embedded console available."
+                consoleStatus = "Auto-start paused"
+                consoleDetail = "The local console will stay offline until you start it again."
             }
             return
         }
@@ -189,11 +196,12 @@ final class ActionLauncherViewModel: ObservableObject {
         self.localConsoleProcess = nil
         consoleIsManagedByAction = false
         consoleStatus = "Stopping local console…"
-        consoleDetail = "Waiting for the local HUD process to exit."
+        consoleDetail = "Auto-start is paused until you start or restart the console again."
         scheduleConsoleProbeBurst()
     }
 
     func restartLocalConsole() {
+        consoleAutoEnsureEnabled = true
         if let localConsoleProcess, localConsoleProcess.isRunning {
             localConsoleProcess.terminate()
             self.localConsoleProcess = nil
@@ -352,6 +360,8 @@ final class ActionLauncherViewModel: ObservableObject {
 
     func stopAgent() {
         agentProcess.stopIfNeeded()
+        consoleReachabilityTask?.cancel()
+        consoleWatchdogTask?.cancel()
         if let localConsoleProcess, localConsoleProcess.isRunning {
             localConsoleProcess.terminate()
             self.localConsoleProcess = nil
@@ -446,10 +456,36 @@ final class ActionLauncherViewModel: ObservableObject {
             consoleStatus = "Waiting for local console…"
             consoleDetail = "The process is running, but the web surface has not responded yet."
             consoleIsManagedByAction = true
+        } else if !consoleAutoEnsureEnabled {
+            consoleStatus = "Auto-start paused"
+            consoleDetail = "The local console is offline and Action is not auto-starting it right now."
+            consoleIsManagedByAction = false
         } else {
             consoleStatus = "Local console offline"
             consoleDetail = "Start it here, then open it embedded or in your browser."
             consoleIsManagedByAction = false
+        }
+    }
+
+    private func startConsoleWatchdog() {
+        consoleWatchdogTask?.cancel()
+        consoleWatchdogTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+
+            while !Task.isCancelled {
+                let reachable = await probeConsoleReachability()
+                self.consoleIsReachable = reachable
+
+                if !reachable, self.consoleAutoEnsureEnabled, (self.localConsoleProcess?.isRunning != true) {
+                    self.consoleStatus = "Bootstrapping local console…"
+                    self.consoleDetail = "Action is starting the HUD automatically because it was not reachable."
+                    self.startLocalConsole()
+                } else {
+                    await self.updateConsoleReachability()
+                }
+
+                try? await Task.sleep(for: .seconds(5))
+            }
         }
     }
 
