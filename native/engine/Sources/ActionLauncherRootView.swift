@@ -191,22 +191,33 @@ struct ActionLauncherRootView: View {
     }
 
     private var appHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Workspace")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(StageHUDTheme.textMuted)
                 Text(selectedSection?.rawValue ?? LauncherSection.review.rawValue)
-                    .font(.system(size: 24, weight: .bold, design: .monospaced))
+                    .font(.system(size: 20, weight: .bold, design: .monospaced))
                     .foregroundStyle(StageHUDTheme.textPrimary)
                 Text(selectedSection?.subtitle ?? LauncherSection.review.subtitle)
-                    .font(.system(size: 12, weight: .regular, design: .default))
+                    .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(StageHUDTheme.textMuted)
             }
 
             Spacer()
 
+            headerActions
+        }
+    }
+
+    @ViewBuilder
+    private var headerActions: some View {
+        switch selectedSection ?? .review {
+        case .review:
             HStack(spacing: 10) {
-                if selectedSection == .review || selectedSection == nil, let session = model.selectedSession {
+                if let session = model.selectedSession {
                     Text(session.expression)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(StageHUDTheme.textSecondary)
                 }
 
@@ -216,8 +227,17 @@ struct ActionLauncherRootView: View {
                     action: model.runGuidedCalculatorDemo
                 )
                 .disabled(model.isRunningGuidedDemo)
-
-                launcherButton("Start Console", action: model.startLocalConsole)
+            }
+        case .library:
+            EmptyView()
+        case .console:
+            HStack(spacing: 10) {
+                launcherButton("Restart Console", tone: .primary, action: model.restartLocalConsole)
+                launcherButton("Browser", action: model.openWebConsoleInBrowser)
+            }
+        case .settings:
+            HStack(spacing: 10) {
+                launcherButton("Refresh Permissions", action: model.refreshPermissions)
             }
         }
     }
@@ -342,92 +362,69 @@ struct ActionLauncherRootView: View {
     private var consoleSection: some View {
         VStack(alignment: .leading, spacing: 18) {
             surfaceCard(title: "Runtime") {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .top, spacing: 18) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 8) {
-                                Circle()
-                                    .fill(model.consoleIsReachable ? Color.green : Color.gray.opacity(0.6))
-                                    .frame(width: 8, height: 8)
-                                Text(model.consoleStatus)
-                                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(StageHUDTheme.textPrimary)
-                            }
-
-                            Text(model.consoleDetail)
-                                .font(.system(size: 12, weight: .regular, design: .default))
-                                .foregroundStyle(StageHUDTheme.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 8) {
-                            metric(label: "Reachable", value: model.consoleIsReachable ? "Yes" : "No")
-                            metric(label: "Managed", value: model.consoleIsManagedByAction ? "Action" : "External")
-                        }
+                HStack(alignment: .center, spacing: 18) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(model.consoleIsReachable ? Color.green : Color.gray.opacity(0.6))
+                            .frame(width: 8, height: 8)
+                        Text(model.consoleStatus)
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textPrimary)
                     }
 
-                    Text(model.consoleURL.absoluteString)
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundStyle(StageHUDTheme.textMuted)
-                        .textSelection(.enabled)
+                    Text(model.consoleDetail)
+                        .font(.system(size: 11, weight: .regular, design: .default))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                        .lineLimit(1)
 
+                    Spacer()
+
+                    metric(label: "Reachable", value: model.consoleIsReachable ? "Yes" : "No")
+                    metric(label: "Managed", value: model.consoleIsManagedByAction ? "Action" : "External")
+                }
+            }
+
+            surfaceCard(title: "Console Surface") {
+                VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 10) {
                         launcherButton("Start", tone: .primary, action: model.startLocalConsole)
                         launcherButton("Stop", action: model.stopLocalConsole)
                         launcherButton("Restart", action: model.restartLocalConsole)
-                        launcherButton("Refresh", action: model.refreshConsoleState)
-                    }
-                }
-            }
-
-            surfaceCard(title: "Open") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("The console now lives inside Action. Use the browser or pop-out path only when you need to debug it separately.")
-                        .font(.system(size: 12, weight: .regular, design: .default))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    HStack(spacing: 10) {
-                        launcherButton("Browser", action: model.openWebConsoleInBrowser)
-                        launcherButton("Pop Out", action: model.openEmbeddedConsole)
                         launcherButton("Reload", action: {
                             consoleBridge.reload()
                             model.refreshConsoleState()
                         })
                         launcherButton("Inspector", action: consoleBridge.showInspector)
+                        Spacer()
+                        launcherButton("Browser", action: model.openWebConsoleInBrowser)
+                        launcherButton("Pop Out", action: model.openEmbeddedConsole)
                     }
-                }
-            }
 
-            surfaceCard(title: "Embedded Console") {
-                ActionEmbeddedWebConsoleView(
-                    url: model.consoleURL,
-                    bridge: consoleBridge,
-                    onStatusChange: { status in
-                        model.setConsoleStatus(status)
-                    },
-                    onCommand: { command in
-                        model.handleWebViewCommand(command)
-                    }
-                )
-                .frame(minHeight: 480)
-                .clipShape(ActionChamferedShape(cornerCut: 6))
-                .overlay(
-                    ActionChamferedShape(cornerCut: 6)
-                        .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-                )
-            }
-
-            surfaceCard(title: "Recovery") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("If you need to debug outside the embedded view, copy the launch command or inspect the captured log.")
-                        .font(.system(size: 12, weight: .regular, design: .default))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    ActionEmbeddedWebConsoleView(
+                        url: model.consoleURL,
+                        bridge: consoleBridge,
+                        onStatusChange: { status in
+                            model.setConsoleStatus(status)
+                        },
+                        onCommand: { command in
+                            model.handleWebViewCommand(command)
+                        }
+                    )
+                    .frame(minHeight: 540)
+                    .clipShape(ActionChamferedShape(cornerCut: 6))
+                    .overlay(
+                        ActionChamferedShape(cornerCut: 6)
+                            .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+                    )
 
                     HStack(spacing: 10) {
+                        Text(model.consoleURL.absoluteString)
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                            .textSelection(.enabled)
+
+                        Spacer()
+
                         launcherButton("Copy Launch Command", action: model.copyLocalConsoleCommand)
                         launcherButton("Open Log", action: model.openConsoleLog)
                     }
