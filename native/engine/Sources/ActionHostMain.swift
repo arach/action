@@ -19,7 +19,7 @@ struct PermissionSnapshot: Encodable {
     let notes: [String]?
 }
 
-struct ActionHostResponse: Encodable {
+struct ActionHostResponse: Codable {
     let status: String
     let outputPath: String?
     let detail: String?
