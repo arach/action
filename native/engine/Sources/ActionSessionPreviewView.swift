@@ -1,4 +1,4 @@
-import AVKit
+import AVFoundation
 import Foundation
 import SwiftUI
 
@@ -29,7 +29,7 @@ struct ActionSessionPreviewView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ZStack(alignment: .topLeading) {
-                VideoPlayer(player: playback.player)
+                ActionInlinePlayerView(player: playback.player)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
