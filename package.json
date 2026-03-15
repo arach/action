@@ -10,6 +10,9 @@
   ],
   "scripts": {
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "docs:generate": "dewey generate",
+    "docs:agent": "dewey agent",
+    "docs:audit": "dewey audit",
     "demo:calculator": "bun packages/cli/src/main.ts calculator-demo mock",
     "demo:calculator:macos": "bun packages/cli/src/main.ts calculator-demo macos",
     "scenario:calculator": "bun packages/cli/src/main.ts scenario calculator-demo",
@@ -25,6 +28,7 @@
     "native:test:record": "native/engine/scripts/test-record.sh"
   },
   "devDependencies": {
+    "@arach/dewey": "/Users/arach/dev/dewey/packages/docs",
     "@types/node": "^24.0.0",
     "typescript": "^5.7.3"
   }
