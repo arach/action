@@ -17,6 +17,7 @@ import type {
   TargetApp,
   TargetQuery,
 } from "@action/protocol";
+import { executeInteractionAction } from "./interaction/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,6 +37,68 @@ function calculatorButtonName(query: TargetQuery): string {
   return query.text ?? query.semanticId ?? "unknown";
 }
 
+function boundsCloseTo(
+  current: StageViewport["bounds"],
+  target: StageViewport["bounds"],
+  tolerance = 6,
+): boolean {
+  return Math.abs(current.x - target.x) <= tolerance
+    && Math.abs(current.y - target.y) <= tolerance
+    && Math.abs(current.width - target.width) <= tolerance
+    && Math.abs(current.height - target.height) <= tolerance;
+}
+
+function containBounds(
+  requested: StageViewport["bounds"],
+  actual: StageViewport["bounds"],
+): StageViewport["bounds"] {
+  const corrected = { ...requested };
+
+  if (corrected.x > actual.x) {
+    corrected.x = actual.x;
+  }
+
+  if (corrected.y > actual.y) {
+    corrected.y = actual.y;
+  }
+
+  const requestedRight = corrected.x + corrected.width;
+  const requestedBottom = corrected.y + corrected.height;
+  const actualRight = actual.x + actual.width;
+  const actualBottom = actual.y + actual.height;
+
+  if (requestedRight < actualRight) {
+    corrected.width = actualRight - corrected.x;
+  }
+
+  if (requestedBottom < actualBottom) {
+    corrected.height = actualBottom - corrected.y;
+  }
+
+  return corrected;
+}
+
+interface PixelSize {
+  width: number;
+  height: number;
+}
+
+interface GeometryReport {
+  generatedAt: string;
+  bundleId?: string;
+  surfaceId?: string;
+  requestedViewport?: StageViewport["bounds"];
+  accessibilityWindowFrame?: StageViewport["bounds"];
+  captureWindowFrame?: StageViewport["bounds"];
+  resolvedViewport?: StageViewport["bounds"];
+  capturePath?: string;
+  capturePixelSize?: PixelSize;
+  viewportScreenshotPath?: string;
+  viewportScreenshotPixelSize?: PixelSize;
+  fullScreenshotPath?: string;
+  fullScreenshotPixelSize?: PixelSize;
+}
+
 export class MacOSCommandEngine implements CaptureEngine {
   private readonly surfaces = new Map<string, TargetApp>();
   private activeCapturePath?: string;
@@ -49,6 +112,12 @@ export class MacOSCommandEngine implements CaptureEngine {
   private overlayControlPath?: string;
   private overlayActive = false;
   private overlayPid?: number;
+  private readonly enableStageControls = process.env.ACTION_STAGE_CONTROLS !== "0";
+  private activeBackdrop: BackdropPreset = "neutral";
+  private geometryReport: GeometryReport = {
+    generatedAt: new Date().toISOString(),
+  };
+  private geometryReportPath?: string;
 
   constructor(
     private readonly nativeHostPath = "native/engine/scripts/run-app-host.sh",
@@ -88,12 +157,14 @@ export class MacOSCommandEngine implements CaptureEngine {
     this.overlayStatePath = paths.statePath;
     this.overlayStopPath = paths.stopPath;
     this.overlayLogPath = paths.logPath;
-    this.overlayControlPath = paths.controlPath;
+    this.overlayControlPath = this.enableStageControls ? paths.controlPath : undefined;
 
     await mkdir(dirname(paths.statePath), { recursive: true });
     await rm(paths.stopPath, { force: true });
     await rm(paths.logPath, { force: true });
-    await rm(paths.controlPath, { force: true });
+    if (this.enableStageControls) {
+      await rm(paths.controlPath, { force: true });
+    }
     await this.writeOverlayState(paths.statePath, presentation);
 
     if (this.overlayActive) {
@@ -110,8 +181,7 @@ export class MacOSCommandEngine implements CaptureEngine {
       paths.stopPath,
       "--debug-log",
       paths.logPath,
-      "--control-file",
-      paths.controlPath,
+      ...(this.enableStageControls ? ["--control-file", paths.controlPath] : []),
     );
     const response = JSON.parse(stdout) as { detail?: string };
     this.overlayPid = response.detail ? Number(response.detail) : undefined;
@@ -162,10 +232,17 @@ export class MacOSCommandEngine implements CaptureEngine {
     this.overlayControlPath = undefined;
   }
 
-  async setBackdrop(_backdrop: BackdropPreset): Promise<void> {}
+  async setBackdrop(backdrop: BackdropPreset): Promise<void> {
+    this.activeBackdrop = backdrop;
+  }
 
   async launchApp(app: TargetApp): Promise<SurfaceRef> {
     await execFileAsync("open", ["-a", app.name]);
+    if (app.bundleId === "com.apple.Notes") {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      await this.runHost("prepare-notes-note");
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
 
     const id = appSurfaceId(app);
     this.surfaces.set(id, app);
@@ -203,38 +280,87 @@ export class MacOSCommandEngine implements CaptureEngine {
       return resolvedViewport;
     }
 
-    await this.runHost(
-      "set-window-frame",
-      "--bundle-id",
-      app.bundleId,
-      "--x",
-      String(viewport.bounds.x),
-      "--y",
-      String(viewport.bounds.y),
-      "--width",
-      String(viewport.bounds.width),
-      "--height",
-      String(viewport.bounds.height),
-    );
+    this.geometryReport = {
+      generatedAt: new Date().toISOString(),
+      bundleId: app.bundleId,
+      surfaceId,
+      requestedViewport: viewport.bounds,
+    };
 
-    try {
-      const { stdout } = await this.runHost(
-        "get-window-frame",
-        "--bundle-id",
-        app.bundleId,
-      );
-      const payload = JSON.parse(stdout) as {
-        frame?: { x: number; y: number; width: number; height: number };
-      };
-      if (payload.frame) {
+    let frameConfigured = false;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        await this.runHost(
+          "set-window-frame",
+          "--bundle-id",
+          app.bundleId,
+          "--x",
+          String(viewport.bounds.x),
+          "--y",
+          String(viewport.bounds.y),
+          "--width",
+          String(viewport.bounds.width),
+          "--height",
+          String(viewport.bounds.height),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        const [accessibilityBounds, captureBounds] = await Promise.all([
+          this.readAccessibilityWindowBounds(app.bundleId),
+          this.readCaptureWindowBounds(app.bundleId),
+        ]);
+        if (accessibilityBounds) {
+          this.geometryReport.accessibilityWindowFrame = accessibilityBounds;
+        }
+        if (captureBounds) {
+          this.geometryReport.captureWindowFrame = captureBounds;
+        }
+
+        const actualBounds = captureBounds ?? accessibilityBounds;
+        if (actualBounds) {
+          const correctedBounds = containBounds(viewport.bounds, actualBounds);
+          resolvedViewport = {
+            ...viewport,
+            bounds: correctedBounds,
+            surfaceId,
+          };
+          frameConfigured = true;
+          if (boundsCloseTo(actualBounds, viewport.bounds)) {
+            break;
+          }
+        }
+        frameConfigured = true;
+      } catch (error) {
+        if (attempt === 19) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+
+    if (frameConfigured) {
+      const [accessibilityBounds, captureBounds] = await Promise.all([
+        this.readAccessibilityWindowBounds(app.bundleId),
+        this.readCaptureWindowBounds(app.bundleId),
+      ]);
+      if (accessibilityBounds) {
+        this.geometryReport.accessibilityWindowFrame = accessibilityBounds;
+      }
+      if (captureBounds) {
+        this.geometryReport.captureWindowFrame = captureBounds;
+      }
+      const actualBounds = captureBounds ?? accessibilityBounds;
+      if (actualBounds) {
         resolvedViewport = {
           ...viewport,
-          bounds: payload.frame,
+          bounds: containBounds(viewport.bounds, actualBounds),
           surfaceId,
         };
       }
-    } catch {}
+    }
 
+    this.geometryReport.generatedAt = new Date().toISOString();
+    this.geometryReport.resolvedViewport = resolvedViewport.bounds;
+    await this.persistGeometryReport();
     this.activeViewport = resolvedViewport;
     return resolvedViewport;
   }
@@ -250,8 +376,23 @@ export class MacOSCommandEngine implements CaptureEngine {
     this.activeCapturePath = request.outputPath;
     this.activeCaptureStopPath = `${request.outputPath}.stop`;
     this.activeCaptureFinishedPath = `${request.outputPath}.finished`;
+    this.geometryReportPath = resolve(dirname(request.outputPath), "geometry-report.json");
+    this.geometryReport.generatedAt = new Date().toISOString();
+    this.geometryReport.capturePath = request.outputPath;
+    await this.persistGeometryReport();
     await rm(this.activeCaptureStopPath, { force: true });
     await rm(this.activeCaptureFinishedPath, { force: true });
+    const app = viewport.surfaceId ? this.surfaces.get(viewport.surfaceId) : undefined;
+    if (app) {
+      await this.startWindowRecordingSession(
+        app.bundleId,
+        request.outputPath,
+        this.activeCaptureStopPath,
+        this.activeCaptureFinishedPath,
+      );
+      return;
+    }
+
     await this.startRecordingSession(
       viewport,
       request.outputPath,
@@ -292,6 +433,12 @@ export class MacOSCommandEngine implements CaptureEngine {
     }
     this.activeCaptureStopPath = undefined;
     this.activeCaptureFinishedPath = undefined;
+    const capturePixelSize = await this.readVideoPixelSize(path);
+    if (capturePixelSize) {
+      this.geometryReport.generatedAt = new Date().toISOString();
+      this.geometryReport.capturePixelSize = capturePixelSize;
+      await this.persistGeometryReport();
+    }
 
     return {
       kind: "raw-capture",
@@ -307,6 +454,43 @@ export class MacOSCommandEngine implements CaptureEngine {
 
     await mkdir(dirname(path), { recursive: true });
     await rm(path, { force: true });
+    if (this.activeCapturePath && !this.activeCaptureStopPath) {
+      try {
+        await this.extractFrameFromCapture(this.activeCapturePath, path);
+        if (this.activeBackdrop === "matte") {
+          await this.composeMatteViewport(path);
+        }
+        await this.waitForFile(path, 1);
+        await this.recordScreenshotDimensions(path, "viewport");
+
+        return {
+          kind: "screenshot",
+          path,
+          metadata: {
+            source: "capture-frame",
+          },
+        };
+      } catch {}
+    }
+
+    const app = viewport.surfaceId ? this.surfaces.get(viewport.surfaceId) : undefined;
+    if (app) {
+      await this.runHost(
+        "screenshot-app-window",
+        "--bundle-id",
+        app.bundleId,
+        "--output",
+        path,
+      );
+      await this.waitForFile(path, 1);
+      await this.recordScreenshotDimensions(path, "viewport");
+
+      return {
+        kind: "screenshot",
+        path,
+      };
+    }
+
     await this.runHost(
       "screenshot-region",
       "--x",
@@ -321,6 +505,7 @@ export class MacOSCommandEngine implements CaptureEngine {
       path,
     );
     await this.waitForFile(path, 1);
+    await this.recordScreenshotDimensions(path, "viewport");
 
     return {
       kind: "screenshot",
@@ -337,6 +522,7 @@ export class MacOSCommandEngine implements CaptureEngine {
       path,
     );
     await this.waitForFile(path, 1);
+    await this.recordScreenshotDimensions(path, "full");
 
     return {
       kind: "screenshot",
@@ -379,23 +565,10 @@ export class MacOSCommandEngine implements CaptureEngine {
   }
 
   async performAction(action: RuntimeAction, target?: ResolvedTarget): Promise<void> {
-    if (action.kind === "type") {
-      const text = String(action.input?.text ?? "");
-      await this.runHost("type-text", "--text", text);
-      return;
-    }
-
-    if (action.kind === "press-key") {
-      const key = String(action.input?.key ?? "");
-      await this.runHost("press-key", "--key", key);
-      return;
-    }
-
-    if (action.kind === "click") {
-      const buttonName = calculatorButtonName(target ? { text: target.label, semanticId: target.id } : action.target ?? {});
-      await this.runHost("click-calculator-button", "--button", buttonName);
-      return;
-    }
+    await executeInteractionAction(action, target, {
+      runHost: this.runHost.bind(this),
+      resolveCalculatorButton: (query) => calculatorButtonName(query),
+    });
   }
 
   async replayArtifact(path: string): Promise<void> {
@@ -430,6 +603,25 @@ export class MacOSCommandEngine implements CaptureEngine {
       fps,
       "--scale",
       scale,
+      "--output",
+      outputPath,
+      "--stop-file",
+      stopPath,
+      "--finished-file",
+      finishedPath,
+    );
+  }
+
+  private async startWindowRecordingSession(
+    bundleId: string,
+    outputPath: string,
+    stopPath: string,
+    finishedPath: string,
+  ): Promise<void> {
+    await this.runHost(
+      "record-app-window",
+      "--bundle-id",
+      bundleId,
       "--output",
       outputPath,
       "--stop-file",
@@ -481,5 +673,156 @@ export class MacOSCommandEngine implements CaptureEngine {
     const tempPath = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
     await writeFile(tempPath, `${JSON.stringify(presentation, null, 2)}\n`);
     await rename(tempPath, path);
+  }
+
+  private async readCaptureWindowBounds(bundleId: string): Promise<StageViewport["bounds"] | undefined> {
+    try {
+      const { stdout } = await this.runHost(
+        "get-capture-window-frame",
+        "--bundle-id",
+        bundleId,
+      );
+      const payload = JSON.parse(stdout) as {
+        frame?: StageViewport["bounds"];
+      };
+      return payload.frame;
+    } catch {
+      try {
+        const { stdout } = await this.runHost(
+          "get-window-frame",
+          "--bundle-id",
+          bundleId,
+        );
+        const payload = JSON.parse(stdout) as {
+          frame?: StageViewport["bounds"];
+        };
+        return payload.frame;
+      } catch {
+        return undefined;
+      }
+    }
+  }
+
+  private async readAccessibilityWindowBounds(bundleId: string): Promise<StageViewport["bounds"] | undefined> {
+    try {
+      const { stdout } = await this.runHost(
+        "get-window-frame",
+        "--bundle-id",
+        bundleId,
+      );
+      const payload = JSON.parse(stdout) as {
+        frame?: StageViewport["bounds"];
+      };
+      return payload.frame;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async extractFrameFromCapture(capturePath: string, outputPath: string): Promise<void> {
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-sseof",
+      "-0.2",
+      "-i",
+      capturePath,
+      "-frames:v",
+      "1",
+      outputPath,
+    ]);
+  }
+
+  private async composeMatteViewport(path: string): Promise<void> {
+    await this.runHost(
+      "compose-rounded-screenshot",
+      "--input",
+      path,
+      "--output",
+      path,
+      "--radius",
+      "24",
+      "--background",
+      "E8EDF5",
+    );
+  }
+
+  private async persistGeometryReport(): Promise<void> {
+    if (!this.geometryReportPath) {
+      return;
+    }
+
+    await mkdir(dirname(this.geometryReportPath), { recursive: true });
+    const tempPath = `${this.geometryReportPath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify(this.geometryReport, null, 2)}\n`);
+    await rename(tempPath, this.geometryReportPath);
+  }
+
+  private async readVideoPixelSize(path: string): Promise<PixelSize | undefined> {
+    try {
+      const { stdout } = await execFileAsync("ffprobe", [
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "json",
+        path,
+      ]);
+      const payload = JSON.parse(stdout) as {
+        streams?: Array<{ width?: number; height?: number }>;
+      };
+      const stream = payload.streams?.[0];
+      if (!stream?.width || !stream?.height) {
+        return undefined;
+      }
+      return {
+        width: stream.width,
+        height: stream.height,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async readImagePixelSize(path: string): Promise<PixelSize | undefined> {
+    try {
+      const { stdout } = await execFileAsync("sips", [
+        "-g",
+        "pixelWidth",
+        "-g",
+        "pixelHeight",
+        path,
+      ]);
+      const widthMatch = stdout.match(/pixelWidth:\s+(\d+)/);
+      const heightMatch = stdout.match(/pixelHeight:\s+(\d+)/);
+      if (!widthMatch || !heightMatch) {
+        return undefined;
+      }
+      return {
+        width: Number(widthMatch[1]),
+        height: Number(heightMatch[1]),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async recordScreenshotDimensions(path: string, scope: "viewport" | "full"): Promise<void> {
+    const pixelSize = await this.readImagePixelSize(path);
+    if (!pixelSize) {
+      return;
+    }
+
+    this.geometryReport.generatedAt = new Date().toISOString();
+    if (scope === "viewport") {
+      this.geometryReport.viewportScreenshotPath = path;
+      this.geometryReport.viewportScreenshotPixelSize = pixelSize;
+    } else {
+      this.geometryReport.fullScreenshotPath = path;
+      this.geometryReport.fullScreenshotPixelSize = pixelSize;
+    }
+    await this.persistGeometryReport();
   }
 }

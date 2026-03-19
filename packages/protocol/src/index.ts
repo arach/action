@@ -83,6 +83,7 @@ export type ActionKind =
   | "press-key"
   | "focus-window"
   | "open-app"
+  | "drag"
   | "start-recording"
   | "stop-recording"
   | "show-cue"
@@ -143,7 +144,7 @@ export const guidedSessionPhases = [
 
 export type GuidedSessionPhase = (typeof guidedSessionPhases)[number];
 
-export type BackdropPreset = "neutral" | "spotlight" | "studio" | "gradient";
+export type BackdropPreset = "neutral" | "spotlight" | "studio" | "gradient" | "matte";
 
 export interface TargetApp {
   name: string;
@@ -155,6 +156,13 @@ export interface StageViewport {
   bounds: Bounds;
   surfaceId?: string;
   dimming: "none" | "surround";
+}
+
+export interface StageInputOverlay {
+  kind: "keys" | "typing";
+  keys?: string[];
+  text?: string;
+  style?: "default" | "notes" | "terminal" | "code";
 }
 
 export interface StageScene {
@@ -177,6 +185,7 @@ export interface StagePresentation {
   stepCurrent?: number;
   stepTotal?: number;
   stepLabel?: string;
+  inputOverlay?: StageInputOverlay;
   recentLogs?: string[];
 }
 
