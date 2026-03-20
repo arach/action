@@ -17,6 +17,7 @@ import type {
   ResolvedTarget,
   RuntimeAction,
   RuntimeArtifact,
+  StageInputOverlay,
   StageScene,
   StagePresentation,
   StageViewport,
@@ -38,6 +39,54 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function stringValue(input: unknown): string | undefined {
+  return typeof input === "string" && input.length > 0 ? input : undefined;
+}
+
+function stringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+function inputOverlayForAction(action: RuntimeAction): StageInputOverlay | undefined {
+  if (action.kind === "press-key") {
+    const modifiers = stringArray(action.input?.modifiers);
+    const keys = stringArray(action.input?.keys);
+    const key = stringValue(action.input?.key);
+    const overlayKeys = keys.length > 0
+      ? keys
+      : [...modifiers, ...(key ? [key] : [])];
+
+    return overlayKeys.length > 0
+      ? {
+          kind: "keys",
+          keys: overlayKeys,
+        }
+      : undefined;
+  }
+
+  if (action.kind === "type") {
+    const text = stringValue(action.input?.overlayText) ?? stringValue(action.input?.text);
+    if (!text) {
+      return undefined;
+    }
+
+    const style = stringValue(action.input?.style);
+    return {
+      kind: "typing",
+      text,
+      style: style === "notes" || style === "terminal" || style === "code"
+        ? style
+        : "default",
+    };
+  }
+
+  return undefined;
 }
 
 export interface GuidedCaptureSessionOptions {
@@ -74,7 +123,9 @@ export class GuidedCaptureSession {
   private stepCurrent?: number;
   private stepTotal?: number;
   private stepLabel?: string;
+  private inputOverlay?: StageInputOverlay;
   private stopRequested = false;
+  private stagePresented = false;
 
   constructor(
     private readonly engine: CaptureEngine,
@@ -152,7 +203,9 @@ export class GuidedCaptureSession {
       ...this.stage,
       viewport: configuredViewport,
     };
+    this.stagePresented = true;
     await this.syncStagePresentation("Stage ready", `${input.targetApp.name} framed in viewport`);
+    await this.engine.focusSurface(surface.id);
 
     this.emit("app.launched", `Opened ${input.targetApp.name}`, {
       app: input.targetApp,
@@ -194,6 +247,7 @@ export class GuidedCaptureSession {
     this.stepTotal = timeline.steps.length;
     this.stepCurrent = undefined;
     this.stepLabel = undefined;
+    this.inputOverlay = undefined;
     this.stopRequested = false;
 
     for (let remaining = this.countdownSeconds; remaining > 0; remaining -= 1) {
@@ -213,6 +267,10 @@ export class GuidedCaptureSession {
     }
 
     const capturePath = `${this.outputDir}/capture.mov`;
+    const surfaceId = this.stage.viewport?.surfaceId;
+    if (surfaceId) {
+      await this.engine.focusSurface(surfaceId);
+    }
     await this.engine.startCapture({
       sessionId: this.session.snapshot().id,
       outputPath: capturePath,
@@ -286,6 +344,7 @@ export class GuidedCaptureSession {
     }
 
     this.session.transition("completing", { reason: "finalize guided capture" });
+    this.inputOverlay = undefined;
     this.setPhase("completing", "Finalizing run");
 
     const capture = await this.engine.stopCapture();
@@ -312,8 +371,10 @@ export class GuidedCaptureSession {
     if (this.stageHoldMsAfterComplete > 0) {
       await sleep(this.stageHoldMsAfterComplete);
       await this.engine.clearStage();
+      this.stagePresented = false;
     } else if (this.stageHoldMsAfterComplete === 0) {
       await this.engine.clearStage();
+      this.stagePresented = false;
     }
 
     return this.snapshot();
@@ -337,6 +398,7 @@ export class GuidedCaptureSession {
 
   async clearStage(): Promise<void> {
     await this.engine.clearStage();
+    this.stagePresented = false;
   }
 
   async consumeStageControls(): Promise<string[]> {
@@ -348,8 +410,13 @@ export class GuidedCaptureSession {
       if (this.stopRequested) {
         break;
       }
+      const surfaceId = this.stage.viewport?.surfaceId;
+      if (surfaceId) {
+        await this.engine.focusSurface(surfaceId);
+      }
       this.stepCurrent = index + 1;
       this.stepLabel = step.action.description;
+      this.inputOverlay = inputOverlayForAction(step.action);
       this.session.recordAction(step.action, "planned");
       this.addLog("info", "action.planned", step.action.description);
 
@@ -387,6 +454,9 @@ export class GuidedCaptureSession {
         throw error;
       }
     }
+
+    this.inputOverlay = undefined;
+    await this.syncStagePresentation();
   }
 
   private controls(): HudControlState[] {
@@ -489,6 +559,7 @@ export class GuidedCaptureSession {
       stepCurrent: this.stepCurrent,
       stepTotal: this.stepTotal,
       stepLabel: this.stepLabel,
+      inputOverlay: this.inputOverlay,
       recentLogs: this.logEntries.slice(-12).map((entry) => entry.message),
     };
   }
@@ -498,7 +569,7 @@ export class GuidedCaptureSession {
     detail = this.stageDetail,
     countdownRemaining?: number,
   ): Promise<void> {
-    if (!this.stage.viewport) {
+    if (!this.stage.viewport || !this.stagePresented) {
       return;
     }
 

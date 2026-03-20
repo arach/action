@@ -5,19 +5,28 @@
   "description": "Native-first macOS capture and demo workstation",
   "packageManager": "bun@1.3.5",
   "type": "module",
+  "bin": {
+    "action": "./packages/cli/src/main.ts",
+    "action-dev": "./packages/cli/src/action-dev.ts"
+  },
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
+    "action": "bun packages/cli/src/main.ts",
+    "action-dev": "bun packages/cli/src/action-dev.ts",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "docs:generate": "dewey generate",
     "docs:agent": "dewey agent",
     "docs:audit": "dewey audit",
-    "demo:calculator": "bun packages/cli/src/main.ts calculator-demo mock",
-    "demo:calculator:macos": "bun packages/cli/src/main.ts calculator-demo macos",
+    "demo:calculator": "bun packages/cli/src/main.ts demo calculator-demo mock",
+    "demo:notes": "bun packages/cli/src/main.ts demo notes-demo mock",
+    "demo:calculator:macos": "bun packages/cli/src/main.ts demo calculator-demo macos",
+    "demo:notes:macos": "bun packages/cli/src/main.ts demo notes-demo macos",
     "scenario:calculator": "bun packages/cli/src/main.ts scenario calculator-demo",
+    "scenario:notes": "bun packages/cli/src/main.ts scenario notes-demo",
     "hud": "bun packages/hud/src/server.ts",
-    "native:dev": "./scripts/action-dev",
+    "native:dev": "bun packages/cli/src/action-dev.ts",
     "native:app:build": "native/engine/scripts/build-app.sh",
     "native:doctor": "native/engine/scripts/doctor.sh",
     "native:verify": "native/engine/scripts/verify-app.sh",

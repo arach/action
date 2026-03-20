@@ -7,6 +7,7 @@ final class ActionSessionPlaybackCoordinator: ObservableObject, @unchecked Senda
     @Published private(set) var currentTimeSeconds: Double = 0
     @Published private(set) var durationSeconds: Double = 0
     @Published private(set) var isPlaying: Bool = false
+    @Published private(set) var playbackRate: Double = 1
 
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
@@ -40,7 +41,7 @@ final class ActionSessionPlaybackCoordinator: ObservableObject, @unchecked Senda
         if durationSeconds > 0, currentTimeSeconds >= durationSeconds {
             seek(to: 0)
         }
-        player.play()
+        player.playImmediately(atRate: Float(playbackRate))
         isPlaying = true
     }
 
@@ -66,6 +67,14 @@ final class ActionSessionPlaybackCoordinator: ObservableObject, @unchecked Senda
         seek(to: currentTimeSeconds + seconds)
     }
 
+    func setPlaybackRate(_ rate: Double) {
+        let clamped = max(0.25, min(rate, 4))
+        playbackRate = clamped
+        if isPlaying {
+            player.rate = Float(clamped)
+        }
+    }
+
     func seek(to seconds: Double) {
         let target = max(0, min(seconds, durationSeconds > 0 ? durationSeconds : seconds))
         let time = CMTime(seconds: target, preferredTimescale: 600)
@@ -74,15 +83,19 @@ final class ActionSessionPlaybackCoordinator: ObservableObject, @unchecked Senda
     }
 
     private func installTimeObserver() {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.1, preferredTimescale: 600), queue: .main) { [weak self] time in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self else {
                 return
             }
             let seconds = time.seconds
             if seconds.isFinite {
-                currentTimeSeconds = seconds
+                if abs(currentTimeSeconds - seconds) >= 0.02 {
+                    currentTimeSeconds = seconds
+                }
             }
-            refreshDuration()
+            if durationSeconds <= 0 {
+                refreshDuration()
+            }
         }
     }
 

@@ -41,6 +41,7 @@ public enum ActionNativeAutomationError: LocalizedError {
     case applicationNotRunning(String)
     case accessibilityLookupFailed(String)
     case accessibilityActionFailed(String)
+    case dragPathNotFound(String)
 
     public var errorDescription: String? {
         switch self {
@@ -50,6 +51,8 @@ public enum ActionNativeAutomationError: LocalizedError {
             return detail
         case .accessibilityActionFailed(let detail):
             return detail
+        case .dragPathNotFound(let path):
+            return "Drag source path not found: \(path)"
         }
     }
 }
@@ -172,6 +175,53 @@ public enum ActionNativeAutomation {
         guard result == .success else {
             throw ActionNativeAutomationError.accessibilityActionFailed("Accessibility press failed for Calculator button \(label): \(result.rawValue)")
         }
+    }
+
+    public static func drag(from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")
+        }
+
+        let normalizedDuration = max(40, durationMs)
+        let steps = max(6, Int(Double(normalizedDuration) / 10.0))
+        let stepDelayUs = UInt32((Double(normalizedDuration) * 1000.0 / Double(steps)).rounded())
+        let deltaX = end.x - start.x
+        let deltaY = end.y - start.y
+
+        CGWarpMouseCursorPosition(start)
+        usleep(10000)
+
+        guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
+              let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left) else {
+            throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create mouse drag events")
+        }
+
+        down.post(tap: .cghidEventTap)
+        usleep(15000)
+
+        for index in 1...steps {
+            let ratio = Double(index) / Double(steps)
+            let current = CGPoint(
+                x: start.x + (deltaX * ratio),
+                y: start.y + (deltaY * ratio)
+            )
+            guard let drag = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: current, mouseButton: .left) else {
+                throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create drag events")
+            }
+
+            drag.post(tap: .cghidEventTap)
+            usleep(stepDelayUs)
+        }
+
+        up.post(tap: .cghidEventTap)
+    }
+
+    public static func dragFile(path: String, from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
+        guard FileManager.default.fileExists(atPath: path) else {
+            throw ActionNativeAutomationError.dragPathNotFound(path)
+        }
+
+        try drag(from: start, to: end, durationMs: durationMs)
     }
 
     public static func calculatorDisplayValue() throws -> String {

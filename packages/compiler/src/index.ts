@@ -27,6 +27,10 @@ export interface ScenarioDocument {
   id: string;
   title: string;
   targetApp: TargetApp;
+  run?: {
+    initialActionDelayMs?: number;
+    actionCadenceMs?: number;
+  };
   stage: {
     backdrop: BackdropPreset;
     viewport: Omit<StageViewport, "surfaceId">;

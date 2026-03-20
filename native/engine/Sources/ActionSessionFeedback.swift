@@ -7,6 +7,7 @@ struct ActionSessionFeedbackDocument: Codable, Sendable {
         let startTimeSeconds: Double
         let endTimeSeconds: Double?
         let region: Region?
+        let drawing: Drawing?
         let instruction: String
     }
 
@@ -15,6 +16,15 @@ struct ActionSessionFeedbackDocument: Codable, Sendable {
         let y: Double
         let width: Double
         let height: Double
+    }
+
+    struct Drawing: Codable, Sendable {
+        struct Point: Codable, Sendable {
+            let x: Double
+            let y: Double
+        }
+
+        let points: [Point]
     }
 
     let sessionId: String
@@ -40,6 +50,7 @@ struct ActionAgentFeedbackExport: Codable, Sendable {
         let endTimeSeconds: Double?
         let endTimecode: String?
         let region: ActionSessionFeedbackDocument.Region?
+        let drawing: ActionSessionFeedbackDocument.Drawing?
     }
 
     let sessionId: String
@@ -79,7 +90,8 @@ extension ActionSessionFeedbackDocument {
                     startTimecode: item.startTimeSeconds.actionTimecode,
                     endTimeSeconds: item.endTimeSeconds,
                     endTimecode: item.endTimeSeconds?.actionTimecode,
-                    region: item.region
+                    region: item.region,
+                    drawing: item.drawing
                 )
             }
         )
@@ -113,6 +125,9 @@ extension ActionSessionFeedbackDocument {
             lines.append("\(index + 1). Time: `\(item.startTimecode)\(item.endTimecode.map { "-\($0)" } ?? "")`")
             if let region = item.region {
                 lines.append("   Region: `x=\(region.x.actionPercent) y=\(region.y.actionPercent) w=\(region.width.actionPercent) h=\(region.height.actionPercent)`")
+            }
+            if let drawing = item.drawing {
+                lines.append("   Drawing: `\(drawing.points.count) points`")
             }
             lines.append("   Instruction: \(item.instruction)")
             lines.append("")

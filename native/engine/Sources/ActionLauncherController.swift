@@ -69,7 +69,7 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         let hostingView = NSHostingView(rootView: rootView)
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 1240, height: 820),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )

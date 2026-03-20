@@ -7,7 +7,7 @@ enum ActionAgentCLIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingMethod:
-            return "Missing method. Try: ping, status, app.launch, app.activate, calculator.buttons, calculator.clickButton, calculator.displayValue"
+            return "Missing method. Try: ping, status, app.launch, app.activate, input.drag, input.typeText, calculator.buttons, calculator.clickButton, calculator.displayValue"
         }
     }
 }
@@ -79,6 +79,23 @@ struct ActionAgentCLIMain {
 
             if ["--x", "--y", "--width", "--height"].contains(argument), let value = iterator.next() {
                 params[String(argument.dropFirst(2))] = value
+                continue
+            }
+
+            if ["--from-x", "--from-y", "--to-x", "--to-y", "--duration-ms"].contains(argument), let value = iterator.next() {
+                let key = switch argument {
+                case "--from-x": "fromX"
+                case "--from-y": "fromY"
+                case "--to-x": "toX"
+                case "--to-y": "toY"
+                default: "durationMs"
+                }
+                params[key] = value
+                continue
+            }
+
+            if argument == "--file-path", let value = iterator.next() {
+                params["filePath"] = value
                 continue
             }
 

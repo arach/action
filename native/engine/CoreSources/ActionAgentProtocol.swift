@@ -36,6 +36,7 @@ public enum ActionAgentMethod: String, CaseIterable, Sendable {
     case openScreenRecordingSettings = "settings.openScreenRecording"
     case activateApp = "app.activate"
     case typeText = "input.typeText"
+    case drag = "input.drag"
     case setWindowFrame = "window.setFrame"
     case getWindowFrame = "window.getFrame"
     case calculatorButtons = "calculator.buttons"

@@ -2,6 +2,9 @@
   "name": "@action/cli",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "bin": {
+    "action": "./src/main.ts",
+    "action-dev": "./src/action-dev.ts"
+  }
 }
-

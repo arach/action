@@ -72,7 +72,7 @@ bun run native:doctor
 Launch the app:
 
 ```bash
-./scripts/action-dev launch
+bun run action-dev -- launch
 ```
 
 ## Developer CLI
@@ -80,10 +80,18 @@ Launch the app:
 For the tightest local loop, use the repo-local dev CLI:
 
 ```bash
-alias action-dev='/Users/arach/dev/action/scripts/action-dev'
+alias action-dev='bun /Users/arach/dev/action/packages/cli/src/action-dev.ts'
 action-dev relaunch
 action-dev host guided-calculator-demo
 action-dev logs
+```
+
+Or link the repo bins once:
+
+```bash
+bun link
+action-dev relaunch
+action scenario calculator-demo
 ```
 
 Useful commands:

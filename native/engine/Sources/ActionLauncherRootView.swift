@@ -43,36 +43,17 @@ struct ActionLauncherRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            NavigationSplitView {
-                VStack(spacing: 0) {
-                    sidebarHeader
+            HStack(spacing: 0) {
+                sidebar
 
-                    List(selection: $selectedSection) {
-                        Section(sidebarIconsOnly ? "" : "Workspace") {
-                            ForEach([LauncherSection.review, .library, .console], id: \.self) { section in
-                                sidebarRow(for: section)
-                                    .tag(Optional(section))
-                            }
-                        }
-                    }
-                .background(StageHUDTheme.railBackground)
-                    .listStyle(.sidebar)
-                    .scrollContentBackground(.hidden)
+                Rectangle()
+                    .fill(StageHUDTheme.cardBorder)
+                    .frame(width: 1)
 
-                    Spacer(minLength: 0)
-
-                    settingsRow
-                        .padding(.horizontal, sidebarIconsOnly ? 4 : 8)
-                        .padding(.bottom, 8)
-                }
-                .background(StageHUDTheme.railBackground)
-                .navigationSplitViewColumnWidth(min: sidebarWidth.min, ideal: sidebarWidth.ideal, max: sidebarWidth.max)
-            } detail: {
                 mainPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(StageHUDTheme.appBackground)
             }
-            .navigationSplitViewStyle(.balanced)
 
             footerBar
         }
@@ -81,6 +62,32 @@ struct ActionLauncherRootView: View {
         .onChange(of: model.reviewSelectionRequestID) { _, _ in
             selectedSection = .review
         }
+    }
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            sidebarHeader
+
+            List(selection: $selectedSection) {
+                Section(sidebarIconsOnly ? "" : "Workspace") {
+                    ForEach([LauncherSection.review, .library, .console], id: \.self) { section in
+                        sidebarRow(for: section)
+                            .tag(Optional(section))
+                    }
+                }
+            }
+            .background(StageHUDTheme.railBackground)
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+
+            Spacer(minLength: 0)
+
+            settingsRow
+                .padding(.horizontal, sidebarIconsOnly ? 4 : 8)
+                .padding(.bottom, 8)
+        }
+        .frame(width: sidebarWidth.ideal)
+        .background(StageHUDTheme.railBackground)
     }
 
     private var sidebarHeader: some View {
@@ -100,8 +107,7 @@ struct ActionLauncherRootView: View {
                 .help("Expand Sidebar")
                 .frame(width: 28, height: 28)
 
-                ActionWindowDragHandle()
-                    .frame(maxWidth: .infinity, minHeight: 28)
+                Spacer(minLength: 0)
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Action")
@@ -112,8 +118,7 @@ struct ActionLauncherRootView: View {
                         .foregroundStyle(StageHUDTheme.textMuted)
                 }
 
-                ActionWindowDragHandle()
-                    .frame(maxWidth: .infinity, minHeight: 28)
+                Spacer(minLength: 0)
 
                 Button {
                     withAnimation(.easeInOut(duration: 0.16)) {
@@ -136,10 +141,16 @@ struct ActionLauncherRootView: View {
 
     private var mainPane: some View {
         VStack(spacing: 0) {
-            appHeader
-                .padding(.horizontal, 30)
-                .padding(.top, 18)
-                .padding(.bottom, 20)
+            if (selectedSection ?? .review) != .review {
+                appHeader
+                    .padding(.horizontal, 30)
+                    .padding(.top, 20)
+                    .padding(.bottom, 12)
+            } else {
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(height: 18)
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -155,10 +166,28 @@ struct ActionLauncherRootView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 30)
+                .padding(.horizontal, (selectedSection ?? .review) == .review ? 18 : 30)
+                .padding(.top, (selectedSection ?? .review) == .review ? 8 : 0)
                 .padding(.bottom, 30)
             }
             .scrollIndicators(.hidden)
+        }
+        .background(mainPaneBackground)
+    }
+
+    @ViewBuilder
+    private var mainPaneBackground: some View {
+        if (selectedSection ?? .review) == .review {
+            LinearGradient(
+                colors: [
+                    StageHUDTheme.reviewCanvas,
+                    StageHUDTheme.reviewPanel.opacity(0.92),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        } else {
+            StageHUDTheme.appBackground
         }
     }
 
@@ -206,20 +235,16 @@ struct ActionLauncherRootView: View {
 
     private var appHeader: some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Workspace")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
+            VStack(alignment: .leading, spacing: 4) {
                 Text(selectedSection?.rawValue ?? LauncherSection.review.rawValue)
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .font(.system(size: 19, weight: .bold, design: .monospaced))
                     .foregroundStyle(StageHUDTheme.textPrimary)
                 Text(selectedSection?.subtitle ?? LauncherSection.review.subtitle)
-                    .font(.system(size: 11, weight: .regular, design: .default))
-                    .foregroundStyle(StageHUDTheme.textMuted)
+                    .font(.system(size: 12, weight: .regular, design: .default))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
             }
 
-            ActionWindowDragHandle()
-                .frame(maxWidth: .infinity, minHeight: 30)
+            Spacer(minLength: 0)
 
             headerActions
         }
@@ -231,7 +256,7 @@ struct ActionLauncherRootView: View {
         case .review:
             HStack(spacing: 10) {
                 if let session = model.selectedSession {
-                    Text(session.expression)
+                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(StageHUDTheme.textSecondary)
                 }
@@ -311,12 +336,12 @@ struct ActionLauncherRootView: View {
     private var reviewSection: some View {
         Group {
             if let latest = model.selectedSession {
-                VStack(alignment: .leading, spacing: 18) {
-                    reviewSummary(for: latest)
-                    ActionSessionPreviewView(session: latest, model: model)
+                VStack(alignment: .leading, spacing: 12) {
+                    reviewDeck(for: latest)
+                    reviewStage(for: latest)
                 }
             } else {
-                surfaceCard(title: "Active Review") {
+                surfaceCard(title: "Review") {
                     Text("Run the guided calculator capture to seed the review loop.")
                         .font(.system(size: 12, weight: .regular, design: .default))
                         .foregroundStyle(StageHUDTheme.textSecondary)
@@ -325,37 +350,108 @@ struct ActionLauncherRootView: View {
         }
     }
 
-    private func reviewSummary(for session: ActionSessionSummary) -> some View {
-        surfaceCard(title: "Active Review") {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(session.expression)
-                            .font(.system(size: 34, weight: .bold, design: .monospaced))
-                            .foregroundStyle(StageHUDTheme.textPrimary)
-                        Text("Result \(session.actualResult) ready for playback and notes.")
-                            .font(.system(size: 14, weight: .regular, design: .default))
-                            .foregroundStyle(StageHUDTheme.textSecondary)
-                    }
-
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 10) {
-                        metric(label: "Session", value: sessionTimestamp(session))
-                        metric(label: "Expected", value: session.expectedResult)
-                        metric(label: "Feedback", value: "\(session.feedbackCount)")
-                    }
+    private func reviewDeck(for session: ActionSessionSummary) -> some View {
+        HStack(alignment: .top, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("REVIEW DECK")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.6))
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
+                        .font(.system(size: 28, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.white)
+                    Text("=\(session.actualResult)")
+                        .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.72))
                 }
+                Text("Playback, annotate, and export from a single stage.")
+                    .font(.system(size: 13, weight: .regular, design: .default))
+                    .foregroundStyle(Color.white.opacity(0.78))
+            }
 
-                HStack(spacing: 10) {
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 10) {
+                HStack(spacing: 8) {
+                    darkStatusBadge(sessionTimestamp(session))
+                    darkStatusBadge("Feedback \(session.feedbackCount)")
+                }
+                HStack(spacing: 8) {
                     launcherButton("Replay", tone: .primary, action: { model.replaySession(session) })
                     launcherButton("Reveal", action: { model.revealSession(session) })
                     launcherButton("Trace", action: { model.openSessionTrace(session) })
-                    launcherButton("Feedback", action: { model.openSessionFeedback(session) })
-                    launcherButton("Screenshot", action: { model.openSessionScreenshot(session) })
+                    launcherButton("Files", action: { model.openSessionFeedback(session) })
                 }
             }
         }
+        .padding(22)
+        .background(reviewDeckBackground)
+        .overlay(
+            ActionChamferedShape(cornerCut: 7)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private func reviewStage(for session: ActionSessionSummary) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ActionSessionPreviewView(session: session, model: model)
+        }
+        .padding(12)
+        .background(
+            ActionChamferedShape(cornerCut: 8)
+                .fill(StageHUDTheme.reviewPanel.opacity(0.9))
+        )
+        .overlay(
+            ActionChamferedShape(cornerCut: 8)
+                .stroke(StageHUDTheme.reviewStrokeStrong, lineWidth: 1)
+        )
+        .shadow(color: StageHUDTheme.panelShadow.opacity(0.12), radius: 18, x: 0, y: 8)
+    }
+
+    private func statusBadge(_ value: String) -> some View {
+        Text(value)
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(StageHUDTheme.textMuted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(StageHUDTheme.buttonSecondary)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+            )
+    }
+
+    private func darkStatusBadge(_ value: String) -> some View {
+        Text(value)
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Color.white.opacity(0.82))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            )
+    }
+
+    private var reviewDeckBackground: some View {
+        ActionChamferedShape(cornerCut: 7)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1)),
+                        Color(nsColor: NSColor(calibratedRed: 0.16, green: 0.18, blue: 0.22, alpha: 1)),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
     }
 
     private var librarySection: some View {
@@ -560,11 +656,11 @@ struct ActionLauncherRootView: View {
         }
         .padding(18)
         .background(
-            ActionChamferedShape(cornerCut: 8)
+            ActionChamferedShape(cornerCut: 6)
                 .fill(StageHUDTheme.cardFill)
         )
         .overlay(
-            ActionChamferedShape(cornerCut: 8)
+            ActionChamferedShape(cornerCut: 6)
                 .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
         )
     }
@@ -639,7 +735,7 @@ struct ActionLauncherRootView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(title, action: action)
-            .buttonStyle(StageHUDButtonStyle(tone: tone))
+            .buttonStyle(ActionLauncherButtonStyle(tone: tone))
     }
 
     private func sessionTimestamp(_ session: ActionSessionSummary) -> String {
@@ -647,5 +743,57 @@ struct ActionLauncherRootView: View {
             return session.sessionId
         }
         return sessionDateFormatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+private struct ActionLauncherButtonStyle: ButtonStyle {
+    let tone: StageHUDViewModel.ButtonTone
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(foregroundColor(configuration: configuration))
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(background(configuration: configuration))
+            .overlay(
+                ActionChamferedShape(cornerCut: 5)
+                    .stroke(borderColor(configuration: configuration), lineWidth: 1)
+            )
+            .clipShape(ActionChamferedShape(cornerCut: 5))
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    private func background(configuration: Configuration) -> some View {
+        Group {
+            switch tone {
+            case .primary:
+                Color(configuration.isPressed ? StageHUDTheme.buttonPrimaryBottom : StageHUDTheme.buttonPrimaryTop)
+            case .secondary:
+                Color(configuration.isPressed ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.buttonSecondary)
+            case .destructive:
+                Color(StageHUDTheme.accentRecording.opacity(configuration.isPressed ? 0.76 : 0.86))
+            }
+        }
+    }
+
+    private func foregroundColor(configuration: Configuration) -> Color {
+        switch tone {
+        case .primary:
+            return StageHUDTheme.buttonPrimaryText.opacity(configuration.isPressed ? 0.88 : 1)
+        case .secondary, .destructive:
+            return StageHUDTheme.textPrimary.opacity(configuration.isPressed ? 0.88 : 1)
+        }
+    }
+
+    private func borderColor(configuration: Configuration) -> Color {
+        switch tone {
+        case .primary:
+            return StageHUDTheme.panelBorder.opacity(configuration.isPressed ? 1 : 0.9)
+        case .secondary, .destructive:
+            return StageHUDTheme.cardBorder.opacity(configuration.isPressed ? 1 : 0.95)
+        }
     }
 }

@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { compileScenario } from "@action/compiler";
 
 import { runScenarioGuidedCaptureDemo } from "./index.js";
@@ -19,6 +21,16 @@ function printJson(value: unknown): void {
 async function main(argv: string[]): Promise<void> {
   const [command, arg, extra] = argv;
 
+  if (command === "demo" && arg) {
+    const scenario = await loadScenario(arg);
+    const result = await runScenarioGuidedCaptureDemo(
+      scenario,
+      extra === "macos" ? "macos" : "mock",
+    );
+    printJson(result);
+    return;
+  }
+
   if (command === "calculator-demo") {
     const scenario = await loadScenario("calculator-demo");
     const result = await runScenarioGuidedCaptureDemo(
@@ -29,8 +41,8 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  if (command === "scenario" && arg === "calculator-demo") {
-    const scenario = await loadScenario("calculator-demo");
+  if (command === "scenario" && arg) {
+    const scenario = await loadScenario(arg);
     printJson(compileScenario(scenario));
     return;
   }
@@ -38,8 +50,13 @@ async function main(argv: string[]): Promise<void> {
   printJson({
     commands: [
       "bun run demo:calculator",
+      "bun run demo:notes",
       "bun run demo:calculator:macos",
+      "bun run demo:notes:macos",
       "bun run scenario:calculator",
+      "bun run scenario:notes",
+      "bun packages/cli/src/main.ts demo <scenario-id> [mock|macos]",
+      "bun packages/cli/src/main.ts scenario <scenario-id>",
     ],
   });
 }

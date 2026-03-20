@@ -10,6 +10,7 @@ type EngineMode = "mock" | "macos";
 
 interface HudState {
   engineMode: EngineMode;
+  scenarioId: string;
   snapshot?: HudSnapshot;
   events: GuidedSessionEvent[];
   sceneSteps: Array<{
@@ -28,6 +29,7 @@ class HudController {
   private runPromise?: Promise<HudState>;
   private state: HudState = {
     engineMode: "mock",
+    scenarioId: "calculator-demo",
     events: [],
     sceneSteps: [],
     status: "idle",
@@ -43,7 +45,7 @@ class HudController {
     return this.state;
   }
 
-  async stage(engineMode: EngineMode): Promise<HudState> {
+  async stage(engineMode: EngineMode, scenarioId = this.state.scenarioId): Promise<HudState> {
     if (this.state.status === "running") {
       return this.state;
     }
@@ -56,7 +58,7 @@ class HudController {
       this.currentTimeline = undefined;
     }
 
-    const scenario = await this.loadScenario("calculator-demo");
+    const scenario = await this.loadScenario(scenarioId);
     const { timeline } = compileScenario(scenario);
     const initialSteps = timeline.steps.map((step) => ({
       id: step.action.id,
@@ -72,14 +74,15 @@ class HudController {
       outputDir: resolve(process.cwd(), "artifacts", "sessions", scenario.id),
       captureProfile: "draft",
       stageHoldMsAfterComplete: -1,
-      initialActionDelayMs: 650,
-      actionCadenceMs: 900,
+      initialActionDelayMs: scenario.run?.initialActionDelayMs ?? 650,
+      actionCadenceMs: scenario.run?.actionCadenceMs ?? 900,
     });
 
     this.currentSession = session;
     this.currentTimeline = timeline;
     this.state = {
       engineMode,
+      scenarioId,
       snapshot: session.snapshot(),
       events: [],
       sceneSteps: initialSteps,
@@ -120,8 +123,8 @@ class HudController {
     return this.state;
   }
 
-  async start(engineMode: EngineMode): Promise<HudState> {
-    await this.stage(engineMode);
+  async start(engineMode: EngineMode, scenarioId = this.state.scenarioId): Promise<HudState> {
+    await this.stage(engineMode, scenarioId);
     if (this.state.status === "failed") {
       return this.state;
     }
@@ -152,11 +155,12 @@ class HudController {
         await this.pushSnapshot();
 
         if (session.snapshot().phase === "recording" || session.snapshot().phase === "completing") {
-          await session.captureScreenshot("screenshot-viewport-final.png", "viewport");
-          await session.captureScreenshot("screenshot-full-final.png", "full");
-          await this.pushSnapshot();
-
           await session.stop();
+          try {
+            await session.captureScreenshot("screenshot-viewport-final.png", "viewport");
+            await session.captureScreenshot("screenshot-full-final.png", "full");
+          } catch {}
+          await this.pushSnapshot();
         }
         this.state = {
           ...this.state,
@@ -466,10 +470,10 @@ function html(): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Action HUD</title>
+    <title>Action Console</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <style>
       :root {
         --bg: #0a0a0b;
@@ -680,24 +684,44 @@ function html(): string {
           0 0 0 1px rgba(255,255,255,0.08) inset;
       }
 
+      .viewport-frame::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        box-shadow:
+          0 0 0 1px rgba(255,255,255,0.08) inset,
+          0 18px 48px rgba(0, 0, 0, 0.28);
+        pointer-events: none;
+      }
+
       .viewport-frame[data-active="true"] {
         border-color: rgba(255, 255, 255, 0.7);
         box-shadow:
           0 24px 90px rgba(0,0,0,0.44),
           0 0 0 1px rgba(255,255,255,0.08) inset,
-          0 0 0 3px rgba(255, 255, 255, 0.15);
+          0 0 0 3px rgba(255, 255, 255, 0.15),
+          0 0 0 10px rgba(255, 255, 255, 0.05);
       }
 
       .viewport-mask {
         position: absolute;
-        background: rgba(7, 7, 9, 0.56);
-        transition: opacity 160ms ease;
+        background:
+          linear-gradient(180deg, rgba(7, 7, 9, 0.3), rgba(7, 7, 9, 0.46));
+        backdrop-filter: blur(12px) saturate(0.78);
+        transition: opacity 160ms ease, backdrop-filter 160ms ease, background 160ms ease;
         opacity: 0;
         pointer-events: none;
       }
 
       .stage-canvas[data-dimmed="true"] .viewport-mask {
         opacity: 1;
+      }
+
+      .stage-canvas[data-dimmed="active"] .viewport-mask {
+        background:
+          linear-gradient(180deg, rgba(7, 7, 9, 0.4), rgba(7, 7, 9, 0.58));
+        backdrop-filter: blur(16px) saturate(0.7);
       }
 
       .mask-top {
@@ -726,6 +750,22 @@ function html(): string {
         top: var(--viewport-top, 15%);
         width: calc(100% - var(--viewport-left, 18%) - var(--viewport-width, 64%));
         height: var(--viewport-height, 70%);
+      }
+
+      .frame-badge {
+        position: absolute;
+        top: 14px;
+        left: 14px;
+        z-index: 3;
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: rgba(8, 8, 10, 0.52);
+        border: 1px solid rgba(255,255,255,0.16);
+        color: rgba(255,255,255,0.88);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        backdrop-filter: blur(10px);
       }
 
       .recording-pill {
@@ -999,16 +1039,200 @@ function html(): string {
           grid-template-columns: 1fr;
         }
       }
+
+      /* Action Console visual language v2 */
+      :root {
+        --bg: #08090d;
+        --panel: rgba(13, 14, 18, 0.86);
+        --ink: #edf0f5;
+        --muted: #8f95a3;
+        --line: rgba(189, 196, 211, 0.24);
+        --line-soft: rgba(189, 196, 211, 0.14);
+        --edge: #9fb0cd;
+        --shadow: 0 30px 65px rgba(2, 3, 7, 0.58);
+        --radius-lg: 14px;
+        --radius-md: 10px;
+        --radius-sm: 8px;
+      }
+
+      body {
+        background:
+          radial-gradient(1200px 700px at 8% -10%, rgba(132, 150, 194, 0.18), transparent 55%),
+          radial-gradient(900px 520px at 105% 110%, rgba(125, 143, 186, 0.14), transparent 55%),
+          linear-gradient(165deg, #05060a 0%, #090b10 48%, #0d1118 100%);
+      }
+
+      .shell {
+        gap: 18px;
+        padding: 18px;
+      }
+
+      .hero, .panel {
+        background: linear-gradient(180deg, rgba(16, 18, 23, 0.9), rgba(10, 12, 16, 0.92));
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+      }
+
+      .hero {
+        padding: 24px;
+      }
+
+      .hero::before {
+        inset: 14px;
+        border: 1px dashed rgba(181, 189, 204, 0.16);
+        border-radius: 10px;
+      }
+
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        color: #a7afbe;
+      }
+
+      h1, .section-title {
+        font-family: "Space Grotesk", sans-serif;
+        letter-spacing: -0.02em;
+      }
+
+      h1 {
+        margin: 10px 0 14px;
+        max-width: 13ch;
+      }
+
+      .lede {
+        color: #9aa2b1;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .viewport {
+        margin-top: 20px;
+        padding: 16px;
+        border-radius: var(--radius-md);
+        background:
+          linear-gradient(170deg, rgba(18, 22, 30, 0.9), rgba(8, 10, 14, 0.98)),
+          radial-gradient(circle at 80% 18%, rgba(190, 204, 232, 0.08), transparent 36%);
+        border: 1px solid rgba(173, 184, 203, 0.16);
+      }
+
+      .viewport::after {
+        border-radius: 8px;
+        border-color: rgba(173, 184, 203, 0.14);
+      }
+
+      .status {
+        border-radius: 999px;
+        background: rgba(174, 185, 207, 0.08);
+        border: 1px solid rgba(174, 185, 207, 0.24);
+        font-size: 12px;
+      }
+
+      .timer {
+        border-radius: 999px;
+        background: rgba(174, 185, 207, 0.1);
+        border: 1px solid rgba(174, 185, 207, 0.28);
+      }
+
+      .record-start {
+        border-radius: 8px;
+        border: 1px solid rgba(174, 185, 207, 0.2);
+        background: rgba(174, 185, 207, 0.05);
+      }
+
+      .stage-card {
+        border-radius: 8px;
+        background: rgba(173, 185, 206, 0.06);
+        border: 1px solid rgba(173, 185, 206, 0.16);
+      }
+
+      .stage-canvas {
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(173, 185, 206, 0.18);
+      }
+
+      .window-bar {
+        border-bottom-color: rgba(173, 185, 206, 0.14);
+      }
+
+      .window-title {
+        font-size: 11px;
+        letter-spacing: 0.12em;
+      }
+
+      .panel {
+        padding: 16px;
+      }
+
+      .section-title {
+        margin: 0 0 12px;
+        font-size: 1.05rem;
+        color: #e9ecf3;
+      }
+
+      .controls {
+        grid-template-columns: 1fr;
+        gap: 9px;
+      }
+
+      button {
+        border-radius: 8px;
+        border: 1px solid rgba(173, 185, 206, 0.24);
+        padding: 11px 12px;
+        background: linear-gradient(180deg, rgba(229, 234, 243, 0.96), rgba(208, 217, 233, 0.9));
+        color: #0d1118;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 12px;
+        letter-spacing: 0.01em;
+      }
+
+      button.secondary {
+        background: rgba(160, 172, 196, 0.08);
+        color: var(--ink);
+        border: 1px solid rgba(173, 185, 206, 0.22);
+      }
+
+      button:not(:disabled):hover {
+        transform: translateY(-1px);
+        filter: brightness(1.04);
+      }
+
+      button:focus-visible {
+        outline: 2px solid rgba(229, 234, 243, 0.92);
+        outline-offset: 2px;
+      }
+
+      .chip, .artifact, .log, .step {
+        border-radius: 8px;
+      }
+
+      .chip {
+        background: rgba(173, 185, 206, 0.09);
+        border: 1px solid rgba(173, 185, 206, 0.2);
+      }
+
+      .artifact, .log, .step {
+        background: rgba(160, 172, 196, 0.05);
+        border: 1px solid rgba(173, 185, 206, 0.16);
+      }
+
+      .log .meta {
+        color: #8f95a3;
+      }
+
+      .list {
+        max-height: 260px;
+      }
     </style>
   </head>
   <body>
     <div class="shell">
       <section class="hero">
-        <div class="eyebrow">Action / Guided Capture</div>
-        <h1>Operator HUD</h1>
-        <p class="lede">A dev-facing control surface for the first milestone. It shows live session state, permissions, artifacts, and a Calculator scenario run while the native macOS host catches up.</p>
+        <div class="eyebrow">Action Console / Guided Capture</div>
+        <h1>Action Console</h1>
+        <p class="lede">Run a capture, watch the stage, and review what happened.</p>
         <div class="viewport">
-          <div class="eyebrow">Current Session</div>
+          <div class="eyebrow">Live Session</div>
           <div class="status-row">
             <div class="status"><span>Mode</span><strong id="mode">mock</strong></div>
             <div class="status"><span>Status</span><strong id="status">idle</strong></div>
@@ -1016,7 +1240,7 @@ function html(): string {
             <div class="status"><span>Target</span><strong id="target">Calculator</strong></div>
             <div class="timer"><strong id="timer">00:00.0</strong></div>
           </div>
-          <div class="record-start" id="record-start">Recording timer idle</div>
+          <div class="record-start" id="record-start">Recorder idle</div>
           <div class="stage-meta">
             <div class="stage-card">
               <small>Backdrop</small>
@@ -1042,6 +1266,7 @@ function html(): string {
             <div class="viewport-mask mask-left"></div>
             <div class="viewport-mask mask-right"></div>
             <div class="viewport-frame" id="viewport-frame" data-active="false">
+              <div class="frame-badge" id="frame-badge">Capture Area</div>
               <div class="window-skin">
                 <div class="window-bar">
                   <div class="traffic"><span></span><span></span><span></span></div>
@@ -1053,7 +1278,7 @@ function html(): string {
                   <div class="window-placeholder" id="window-placeholder">
                     <div>
                       <strong id="placeholder-target">Calculator</strong>
-                      <small id="placeholder-copy">Stage the target app, count into recording, and keep the viewport crisp while artifacts and logs update on the side.</small>
+                      <small id="placeholder-copy">Stage the app, start recording, and keep the frame clean while logs update.</small>
                     </div>
                   </div>
                 </div>
@@ -1066,11 +1291,11 @@ function html(): string {
         <section class="panel">
           <h2 class="section-title">Controls</h2>
           <div class="controls">
-            <button id="stage-mock">Stage Mock Scene</button>
-            <button id="stage-macos" class="secondary">Stage macOS Scene</button>
-            <button id="run-scene">Run Staged Scene</button>
+            <button id="stage-mock">Load Mock Stage</button>
+            <button id="stage-macos" class="secondary">Load macOS Stage</button>
+            <button id="run-scene">Start Capture</button>
             <button id="clear-scene" class="secondary">Clear Stage</button>
-            <button id="request-perms" class="secondary">Request Permissions</button>
+            <button id="request-perms" class="secondary">Check Permissions</button>
             <button id="open-access" class="secondary">Open Accessibility</button>
             <button id="open-screen" class="secondary">Open Screen Recording</button>
             <button id="replay" class="secondary">Replay Last Run</button>
@@ -1163,12 +1388,19 @@ function html(): string {
         }
 
         const bounds = viewport.bounds;
-        const stageWidth = Math.max(1, bounds.width);
-        const stageHeight = Math.max(1, bounds.height);
-        const left = 0;
-        const top = 0;
-        const width = (bounds.width / stageWidth) * 100;
-        const height = (bounds.height / stageHeight) * 100;
+        const aspect = Math.max(bounds.width, 1) / Math.max(bounds.height, 1);
+        const maxWidth = 84;
+        const maxHeight = 78;
+        let width = maxWidth;
+        let height = width / aspect;
+
+        if (height > maxHeight) {
+          height = maxHeight;
+          width = height * aspect;
+        }
+
+        const left = (100 - width) / 2;
+        const top = (100 - height) / 2;
 
         for (const el of [els.viewportFrame, els.stageCanvas]) {
           el.style.setProperty("--viewport-left", left.toFixed(2) + "%");
@@ -1202,7 +1434,9 @@ function html(): string {
         setChip(els.access, "Accessibility", snapshot.diagnostics?.accessibility);
         setChip(els.screen, "Screen Recording", snapshot.diagnostics?.screenRecording);
         els.stageCanvas.dataset.backdrop = snapshot.stage?.backdrop || "neutral";
-        els.stageCanvas.dataset.dimmed = (phase === "countdown" || snapshot.isRecording) ? "true" : "false";
+        const stagedMask = viewport?.dimming === "surround" && state.status !== "idle";
+        const activeMask = phase === "countdown" || snapshot.isRecording || phase === "paused" || phase === "completing";
+        els.stageCanvas.dataset.dimmed = activeMask ? "active" : stagedMask ? "true" : "false";
         els.viewportFrame.dataset.active = snapshot.isRecording ? "true" : "false";
         els.recordingPill.hidden = !(snapshot.isRecording || phase === "paused" || phase === "completing");
         els.recordingLabel.textContent = phase === "paused" ? "Paused" : "Recording";
@@ -1216,7 +1450,7 @@ function html(): string {
         } else if (phase === "completed") {
           els.recordStart.textContent = "Completed. Review the captured artifacts.";
         } else {
-          els.recordStart.textContent = "Recording timer idle";
+          els.recordStart.textContent = "Recorder idle";
         }
         updateStageLayout(viewport);
         els.viewportBounds.textContent = viewport
@@ -1343,13 +1577,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   if (req.method === "POST" && url.pathname === "/api/start") {
     const engine = url.searchParams.get("engine") === "macos" ? "macos" : "mock";
-    sendJson(res, 200, await controller.start(engine));
+    sendJson(res, 200, await controller.start(engine, url.searchParams.get("scenario") ?? undefined));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/stage") {
     const engine = url.searchParams.get("engine") === "macos" ? "macos" : "mock";
-    sendJson(res, 200, await controller.stage(engine));
+    sendJson(res, 200, await controller.stage(engine, url.searchParams.get("scenario") ?? undefined));
     return;
   }
 

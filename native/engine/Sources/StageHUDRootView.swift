@@ -4,85 +4,89 @@ struct StageHUDRootView: View {
     @ObservedObject var model: StageHUDViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             header
-            controls
+            primaryControls
+            utilityControls
             logs
         }
         .padding(16)
-        .frame(width: 312, height: 428, alignment: .topLeading)
+        .frame(width: 336, height: 456, alignment: .topLeading)
         .background(panelBackground)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 10) {
-                Circle()
-                    .fill(accentColor)
-                    .frame(width: 9, height: 9)
-                    .shadow(color: accentColor.opacity(0.35), radius: 10)
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(accentColor)
+                        .frame(width: 9, height: 9)
+                        .shadow(color: accentColor.opacity(0.35), radius: 10)
 
-                Text(model.phaseLabel)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(accentColor)
+                    Text(model.phaseLabel)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(accentColor)
+                }
 
                 Spacer()
 
-                Text(model.targetApp)
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-                    .lineLimit(1)
+                statusChip(model.targetApp)
+                if let elapsedText = model.elapsedText {
+                    statusChip(elapsedText)
+                }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(model.summary)
-                    .font(.system(size: 17, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
                     .foregroundStyle(StageHUDTheme.textPrimary)
                     .lineLimit(2)
 
                 Text(model.detailText)
                     .font(.system(size: 12, weight: .regular, design: .default))
                     .foregroundStyle(StageHUDTheme.textSecondary)
-                    .lineLimit(2)
-            }
-
-            HStack(spacing: 8) {
-                capsule("Floating HUD")
-                if let elapsedText = model.elapsedText {
-                    capsule(elapsedText)
-                }
+                    .lineLimit(3)
             }
         }
-        .padding(14)
+        .padding(15)
         .background(cardBackground)
     }
 
-    private var controls: some View {
+    private var primaryControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Controls")
+            Text("Transport")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(StageHUDTheme.textMuted)
 
-            LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: 10),
-                GridItem(.flexible(), spacing: 10),
-            ], spacing: 10) {
-                ForEach(model.buttons) { button in
-                    Button(button.title) {
-                        model.send(button.id)
-                    }
-                    .buttonStyle(StageHUDButtonStyle(tone: button.tone))
-                    .disabled(!button.enabled)
-                }
+            HStack(spacing: 10) {
+                controlButton("start")
+                controlButton("stop")
             }
         }
-        .padding(14)
+        .padding(15)
+        .background(cardBackground)
+    }
+
+    private var utilityControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Session")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(StageHUDTheme.textMuted)
+
+            HStack(spacing: 10) {
+                controlButton("replay")
+                controlButton("clear")
+                controlButton("quit")
+            }
+        }
+        .padding(15)
         .background(cardBackground)
     }
 
     private var logs: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(alignment: .center) {
                 Text("Recent Events")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(StageHUDTheme.textMuted)
@@ -100,28 +104,35 @@ struct StageHUDRootView: View {
                             .foregroundStyle(StageHUDTheme.textMuted)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        ForEach(Array(model.recentLogs.enumerated().reversed()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(.system(size: 12, weight: .regular, design: .default))
-                                .foregroundStyle(StageHUDTheme.textSecondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(Color.primary.opacity(0.04))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                                )
+                        ForEach(Array(model.recentLogs.enumerated().reversed()), id: \.offset) { index, line in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(String(format: "%02d", model.recentLogs.count - index))
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(StageHUDTheme.textMuted)
+                                    .padding(.top, 2)
+
+                                Text(line)
+                                    .font(.system(size: 12, weight: .regular, design: .default))
+                                    .foregroundStyle(StageHUDTheme.textSecondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 9)
+                            .padding(.horizontal, 11)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color.primary.opacity(0.035))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
                         }
                     }
                 }
             }
             .scrollIndicators(.hidden)
         }
-        .padding(14)
+        .padding(15)
         .background(cardBackground)
     }
 
@@ -155,12 +166,12 @@ struct StageHUDRootView: View {
         }
     }
 
-    private func capsule(_ text: String) -> some View {
+    private func statusChip(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .regular, design: .monospaced))
             .foregroundStyle(StageHUDTheme.textSecondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
             .background(
                 Capsule(style: .continuous)
                     .fill(StageHUDTheme.buttonSecondary)
@@ -169,6 +180,16 @@ struct StageHUDRootView: View {
                 Capsule(style: .continuous)
                     .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
             )
+    }
+
+    private func controlButton(_ id: String) -> some View {
+        let button = model.buttons.first(where: { $0.id == id })
+
+        return Button(button?.title ?? id.capitalized) {
+            model.send(id)
+        }
+        .buttonStyle(StageHUDButtonStyle(tone: button?.tone ?? .secondary))
+        .disabled(!(button?.enabled ?? false))
     }
 }
 

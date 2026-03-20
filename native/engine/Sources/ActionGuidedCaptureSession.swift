@@ -303,8 +303,8 @@ final class GuidedCaptureSessionRunner {
             }
         }
 
-        try await captureRegionScreenshot(
-            rect: captureFrame,
+        try await captureAppWindowScreenshot(
+            bundleId: targetBundleId,
             outputPath: stagedScreenshotPath,
             writer: ResponseWriter(replyFile: artifactDirectory.appendingPathComponent("stage-screenshot.reply.json").path)
         )
@@ -386,8 +386,8 @@ final class GuidedCaptureSessionRunner {
         appendLog("result \(actualResult)")
         appendStep("read result \(actualResult)")
 
-        try await captureRegionScreenshot(
-            rect: captureFrame,
+        try await captureAppWindowScreenshot(
+            bundleId: targetBundleId,
             outputPath: resultScreenshotPath,
             writer: ResponseWriter(replyFile: artifactDirectory.appendingPathComponent("result-screenshot.reply.json").path)
         )

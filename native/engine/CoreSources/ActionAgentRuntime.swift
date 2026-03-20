@@ -191,6 +191,22 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
             }
             try ActionNativeAutomation.typeText(text)
             return ["status": "typed", "detail": text]
+        case .drag:
+            guard
+                let fromX = request.params["fromX"].flatMap(Double.init),
+                let fromY = request.params["fromY"].flatMap(Double.init),
+                let toX = request.params["toX"].flatMap(Double.init),
+                let toY = request.params["toY"].flatMap(Double.init)
+            else {
+                throw NSError(domain: "ActionAgent", code: 21, userInfo: [NSLocalizedDescriptionKey: "Missing or invalid drag parameters"])
+            }
+            let durationMs = Int(request.params["durationMs"].flatMap(Double.init) ?? 300)
+            if let filePath = request.params["filePath"], !filePath.isEmpty {
+                try ActionNativeAutomation.dragFile(path: filePath, from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), durationMs: durationMs)
+            } else {
+                try ActionNativeAutomation.drag(from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), durationMs: durationMs)
+            }
+            return ["status": "dragged", "detail": "\(Int(fromX)),\(Int(fromY))->\(Int(toX)),\(Int(toY))"]
         case .setWindowFrame:
             guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
                 throw NSError(domain: "ActionAgent", code: 4, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])

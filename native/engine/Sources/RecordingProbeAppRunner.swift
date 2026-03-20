@@ -37,7 +37,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     func run() {
         Self.retainedRunner = self
         let app = NSApplication.shared
-        app.setActivationPolicy(.regular)
+        app.setActivationPolicy(.accessory)
         app.delegate = self
         app.run()
     }
@@ -60,41 +60,29 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     }
 
     private func showWindow() {
-        let statusField = NSTextField(labelWithString: "Preparing recording probe…")
-        statusField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        statusField.textColor = .secondaryLabelColor
-        statusField.lineBreakMode = .byTruncatingMiddle
-        statusField.maximumNumberOfLines = 3
-        statusField.translatesAutoresizingMaskIntoConstraints = false
-
         let root = NSView(frame: .zero)
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        root.addSubview(statusField)
-
-        NSLayoutConstraint.activate([
-            statusField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
-            statusField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
-            statusField.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
-        ])
+        root.layer?.backgroundColor = NSColor.clear.cgColor
 
         let window = NSWindow(
-            contentRect: CGRect(x: 0, y: 0, width: 520, height: 140),
-            styleMask: [.titled, .closable],
+            contentRect: CGRect(x: -10_000, y: -10_000, width: 1, height: 1),
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
-        window.title = "Recording Probe"
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         window.contentView = root
-        window.center()
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.makeKeyAndOrderFront(nil)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
 
         self.window = window
-        self.statusField = statusField
+        self.statusField = nil
     }
 
     private func startRecording() {

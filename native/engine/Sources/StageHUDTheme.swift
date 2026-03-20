@@ -86,4 +86,34 @@ enum StageHUDTheme {
         light: NSColor.white,
         dark: NSColor(calibratedWhite: 0.08, alpha: 1)
     )
+
+    // Review surface tokens (premium pass V1)
+    static let reviewCanvas = dynamic(
+        light: NSColor(calibratedRed: 0.975, green: 0.978, blue: 0.985, alpha: 1),
+        dark: NSColor(calibratedWhite: 0.055, alpha: 1)
+    )
+    static let reviewPanel = dynamic(
+        light: NSColor(calibratedRed: 0.992, green: 0.993, blue: 0.996, alpha: 1),
+        dark: NSColor(calibratedWhite: 0.08, alpha: 1)
+    )
+    static let reviewPanelRaised = dynamic(
+        light: NSColor.white,
+        dark: NSColor(calibratedWhite: 0.095, alpha: 1)
+    )
+    static let reviewStrokeSoft = dynamic(
+        light: NSColor(calibratedWhite: 0.08, alpha: 0.08),
+        dark: NSColor(calibratedWhite: 1.0, alpha: 0.08)
+    )
+    static let reviewStrokeStrong = dynamic(
+        light: NSColor(calibratedWhite: 0.08, alpha: 0.16),
+        dark: NSColor(calibratedWhite: 1.0, alpha: 0.16)
+    )
+    static let reviewAccent = dynamic(
+        light: NSColor(calibratedRed: 0.19, green: 0.47, blue: 0.90, alpha: 1),
+        dark: NSColor(calibratedRed: 0.47, green: 0.71, blue: 1.00, alpha: 1)
+    )
+    static let reviewAccentMuted = dynamic(
+        light: NSColor(calibratedRed: 0.19, green: 0.47, blue: 0.90, alpha: 0.18),
+        dark: NSColor(calibratedRed: 0.47, green: 0.71, blue: 1.00, alpha: 0.22)
+    )
 }

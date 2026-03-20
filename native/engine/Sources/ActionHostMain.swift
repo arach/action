@@ -5,8 +5,10 @@ import AVFoundation
 import CoreGraphics
 import CoreMedia
 import Foundation
+import ImageIO
 @preconcurrency import ScreenCaptureKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum PermissionState: String, Encodable {
     case granted
@@ -30,11 +32,15 @@ enum ActionHostCommand: String {
     case launcher
     case webkitSmoke = "webkit-smoke"
     case guidedCalculatorDemo = "guided-calculator-demo"
+    case quitApp = "quit-app"
     case status
     case request
     case openAccessibilitySettings = "open-accessibility-settings"
     case openScreenRecordingSettings = "open-screen-recording-settings"
     case stageOverlay = "stage-overlay"
+    case prepareNotesNote = "prepare-notes-note"
+    case getCaptureWindowFrame = "get-capture-window-frame"
+    case composeRoundedScreenshot = "compose-rounded-screenshot"
     case launchApp = "launch-app"
     case recordAppWindow = "record-app-window"
     case recordAppWindowLocal = "record-app-window-local"
@@ -42,6 +48,8 @@ enum ActionHostCommand: String {
     case activateApp = "activate-app"
     case typeText = "type-text"
     case pressKey = "press-key"
+    case clickPoint = "click-point"
+    case drag
     case clickCalculatorButton = "click-calculator-button"
     case inspectCalculatorButtons = "inspect-calculator-buttons"
     case inspectCalculatorUI = "inspect-calculator-ui"
@@ -67,6 +75,8 @@ enum ActionHostError: LocalizedError {
     case applicationNotRunning(String)
     case accessibilityLookupFailed(String)
     case accessibilityActionFailed(String)
+    case fileNotFound(String)
+    case invalidColor(String)
 
     var errorDescription: String? {
         switch self {
@@ -92,6 +102,10 @@ enum ActionHostError: LocalizedError {
             return detail
         case .accessibilityActionFailed(let detail):
             return detail
+        case .fileNotFound(let path):
+            return "File not found: \(path)"
+        case .invalidColor(let color):
+            return "Invalid color \(color)"
         }
     }
 }
@@ -252,7 +266,131 @@ func activateApplication(bundleId: String) throws {
     app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
 }
 
-func postText(_ text: String) throws {
+func runAppleScript(_ source: String) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    process.arguments = ["-e", source]
+
+    let outputPipe = Pipe()
+    let errorPipe = Pipe()
+    process.standardOutput = outputPipe
+    process.standardError = errorPipe
+
+    try process.run()
+    process.waitUntilExit()
+
+    let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if process.terminationStatus == 0 {
+        return output
+    }
+
+    let error = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown AppleScript error"
+    throw ActionHostError.appleScriptFailed(error)
+}
+
+func prepareNotesNote() throws -> String {
+    let script = """
+    tell application "Notes"
+      activate
+      set targetFolder to default folder of default account
+      set newNote to make new note at targetFolder with properties {body:"<div><br></div>"}
+      show newNote
+      delay 0.35
+      return name of newNote
+    end tell
+    """
+
+    let noteName = try runAppleScript(script)
+    try focusNotesEditor()
+    return noteName
+}
+
+let keyCodes: [String: UInt16] = [
+    "a": 0x00, "s": 0x01, "d": 0x02, "f": 0x03, "h": 0x04, "g": 0x05, "z": 0x06, "x": 0x07,
+    "c": 0x08, "v": 0x09, "b": 0x0B, "q": 0x0C, "w": 0x0D, "e": 0x0E, "r": 0x0F, "y": 0x10,
+    "t": 0x11, "1": 0x12, "2": 0x13, "3": 0x14, "4": 0x15, "6": 0x16, "5": 0x17, "=": 0x18,
+    "9": 0x19, "7": 0x1A, "-": 0x1B, "8": 0x1C, "0": 0x1D, "]": 0x1E, "o": 0x1F, "u": 0x20,
+    "[": 0x21, "i": 0x22, "p": 0x23, "l": 0x25, "j": 0x26, "'": 0x27, "k": 0x28, ";": 0x29,
+    "\\": 0x2A, ",": 0x2B, "/": 0x2C, "n": 0x2D, "m": 0x2E, ".": 0x2F, "`": 0x32,
+    "return": 0x24, "enter": 0x24, "tab": 0x30, "space": 0x31, "delete": 0x33, "backspace": 0x33,
+    "escape": 0x35, "esc": 0x35,
+    "up": 0x7E, "down": 0x7D, "left": 0x7B, "right": 0x7C,
+]
+
+let keySymbols: [String: String] = [
+    "cmd": "⌘", "command": "⌘",
+    "shift": "⇧",
+    "opt": "⌥", "option": "⌥", "alt": "⌥",
+    "ctrl": "⌃", "control": "⌃",
+    "fn": "fn",
+    "return": "↵", "enter": "↵",
+    "tab": "⇥",
+    "space": "␣",
+    "delete": "⌫", "backspace": "⌫",
+    "escape": "⎋", "esc": "⎋",
+    "up": "↑", "down": "↓", "left": "←", "right": "→",
+]
+
+func keyOverlayLabel(_ key: String) -> String {
+    keySymbols[key.lowercased()] ?? key.uppercased()
+}
+
+func modifierFlags(for modifiers: [String]) -> CGEventFlags {
+    modifiers.reduce(into: CGEventFlags()) { result, modifier in
+        switch modifier.lowercased() {
+        case "cmd", "command":
+            result.insert(.maskCommand)
+        case "shift":
+            result.insert(.maskShift)
+        case "opt", "option", "alt":
+            result.insert(.maskAlternate)
+        case "ctrl", "control":
+            result.insert(.maskControl)
+        default:
+            break
+        }
+    }
+}
+
+func postKeyPress(_ key: String, modifiers: [String] = []) throws {
+    guard let source = CGEventSource(stateID: .hidSystemState) else {
+        throw ActionHostError.accessibilityActionFailed("Unable to create event source")
+    }
+
+    let normalized = key.lowercased()
+    guard let keyCode = keyCodes[normalized] else {
+        try postText(key, delayMs: nil)
+        return
+    }
+
+    let flags = modifierFlags(for: modifiers)
+    guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+          let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+        throw ActionHostError.accessibilityActionFailed("Unable to create keyboard events")
+    }
+
+    keyDown.flags = flags
+    keyUp.flags = flags
+    keyDown.post(tap: .cghidEventTap)
+    usleep(50000)
+    keyUp.post(tap: .cghidEventTap)
+}
+
+func clickPoint(_ point: CGPoint) throws {
+    CGWarpMouseCursorPosition(point)
+    usleep(10000)
+
+    guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+        throw ActionHostError.accessibilityActionFailed("Unable to create mouse events")
+    }
+
+    down.post(tap: .cghidEventTap)
+    usleep(30000)
+    up.post(tap: .cghidEventTap)
+}
+
+func postText(_ text: String, delayMs: Int?) throws {
     guard let source = CGEventSource(stateID: .hidSystemState) else {
         throw ActionHostError.accessibilityActionFailed("Unable to create event source")
     }
@@ -267,7 +405,13 @@ func postText(_ text: String) throws {
         keyDown.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unicode)
         keyUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unicode)
         keyDown.post(tap: .cghidEventTap)
+        if let delayMs, delayMs > 0 {
+            usleep(useconds_t(delayMs * 500))
+        }
         keyUp.post(tap: .cghidEventTap)
+        if let delayMs, delayMs > 0 {
+            usleep(useconds_t(delayMs * 500))
+        }
     }
 }
 
@@ -407,6 +551,52 @@ func findButton(in root: AXUIElement, label: String) -> AXUIElement? {
     return nil
 }
 
+func matchesText(_ candidate: String?, expected: String) -> Bool {
+    candidate?.trimmingCharacters(in: .whitespacesAndNewlines) == expected
+}
+
+func findElement(
+    in root: AXUIElement,
+    where predicate: (AXUIElement) -> Bool
+) -> AXUIElement? {
+    var queue = [root]
+
+    while let current = queue.first {
+        queue.removeFirst()
+
+        if predicate(current) {
+            return current
+        }
+
+        queue.append(contentsOf: axChildren(of: current))
+    }
+
+    return nil
+}
+
+func focusNotesEditor() throws {
+    let window = try firstWindowElement(for: "com.apple.Notes")
+    guard let editor = findElement(in: window, where: { element in
+        let role = axValue(element, attribute: kAXRoleAttribute) as? String
+        let identifier = axValue(element, attribute: kAXIdentifierAttribute) as? String
+        let title = axValue(element, attribute: kAXTitleAttribute) as? String
+        return role == kAXTextAreaRole as String
+            && (matchesText(identifier, expected: "Note Body Text View")
+                || matchesText(title, expected: "Note Body Text View"))
+    }) else {
+        throw ActionHostError.accessibilityLookupFailed("Could not find the Notes body text view")
+    }
+
+    let focusResult = AXUIElementSetAttributeValue(
+        editor,
+        kAXFocusedAttribute as CFString,
+        kCFBooleanTrue
+    )
+    guard focusResult == .success else {
+        throw ActionHostError.accessibilityActionFailed("Failed to focus Notes editor: \(focusResult.rawValue)")
+    }
+}
+
 struct CalculatorButtonSnapshot: Encodable {
     let role: String
     let title: String?
@@ -503,6 +693,18 @@ func regionSelection(for rect: CGRect, displays: [SCDisplay]) -> RegionSelection
     return RegionSelection(display: display, sourceRect: localRect)
 }
 
+func rectArea(_ rect: CGRect) -> CGFloat {
+    max(rect.width, 0) * max(rect.height, 0)
+}
+
+func overlapArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+    let intersection = lhs.intersection(rhs)
+    if intersection.isNull || intersection.isEmpty {
+        return 0
+    }
+    return rectArea(intersection)
+}
+
 func bestWindowSelection(for bundleId: String) async throws -> WindowSelection {
     let content = try await shareableContent()
 
@@ -510,12 +712,28 @@ func bestWindowSelection(for bundleId: String) async throws -> WindowSelection {
         window.owningApplication?.bundleIdentifier == bundleId && window.isOnScreen && window.windowLayer == 0
     }
 
-    let selectedWindow: SCWindow
+    let sizableCandidates = candidates.filter { window in
+        window.frame.width >= 400 && window.frame.height >= 300
+    }
+    let titledCandidates = sizableCandidates.filter { window in
+        let title = window.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !title.isEmpty
+    }
+    let primaryCandidates = titledCandidates.isEmpty
+        ? (sizableCandidates.isEmpty ? candidates : sizableCandidates)
+        : titledCandidates
 
-    if let active = candidates.first(where: \.isActive) {
+    let selectedWindow: SCWindow
+    if let expectedFrame = try? getWindowFrame(bundleId: bundleId),
+       let overlapping = primaryCandidates.max(by: { lhs, rhs in
+           overlapArea(lhs.frame, expectedFrame) < overlapArea(rhs.frame, expectedFrame)
+       }),
+       overlapArea(overlapping.frame, expectedFrame) > 0 {
+        selectedWindow = overlapping
+    } else if let active = primaryCandidates.first(where: \.isActive) {
         selectedWindow = active
-    } else if let largest = candidates.max(by: { lhs, rhs in
-        lhs.frame.width * lhs.frame.height < rhs.frame.width * rhs.frame.height
+    } else if let largest = primaryCandidates.max(by: { lhs, rhs in
+        rectArea(lhs.frame) < rectArea(rhs.frame)
     }) {
         selectedWindow = largest
     } else {
@@ -529,9 +747,93 @@ func bestWindowSelection(for bundleId: String) async throws -> WindowSelection {
     return WindowSelection(content: content, window: selectedWindow, display: display)
 }
 
+func getCaptureWindowFrame(bundleId: String) async throws -> CGRect {
+    let selection = try await bestWindowSelection(for: bundleId)
+    return selection.window.frame
+}
+
 func pngData(from image: CGImage) -> Data? {
     let bitmap = NSBitmapImageRep(cgImage: image)
     return bitmap.representation(using: .png, properties: [:])
+}
+
+func colorFromHex(_ hex: String) throws -> NSColor {
+    let normalized = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+    guard normalized.count == 6 || normalized.count == 8,
+          let value = UInt64(normalized, radix: 16) else {
+        throw ActionHostError.invalidColor(hex)
+    }
+
+    let hasAlpha = normalized.count == 8
+    let red = CGFloat((value >> (hasAlpha ? 24 : 16)) & 0xFF) / 255
+    let green = CGFloat((value >> (hasAlpha ? 16 : 8)) & 0xFF) / 255
+    let blue = CGFloat((value >> (hasAlpha ? 8 : 0)) & 0xFF) / 255
+    let alpha = hasAlpha ? CGFloat(value & 0xFF) / 255 : 1
+    return NSColor(calibratedRed: red, green: green, blue: blue, alpha: alpha)
+}
+
+func composeRoundedScreenshot(
+    inputPath: String,
+    outputPath: String,
+    radius: CGFloat,
+    backgroundHex: String
+) throws {
+    let inputURL = URL(fileURLWithPath: inputPath)
+    guard let sourceImage = CGImageSourceCreateWithURL(inputURL as CFURL, nil),
+          let source = CGImageSourceCreateImageAtIndex(sourceImage, 0, nil) else {
+        throw ActionHostError.captureFailed("Unable to read image at \(inputPath)")
+    }
+
+    let outputURL = URL(fileURLWithPath: outputPath)
+    try FileManager.default.createDirectory(
+        at: outputURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+
+    let width = source.width
+    let height = source.height
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+          let context = CGContext(
+              data: nil,
+              width: width,
+              height: height,
+              bitsPerComponent: 8,
+              bytesPerRow: 0,
+              space: colorSpace,
+              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+          ) else {
+        throw ActionHostError.unableToEncodeImage
+    }
+
+    let backgroundColor = try colorFromHex(backgroundHex).usingColorSpace(.sRGB) ?? NSColor.white
+    context.setFillColor(backgroundColor.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+    let drawRect = CGRect(x: 0, y: 0, width: width, height: height)
+    let clipPath = CGPath(
+        roundedRect: drawRect,
+        cornerWidth: radius,
+        cornerHeight: radius,
+        transform: nil
+    )
+    context.addPath(clipPath)
+    context.clip()
+    context.draw(source, in: drawRect)
+
+    guard let output = context.makeImage(),
+          let destination = CGImageDestinationCreateWithURL(
+              outputURL as CFURL,
+              UTType.png.identifier as CFString,
+              1,
+              nil
+          ) else {
+        throw ActionHostError.unableToEncodeImage
+    }
+
+    CGImageDestinationAddImage(destination, output, nil)
+    guard CGImageDestinationFinalize(destination) else {
+        throw ActionHostError.unableToEncodeImage
+    }
 }
 
 @available(macOS 15.0, *)
@@ -853,6 +1155,13 @@ struct OverlayViewport: Decodable {
     let dimming: String
 }
 
+struct OverlayInputState: Decodable {
+    let kind: String
+    let keys: [String]?
+    let text: String?
+    let style: String?
+}
+
 struct StageOverlayState: Decodable {
     let sessionId: String
     let phase: String
@@ -867,6 +1176,7 @@ struct StageOverlayState: Decodable {
     let stepCurrent: Int?
     let stepTotal: Int?
     let stepLabel: String?
+    let inputOverlay: OverlayInputState?
     let recentLogs: [String]?
 }
 
@@ -903,11 +1213,12 @@ final class StageOverlayView: NSView {
 
         drawBackdrop(state: state, viewport: viewport)
         drawViewportFrame(state: state, viewport: viewport)
-        drawHudPill(state: state, viewport: viewport)
 
         if state.phase == "countdown", let countdown = state.countdownRemaining {
             drawCountdown(String(countdown), viewport: viewport)
         }
+
+        drawInputOverlay(state: state, viewport: viewport)
     }
 
     private func viewportRect(for state: StageOverlayState) -> CGRect? {
@@ -936,6 +1247,11 @@ final class StageOverlayView: NSView {
 
         let gradient: NSGradient
         switch state.backdrop {
+        case "matte":
+            gradient = NSGradient(colors: [
+                NSColor(calibratedRed: 0.91, green: 0.93, blue: 0.96, alpha: 0.98),
+                NSColor(calibratedRed: 0.89, green: 0.92, blue: 0.95, alpha: 0.98),
+            ])!
         case "gradient":
             gradient = NSGradient(colors: [
                 NSColor(calibratedWhite: 0.18, alpha: 0.64),
@@ -1005,138 +1321,6 @@ final class StageOverlayView: NSView {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    private func drawHudPill(state: StageOverlayState, viewport: CGRect) {
-        let reservedRightInset: CGFloat = 340
-        let width: CGFloat = min(440, max(320, viewport.width + 84))
-        let height: CGFloat = 110
-        let maxX = max(24, bounds.width - reservedRightInset - width)
-        let x = min(maxX, max(24, viewport.minX))
-        let yAbove = viewport.maxY + 14
-        let yBelow = viewport.minY - height - 14
-        let y: CGFloat
-        if yAbove + height <= bounds.height - 24 {
-            y = yAbove
-        } else {
-            y = max(24, yBelow)
-        }
-        let rect = CGRect(x: x, y: y, width: width, height: height)
-        let path = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
-
-        NSColor(calibratedWhite: 0.055, alpha: 0.9).setFill()
-        path.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.16).setStroke()
-        path.lineWidth = 1
-        path.stroke()
-
-        let phaseLabel = state.isRecording ? "RECORDING" : state.phase.uppercased()
-        let contentInset: CGFloat = 14
-        let contentWidth = rect.width - (contentInset * 2)
-        let topY = rect.maxY - contentInset
-
-        let divider = NSBezierPath()
-        divider.move(to: CGPoint(x: rect.minX + contentInset, y: topY - 22))
-        divider.line(to: CGPoint(x: rect.maxX - contentInset, y: topY - 22))
-        NSColor(calibratedWhite: 1, alpha: 0.12).setStroke()
-        divider.lineWidth = 1
-        divider.stroke()
-
-        let indicatorRect = CGRect(x: rect.minX + contentInset, y: topY - 13, width: 6, height: 6)
-        let indicatorPath = NSBezierPath(ovalIn: indicatorRect)
-        let indicatorColor = state.isRecording
-            ? NSColor(calibratedWhite: 0.95, alpha: 1.0)
-            : NSColor(calibratedWhite: 0.7, alpha: 0.95)
-        indicatorColor.setFill()
-        indicatorPath.fill()
-
-        drawText(
-            text: phaseLabel,
-            in: CGRect(x: rect.minX + contentInset + 12, y: topY - 17, width: 210, height: 12),
-            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
-            color: NSColor(calibratedWhite: 1, alpha: 0.88)
-        )
-        drawText(
-            text: state.targetApp ?? "Action",
-            in: CGRect(x: rect.maxX - contentInset - 132, y: topY - 17, width: 132, height: 12),
-            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            color: NSColor(calibratedWhite: 1, alpha: 0.68),
-            alignment: .right
-        )
-
-        let headline = state.summary
-        drawText(
-            text: headline,
-            in: CGRect(x: rect.minX + contentInset, y: rect.maxY - 56, width: contentWidth, height: 18),
-            font: NSFont.monospacedSystemFont(ofSize: 15, weight: .semibold),
-            color: NSColor(calibratedWhite: 0.98, alpha: 0.96)
-        )
-
-        let context: String
-        if let label = state.stepLabel, !label.isEmpty {
-            context = label
-        } else if let detail = state.detail, !detail.isEmpty {
-            context = detail
-        } else {
-            context = phaseDetail(for: state)
-        }
-        drawText(
-            text: context,
-            in: CGRect(x: rect.minX + contentInset, y: rect.maxY - 74, width: contentWidth, height: 14),
-            font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            color: NSColor(calibratedWhite: 1, alpha: 0.62)
-        )
-
-        var chipX = rect.minX + contentInset
-        let chipY = rect.minY + 12
-
-        func drawChip(_ text: String) {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
-            ]
-            let textSize = text.size(withAttributes: attrs)
-            let chipWidth = textSize.width + 18
-            if chipX + chipWidth > rect.maxX - contentInset {
-                return
-            }
-            let chipRect = CGRect(x: chipX, y: chipY, width: chipWidth, height: 20)
-            let chipPath = NSBezierPath(roundedRect: chipRect, xRadius: 4, yRadius: 4)
-            NSColor(calibratedWhite: 1, alpha: 0.08).setFill()
-            chipPath.fill()
-            NSColor(calibratedWhite: 1, alpha: 0.14).setStroke()
-            chipPath.lineWidth = 1
-            chipPath.stroke()
-            drawText(
-                text: text,
-                in: CGRect(x: chipRect.minX + 9, y: chipRect.minY + 4, width: chipRect.width - 12, height: 12),
-                font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
-                color: NSColor(calibratedWhite: 1, alpha: 0.72)
-            )
-            chipX += chipWidth + 8
-        }
-
-        if state.phase == "countdown", let remaining = state.countdownRemaining {
-            drawChip("START IN \(remaining)S")
-        }
-        if let current = state.stepCurrent, let total = state.stepTotal, total > 0 {
-            drawChip("STEP \(current)/\(total)")
-        }
-        if let logs = state.recentLogs, let last = logs.last, !last.isEmpty {
-            drawChip(last.uppercased())
-        }
-    }
-
-    private func phaseDetail(for state: StageOverlayState) -> String {
-        switch state.phase {
-        case "countdown":
-            return "Stand by for capture"
-        case "recording":
-            return "Viewport locked and capture live"
-        case "completed":
-            return "Artifacts saved"
-        default:
-            return "Guided capture session"
-        }
-    }
-
     private func drawCountdown(_ text: String, viewport: CGRect) {
         let glow = NSShadow()
         glow.shadowBlurRadius = 36
@@ -1156,6 +1340,184 @@ final class StageOverlayView: NSView {
             height: size.height
         )
         text.draw(in: rect, withAttributes: attrs)
+    }
+
+    private func drawInputOverlay(state: StageOverlayState, viewport: CGRect) {
+        guard let overlay = state.inputOverlay else {
+            return
+        }
+
+        switch overlay.kind {
+        case "keys":
+            drawKeyOverlay(keys: overlay.keys ?? [], viewport: viewport)
+        case "typing":
+            drawTypingOverlay(text: overlay.text ?? "", style: overlay.style ?? "default", viewport: viewport)
+        default:
+            break
+        }
+    }
+
+    private func drawKeyOverlay(keys: [String], viewport: CGRect) {
+        guard !keys.isEmpty else {
+            return
+        }
+
+        let labels = keys.map(keyOverlayLabel)
+        let fonts = labels.map { label in
+            NSFont.systemFont(ofSize: ["⌘", "⇧", "⌥", "⌃", "fn"].contains(label) ? 28 : 23, weight: .medium)
+        }
+        let sizes = zip(labels, fonts).map { label, font in
+            (label as NSString).size(withAttributes: [.font: font])
+        }
+        let keyWidths = zip(labels, sizes).map { label, size in
+            max(size.width + 26, ["⌘", "⇧", "⌥", "⌃", "fn"].contains(label) ? 54 : 46)
+        }
+
+        let spacing: CGFloat = 8
+        let totalWidth = keyWidths.reduce(0, +) + (CGFloat(keyWidths.count - 1) * spacing)
+        let panelRect = CGRect(
+            x: viewport.midX - totalWidth / 2 - 18,
+            y: viewport.minY + 24,
+            width: totalWidth + 36,
+            height: 72
+        )
+
+        let panelShadow = NSShadow()
+        panelShadow.shadowBlurRadius = 20
+        panelShadow.shadowOffset = .zero
+        panelShadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.24)
+        panelShadow.set()
+
+        let panelPath = NSBezierPath(roundedRect: panelRect, xRadius: 20, yRadius: 20)
+        NSColor(calibratedWhite: 0.08, alpha: 0.76).setFill()
+        panelPath.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.10).setStroke()
+        panelPath.lineWidth = 1
+        panelPath.stroke()
+
+        var cursorX = panelRect.minX + 18
+        for (index, label) in labels.enumerated() {
+            let width = keyWidths[index]
+            let keyRect = CGRect(x: cursorX, y: panelRect.minY + 11, width: width, height: 50)
+            drawKeyCap(label: label, rect: keyRect, font: fonts[index])
+            cursorX += width + spacing
+        }
+    }
+
+    private func drawKeyCap(label: String, rect: CGRect, font: NSFont) {
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 8
+        shadow.shadowOffset = CGSize(width: 0, height: -2)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.24)
+        shadow.set()
+
+        let capRect = rect.insetBy(dx: 2, dy: 2)
+        let capPath = NSBezierPath(roundedRect: capRect, xRadius: 10, yRadius: 10)
+        NSColor(calibratedWhite: 0.15, alpha: 0.98).setFill()
+        capPath.fill()
+
+        let topRect = CGRect(x: capRect.minX, y: capRect.minY + capRect.height * 0.42, width: capRect.width, height: capRect.height * 0.58)
+        let topPath = NSBezierPath(roundedRect: topRect, xRadius: 10, yRadius: 10)
+        NSColor(calibratedWhite: 0.24, alpha: 1.0).setFill()
+        topPath.fill()
+
+        NSColor(calibratedWhite: 0.08, alpha: 1.0).setStroke()
+        capPath.lineWidth = 1
+        capPath.stroke()
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white,
+        ]
+        let size = (label as NSString).size(withAttributes: attrs)
+        let labelRect = CGRect(
+            x: rect.midX - size.width / 2,
+            y: rect.midY - size.height / 2 + 2,
+            width: size.width,
+            height: size.height
+        )
+        (label as NSString).draw(in: labelRect, withAttributes: attrs)
+    }
+
+    private func drawTypingOverlay(text: String, style: String, viewport: CGRect) {
+        guard !text.isEmpty else {
+            return
+        }
+
+        let summary = summarizeTypingText(text)
+        let panelWidth = min(viewport.width - 56, max(320, CGFloat(summary.count) * 10.4))
+        let panelRect = CGRect(
+            x: viewport.midX - panelWidth / 2,
+            y: viewport.minY + 24,
+            width: panelWidth,
+            height: 56
+        )
+
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 18
+        shadow.shadowOffset = .zero
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.16)
+        shadow.set()
+
+        let path = NSBezierPath(roundedRect: panelRect, xRadius: 18, yRadius: 18)
+        let background: NSColor
+        let border: NSColor
+        let foreground: NSColor
+        let font: NSFont
+
+        switch style {
+        case "notes":
+            background = NSColor(calibratedRed: 0.99, green: 0.97, blue: 0.90, alpha: 0.97)
+            border = NSColor(calibratedRed: 0.90, green: 0.84, blue: 0.66, alpha: 0.85)
+            foreground = NSColor(calibratedRed: 0.20, green: 0.16, blue: 0.11, alpha: 1)
+            font = NSFont.systemFont(ofSize: 18, weight: .medium)
+        case "terminal":
+            background = NSColor(calibratedRed: 0.11, green: 0.12, blue: 0.14, alpha: 0.95)
+            border = NSColor(calibratedRed: 0.26, green: 0.54, blue: 0.32, alpha: 0.72)
+            foreground = NSColor(calibratedRed: 0.62, green: 0.95, blue: 0.70, alpha: 1)
+            font = NSFont.monospacedSystemFont(ofSize: 17, weight: .regular)
+        case "code":
+            background = NSColor(calibratedRed: 0.13, green: 0.14, blue: 0.17, alpha: 0.95)
+            border = NSColor(calibratedWhite: 1, alpha: 0.12)
+            foreground = NSColor(calibratedWhite: 0.94, alpha: 1)
+            font = NSFont.monospacedSystemFont(ofSize: 16, weight: .regular)
+        default:
+            background = NSColor(calibratedWhite: 0.12, alpha: 0.90)
+            border = NSColor(calibratedWhite: 1, alpha: 0.10)
+            foreground = NSColor(calibratedWhite: 0.96, alpha: 1)
+            font = NSFont.systemFont(ofSize: 18, weight: .medium)
+        }
+
+        background.setFill()
+        path.fill()
+        border.setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        let displayText = style == "terminal" ? "$ \(summary)▌" : "\(summary)▌"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: foreground,
+        ]
+        let size = (displayText as NSString).size(withAttributes: attrs)
+        let textRect = CGRect(
+            x: panelRect.minX + 20,
+            y: panelRect.midY - size.height / 2,
+            width: panelRect.width - 40,
+            height: size.height
+        )
+        (displayText as NSString).draw(in: textRect, withAttributes: attrs)
+    }
+
+    private func summarizeTypingText(_ text: String) -> String {
+        let compact = text
+            .replacingOccurrences(of: "\n", with: "  ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard compact.count > 46 else {
+            return compact
+        }
+        let index = compact.index(compact.startIndex, offsetBy: 43)
+        return "\(compact[..<index])..."
     }
 
     private func drawText(
@@ -1190,6 +1552,7 @@ final class StageOverlayController: NSObject {
     private var controlViewModel: StageHUDViewModel?
     private var lastStateData: Data?
     private var pollTimer: Timer?
+    private var currentPhase: String = "staging"
 
     init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?, controlFile: String?) {
         self.stateFile = stateFile
@@ -1201,9 +1564,7 @@ final class StageOverlayController: NSObject {
 
     func run() throws {
         let app = NSApplication.shared
-        app.setActivationPolicy(.regular)
-        configureAppIcon()
-        app.activate(ignoringOtherApps: true)
+        app.setActivationPolicy(.accessory)
         try writer.write(
             ActionHostResponse(
                 status: "overlay-running",
@@ -1224,6 +1585,7 @@ final class StageOverlayController: NSObject {
 
         let state = try JSONDecoder().decode(StageOverlayState.self, from: data)
         lastStateData = data
+        currentPhase = state.phase
         logger.log("stage-overlay: apply phase=\(state.phase) summary=\(state.summary)")
         apply(state: state)
     }
@@ -1293,7 +1655,7 @@ final class StageOverlayController: NSObject {
             return
         }
 
-        let controlSize = CGSize(width: 312, height: 428)
+        let controlSize = CGSize(width: 336, height: 456)
         let controlWindow = StageHUDPanel(
             contentRect: CGRect(origin: .zero, size: controlSize),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -1340,6 +1702,15 @@ final class StageOverlayController: NSObject {
             return
         }
 
+        if shouldHandleControlCommandsLocally() {
+            let commands = consumeControlCommands()
+            if commands.contains("clear") || commands.contains("quit") {
+                logger.log("stage-overlay: local dismiss command received")
+                shutdown()
+                return
+            }
+        }
+
         do {
             try refreshState(force: false)
         } catch {
@@ -1356,33 +1727,18 @@ final class StageOverlayController: NSObject {
     }
 
     private func controlPanelFrame(screenFrame: CGRect, viewportRect: CGRect) -> CGRect? {
-        let sideGap: CGFloat = 14
         let edgePadding: CGFloat = 16
         let topPadding: CGFloat = 18
         let bottomPadding: CGFloat = 16
-        let panelWidth: CGFloat = 312
-        let panelHeight: CGFloat = min(428, screenFrame.height - topPadding - bottomPadding)
-        let preferredRightX = viewportRect.maxX + sideGap
-        let preferredLeftX = viewportRect.minX - sideGap - panelWidth
-        let hasRoomOnRight = preferredRightX + panelWidth <= screenFrame.maxX - edgePadding
-        let unclampedX = hasRoomOnRight ? preferredRightX : preferredLeftX
-        let x = min(
-            screenFrame.maxX - edgePadding - panelWidth,
-            max(screenFrame.minX + edgePadding, unclampedX)
-        )
-        let preferredTopAlignedY = viewportRect.maxY - panelHeight
+        let panelWidth: CGFloat = 336
+        let panelHeight: CGFloat = min(456, screenFrame.height - topPadding - bottomPadding)
+        let x = screenFrame.maxX - edgePadding - panelWidth
+        let preferredTopAlignedY = viewportRect.maxY - panelHeight + 6
         let y = min(
             screenFrame.maxY - topPadding - panelHeight,
             max(screenFrame.minY + bottomPadding, preferredTopAlignedY)
         )
         return CGRect(x: x, y: y, width: panelWidth, height: panelHeight)
-    }
-
-    private func configureAppIcon() {
-        if let image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Action") {
-            image.size = NSSize(width: 512, height: 512)
-            NSApplication.shared.applicationIconImage = image
-        }
     }
 
     private func appendControlCommand(_ command: String) {
@@ -1407,6 +1763,34 @@ final class StageOverlayController: NSObject {
                 FileHandle.standardError.write(Data("ActionHost control write failed: \(error.localizedDescription)\n".utf8))
             }
         }
+    }
+
+    private func shouldHandleControlCommandsLocally() -> Bool {
+        switch currentPhase {
+        case "created", "staging", "completed", "failed", "cancelled":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func consumeControlCommands() -> [String] {
+        guard let controlFile,
+              FileManager.default.fileExists(atPath: controlFile),
+              let raw = try? String(contentsOfFile: controlFile, encoding: .utf8) else {
+            return []
+        }
+
+        let commands = raw
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        guard !commands.isEmpty else {
+            return []
+        }
+
+        try? "".write(toFile: controlFile, atomically: true, encoding: .utf8)
+        return commands
     }
 }
 
@@ -1439,6 +1823,29 @@ func waitForFinishedSignal(at path: String) throws {
     }
 }
 
+func terminateRunningActionApps(timeout: TimeInterval = 2.5) -> Bool {
+    let bundleId = "dev.action.Action"
+    let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+    guard !running.isEmpty else {
+        return true
+    }
+
+    for app in running {
+        _ = app.terminate()
+    }
+
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        let remaining = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+        if remaining.isEmpty {
+            return true
+        }
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.08))
+    }
+
+    return NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
+}
+
 func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWriter, logger: DebugLogger) async throws {
     let agentBridge = ActionAgentCommandBridge()
     switch command {
@@ -1453,6 +1860,15 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
     case .guidedCalculatorDemo:
         let runner = GuidedCaptureSessionRunner(writer: writer, logger: logger, options: options)
         try await runner.run()
+    case .quitApp:
+        let didQuit = terminateRunningActionApps()
+        try writer.write(
+            ActionHostResponse(
+                status: didQuit ? "quit" : "error",
+                outputPath: nil,
+                detail: didQuit ? "terminated-running-action-apps" : "unable-to-quit-within-timeout"
+            )
+        )
     case .status:
         try writer.write(snapshot(promptAccessibility: false, requestScreenRecordingPermission: false))
     case .request:
@@ -1612,14 +2028,85 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             try ActionNativeAutomation.launchApplication(bundleId: bundleId)
         }
         try writer.write(ActionHostResponse(status: "launched", outputPath: nil, detail: bundleId))
+    case .prepareNotesNote:
+        let noteName = try prepareNotesNote()
+        try writer.write(ActionHostResponse(status: "prepared", outputPath: nil, detail: noteName))
+    case .getCaptureWindowFrame:
+        let bundleId = try options.required("bundle-id")
+        let rect = try await getCaptureWindowFrame(bundleId: bundleId)
+        try writer.write(
+            WindowFrameResponse(
+                status: "capture-window-frame",
+                bundleId: bundleId,
+                frame: OverlayBounds(
+                    x: rect.origin.x,
+                    y: rect.origin.y,
+                    width: rect.size.width,
+                    height: rect.size.height
+                )
+            )
+        )
+    case .composeRoundedScreenshot:
+        let inputPath = try options.required("input")
+        let outputPath = try options.required("output")
+        let radius = CGFloat(options.double("radius", default: 24))
+        let background = options.options["background"] ?? "E8EDF5"
+        try composeRoundedScreenshot(
+            inputPath: inputPath,
+            outputPath: outputPath,
+            radius: radius,
+            backgroundHex: background
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: "composed",
+                outputPath: outputPath,
+                detail: "radius=\(Int(radius)) background=\(background)"
+            )
+        )
     case .typeText:
         let text = try options.required("text")
-        try postText(text)
+        let delayMs = Int(options.double("delay-ms", default: 0))
+        try postText(text, delayMs: delayMs > 0 ? delayMs : nil)
         try writer.write(ActionHostResponse(status: "typed", outputPath: nil, detail: text))
     case .pressKey:
         let key = try options.required("key")
-        try postText(key)
-        try writer.write(ActionHostResponse(status: "pressed", outputPath: nil, detail: key))
+        let modifiers = options.options["modifiers"]?
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty } ?? []
+        try postKeyPress(key, modifiers: modifiers)
+        let detail = modifiers.isEmpty ? key : "\(modifiers.joined(separator: "+"))+\(key)"
+        try writer.write(ActionHostResponse(status: "pressed", outputPath: nil, detail: detail))
+    case .clickPoint:
+        let x = options.double("x", default: .nan)
+        let y = options.double("y", default: .nan)
+        guard x.isFinite, y.isFinite else {
+            throw ActionHostError.missingOption("--x/--y")
+        }
+        try clickPoint(CGPoint(x: x, y: y))
+        try writer.write(ActionHostResponse(status: "clicked", outputPath: nil, detail: "\(Int(x)),\(Int(y))"))
+    case .drag:
+        let fromX = options.double("from-x", default: .nan)
+        let fromY = options.double("from-y", default: .nan)
+        let toX = options.double("to-x", default: .nan)
+        let toY = options.double("to-y", default: .nan)
+        let durationMs = Int(options.double("duration-ms", default: 300))
+        let filePath = options.options["file-path"]
+
+        guard fromX.isFinite, fromY.isFinite, toX.isFinite, toY.isFinite else {
+            throw ActionHostError.missingOption("--from-x --from-y --to-x --to-y")
+        }
+        if let filePath, !filePath.isEmpty, !FileManager.default.fileExists(atPath: filePath) {
+            throw ActionHostError.fileNotFound(filePath)
+        }
+        if let filePath, !filePath.isEmpty {
+            try ActionNativeAutomation.dragFile(path: filePath, from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), durationMs: durationMs)
+            try writer.write(ActionHostResponse(status: "dragged", outputPath: nil, detail: "file=\(filePath)"))
+        } else {
+            try ActionNativeAutomation.drag(from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), durationMs: durationMs)
+            try writer.write(ActionHostResponse(status: "dragged", outputPath: nil, detail: "\(Int(fromX)),\(Int(fromY))->\(Int(toX)),\(Int(toY))"))
+        }
     case .clickCalculatorButton:
         let button = try options.required("button")
         try clickCalculatorButton(label: button)
