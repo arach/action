@@ -20,6 +20,7 @@ final class StageHUDViewModel: ObservableObject {
     @Published var summary: String = "Guided capture session"
     @Published var detail: String?
     @Published var stepLabel: String?
+    @Published var countdownRemaining: Int?
     @Published var recentLogs: [String] = []
     @Published var elapsedMs: Double?
 
@@ -31,7 +32,7 @@ final class StageHUDViewModel: ObservableObject {
 
     var phaseAccent: StageHUDThemePhaseAccent {
         switch phase {
-        case "recording":
+        case "recording", "acting":
             return .recording
         case "paused":
             return .paused
@@ -60,12 +61,82 @@ final class StageHUDViewModel: ObservableObject {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
+    var countdownText: String? {
+        guard phase == "countdown", let countdownRemaining else {
+            return nil
+        }
+
+        return "\(countdownRemaining)"
+    }
+
+    var captureStatusTitle: String {
+        switch phase {
+        case "observing":
+            return "Live Surface"
+        case "analyzing":
+            return "Reflecting"
+        case "awaiting-decision":
+            return "Decision Gate"
+        case "acting":
+            return "Applying Action"
+        case "countdown":
+            return countdownText.map { "T-\($0)" } ?? "Count In"
+        case "recording":
+            return "Live Capture"
+        case "completing":
+            return "Finalizing"
+        case "completed":
+            return "Take Saved"
+        case "cancelled":
+            return "Take Cancelled"
+        case "failed":
+            return "Capture Failed"
+        default:
+            return "Recorder Ready"
+        }
+    }
+
+    var captureStatusDetail: String {
+        switch phase {
+        case "observing":
+            return "The runtime is staged on a live surface and ready to inspect or act."
+        case "analyzing":
+            return "Reflection is in progress. Keep stop available so inspection never becomes a dead end."
+        case "awaiting-decision":
+            return "Findings are ready. Choose whether to act, record, or dismiss the session."
+        case "acting":
+            return "The runtime is applying a follow-up action from the current inspection context."
+        case "countdown":
+            return "Start now to skip the countdown, or cancel before capture begins."
+        case "recording":
+            return "Interrupt ends the take immediately so you can reset and try again."
+        case "completing":
+            return "Writing the movie and marker files."
+        case "completed":
+            return "Replay the last run or dismiss the panel."
+        case "cancelled":
+            return "The take ended before a completed session was saved."
+        case "failed":
+            return "Inspect the recent events for the native failure."
+        default:
+            return "Stage the app, then arm the capture."
+        }
+    }
+
+    var stepProgressText: String? {
+        guard let detail, !detail.isEmpty else {
+            return nil
+        }
+
+        return detail
+    }
+
     var buttons: [ButtonModel] {
         [
-            ButtonModel(id: "start", title: phase == "paused" ? "Resume" : "Start", enabled: isEnabled("start"), tone: .primary),
-            ButtonModel(id: "stop", title: phase == "paused" ? "End" : "Stop", enabled: isEnabled("stop"), tone: .destructive),
+            ButtonModel(id: "start", title: startButtonTitle, enabled: isEnabled("start"), tone: .primary),
+            ButtonModel(id: "stop", title: stopButtonTitle, enabled: isEnabled("stop"), tone: .destructive),
             ButtonModel(id: "replay", title: "Replay", enabled: isEnabled("replay"), tone: .secondary),
-            ButtonModel(id: "clear", title: "Clear", enabled: isEnabled("clear"), tone: .secondary),
+            ButtonModel(id: "clear", title: clearButtonTitle, enabled: isEnabled("clear"), tone: .secondary),
             ButtonModel(id: "quit", title: "Quit", enabled: isEnabled("quit"), tone: .secondary),
         ]
     }
@@ -80,15 +151,69 @@ final class StageHUDViewModel: ObservableObject {
     private func isEnabled(_ id: String) -> Bool {
         switch id {
         case "start":
-            return phase == "staging" || phase == "completed" || phase == "failed" || phase == "paused" || phase == "created"
+            return phase == "staging"
+                || phase == "observing"
+                || phase == "awaiting-decision"
+                || phase == "completed"
+                || phase == "failed"
+                || phase == "paused"
+                || phase == "created"
+                || phase == "countdown"
         case "stop":
-            return phase == "countdown" || phase == "recording" || phase == "paused"
+            return phase == "countdown"
+                || phase == "observing"
+                || phase == "analyzing"
+                || phase == "awaiting-decision"
+                || phase == "acting"
+                || phase == "recording"
+                || phase == "paused"
         case "replay":
             return phase == "completed"
         case "clear", "quit":
             return true
         default:
             return false
+        }
+    }
+
+    private var startButtonTitle: String {
+        switch phase {
+        case "observing":
+            return "Inspect"
+        case "awaiting-decision":
+            return "Apply"
+        case "countdown":
+            return "Start Now"
+        case "paused":
+            return "Resume"
+        default:
+            return "Start"
+        }
+    }
+
+    private var stopButtonTitle: String {
+        switch phase {
+        case "observing", "analyzing", "awaiting-decision":
+            return "Cancel"
+        case "acting":
+            return "Interrupt"
+        case "countdown":
+            return "Cancel"
+        case "paused":
+            return "End Take"
+        case "recording":
+            return "Interrupt"
+        default:
+            return "Stop"
+        }
+    }
+
+    private var clearButtonTitle: String {
+        switch phase {
+        case "completed", "failed", "cancelled":
+            return "Dismiss"
+        default:
+            return "Clear"
         }
     }
 }

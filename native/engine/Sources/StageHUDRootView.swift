@@ -6,6 +6,7 @@ struct StageHUDRootView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            captureStatus
             primaryControls
             utilityControls
             logs
@@ -53,9 +54,49 @@ struct StageHUDRootView: View {
         .background(cardBackground)
     }
 
+    private var captureStatus: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(model.captureStatusTitle)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(StageHUDTheme.textMuted)
+
+                Spacer()
+
+                if let progress = model.stepProgressText {
+                    Text(progress)
+                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                        .lineLimit(1)
+                }
+            }
+
+            if let countdown = model.countdownText {
+                HStack(alignment: .center, spacing: 14) {
+                    Text(countdown)
+                        .font(.system(size: 44, weight: .bold, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textPrimary)
+                        .frame(width: 72, alignment: .leading)
+
+                    Text(model.captureStatusDetail)
+                        .font(.system(size: 12, weight: .regular, design: .default))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text(model.captureStatusDetail)
+                    .font(.system(size: 12, weight: .regular, design: .default))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(15)
+        .background(cardBackground)
+    }
+
     private var primaryControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Transport")
+            Text("Capture")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(StageHUDTheme.textMuted)
 

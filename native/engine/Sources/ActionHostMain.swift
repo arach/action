@@ -1619,6 +1619,7 @@ final class StageOverlayController: NSObject {
         controlViewModel?.summary = state.summary
         controlViewModel?.detail = state.detail
         controlViewModel?.stepLabel = state.stepLabel
+        controlViewModel?.countdownRemaining = state.countdownRemaining
         controlViewModel?.recentLogs = state.recentLogs ?? []
         controlViewModel?.elapsedMs = state.elapsedMs
         if let dockFrame = controlPanelFrame(screenFrame: screen.frame, viewportRect: viewportRect) {

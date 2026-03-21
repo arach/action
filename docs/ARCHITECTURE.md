@@ -12,9 +12,13 @@ The central architectural decision for `action` is:
 
 **The runtime is the product. The scene format is a compiled input, not the architecture.**
 
+Another useful way to say the same thing:
+
+**`action` is an action runtime that can observe, act, reflect, and record.**
+
 ## Goals
 
-- Provide a deterministic, session-based runtime for observing apps and browsers, resolving targets, executing actions, and recording structured traces.
+- Provide a deterministic, session-based runtime for observing apps and browsers, resolving targets, executing actions, reflecting on what happened, and recording structured traces.
 - Support agent-authored demo and promo workflows without relying on hidden heuristics or magical state.
 - Separate live automation from final composition so polished output can improve without destabilizing the runtime.
 - Lean fully into macOS-native fidelity instead of designing for fake cross-platform flexibility.
@@ -62,6 +66,7 @@ The runtime is the heart of the system. It owns:
 - current surfaces and active targets
 - observations and resolution logic
 - action execution
+- reflection and inspection workflows
 - traces and artifacts
 
 All mutable run state belongs to a concrete session. Avoid hidden globals and avoid lifecycle behavior that relies on shell cleanup or broad process-kill patterns.
@@ -111,8 +116,8 @@ Frontends must stay thin.
 
 - CLI: operational control and local authoring workflows
 - MCP: agent-facing execution surface
-- TS HUD: richer operator console for logs, diagnostics, artifacts, and scenario control
-- native HUD: minimal always-on capture companion tied closely to runtime truth
+- TS HUD: richer operator console for logs, diagnostics, artifacts, scenario control, and reflection output
+- native HUD: minimal always-on capture companion tied closely to runtime truth and immediate controls
 
 They should call the same runtime interfaces, not implement separate behavior.
 
@@ -121,6 +126,7 @@ The HUD split should be deliberate:
 - the native HUD should stay minimal and capture-adjacent
 - the TS HUD can carry more product richness and operator affordances
 - neither HUD should become the owner of runtime truth
+- if a HUD is on screen during a live session, it should expose explicit controls instead of acting like passive decoration
 
 ## Core Primitives
 
@@ -171,6 +177,26 @@ Examples:
 - cursor position
 - recording state
 - audio level
+
+### Reflection
+
+A structured interpretation of current state or recent action.
+
+Examples:
+
+- UI critique from a model provider
+- QA finding attached to a screenshot
+- target suggestion derived from vision plus AX context
+- operator-facing summary of what changed after an action
+
+Reflection is not the same thing as raw observation.
+
+- observations are facts gathered from the system
+- reflections are interpretations produced from those facts
+
+The runtime should own reflection sessions, prompts, findings, and artifacts, but
+provider-specific model clients should stay outside the native engine. See
+[LIVE_INSPECTION_RUNTIME.md](/Users/arach/dev/action/docs/LIVE_INSPECTION_RUNTIME.md).
 
 ### Target
 
