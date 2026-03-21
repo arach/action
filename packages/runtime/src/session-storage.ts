@@ -1,49 +1,16 @@
 import { relative } from "node:path";
 
 import type {
-  GuidedSessionPhase,
   HudSnapshot,
+  PersistedRuntimeSession,
   RuntimeArtifact,
-  SessionState,
+  SessionArtifactEntry,
+  SessionArtifactManifest,
+  SessionMode,
   TraceEvent,
 } from "@action/protocol";
 
-export type RuntimeSessionMode = "capture" | "inspection" | "hybrid";
-
-export interface SessionManifestEntry {
-  kind: RuntimeArtifact["kind"];
-  path: string;
-  relativePath: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface PersistedRuntimeSession {
-  id: string;
-  mode: RuntimeSessionMode;
-  state: SessionState;
-  phase: GuidedSessionPhase;
-  createdAt: string;
-  updatedAt: string;
-  targetApp?: string;
-  outputDir: string;
-  tracePath: string;
-  manifestPath: string;
-  artifactCount: number;
-  traceCount: number;
-  artifacts: SessionManifestEntry[];
-  stage: HudSnapshot["stage"];
-}
-
-export interface SessionArtifactManifest {
-  sessionId: string;
-  mode: RuntimeSessionMode;
-  generatedAt: string;
-  outputDir: string;
-  tracePath: string;
-  artifacts: SessionManifestEntry[];
-}
-
-export function toManifestEntries(outputDir: string, artifacts: RuntimeArtifact[]): SessionManifestEntry[] {
+export function toManifestEntries(outputDir: string, artifacts: RuntimeArtifact[]): SessionArtifactEntry[] {
   return artifacts.map((artifact) => ({
     kind: artifact.kind,
     path: artifact.path,
@@ -54,7 +21,7 @@ export function toManifestEntries(outputDir: string, artifacts: RuntimeArtifact[
 
 export function buildSessionManifest(input: {
   sessionId: string;
-  mode: RuntimeSessionMode;
+  mode: SessionMode;
   generatedAt: string;
   outputDir: string;
   tracePath: string;
@@ -71,7 +38,7 @@ export function buildSessionManifest(input: {
 }
 
 export function buildPersistedSession(input: {
-  mode: RuntimeSessionMode;
+  mode: SessionMode;
   outputDir: string;
   tracePath: string;
   manifestPath: string;

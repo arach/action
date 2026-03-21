@@ -27,6 +27,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
 
     private var window: NSWindow?
     private var statusField: NSTextField?
+    private let panicRegistrationID = "recording-probe-\(UUID().uuidString)"
 
     init(configuration: Configuration, writer: ResponseWriter, debugLogger: DebugLogger) {
         self.configuration = configuration
@@ -43,6 +44,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        registerPanicStopIfNeeded()
         showWindow()
         startRecording()
     }
@@ -52,6 +54,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        ActionPanicRegistry.unregister(id: panicRegistrationID)
         Self.retainedRunner = nil
     }
 
@@ -127,5 +130,23 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     private func report(_ message: String) {
         statusField?.stringValue = message
         logger.notice("\(message, privacy: .public)")
+    }
+
+    private func registerPanicStopIfNeeded() {
+        guard let stopSignalPath = configuration.stopSignalPath, !stopSignalPath.isEmpty else {
+            return
+        }
+
+        do {
+            try ActionPanicRegistry.register(
+                id: panicRegistrationID,
+                title: "Stop Recording",
+                detail: "Recording probe",
+                controlFile: nil,
+                stopFile: stopSignalPath
+            )
+        } catch {
+            logger.error("Failed to register panic stop: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }

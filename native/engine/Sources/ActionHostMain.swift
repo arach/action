@@ -37,6 +37,9 @@ enum ActionHostCommand: String {
     case request
     case openAccessibilitySettings = "open-accessibility-settings"
     case openScreenRecordingSettings = "open-screen-recording-settings"
+    case currentSurface = "current-surface"
+    case panicOverlay = "panic-overlay"
+    case panicStop = "panic-stop"
     case stageOverlay = "stage-overlay"
     case prepareNotesNote = "prepare-notes-note"
     case getCaptureWindowFrame = "get-capture-window-frame"
@@ -53,6 +56,7 @@ enum ActionHostCommand: String {
     case clickCalculatorButton = "click-calculator-button"
     case inspectCalculatorButtons = "inspect-calculator-buttons"
     case inspectCalculatorUI = "inspect-calculator-ui"
+    case inspectAppUI = "inspect-app-ui"
     case getCalculatorDisplay = "get-calculator-display"
     case setWindowFrame = "set-window-frame"
     case getWindowFrame = "get-window-frame"
@@ -517,6 +521,68 @@ struct WindowFrameResponse: Encodable {
     let status: String
     let bundleId: String
     let frame: OverlayBounds
+}
+
+struct CurrentSurfaceResponse: Encodable {
+    let status: String
+    let bundleId: String
+    let appName: String
+    let frame: OverlayBounds?
+}
+
+func overlayBounds(from rect: CGRect) -> OverlayBounds {
+    OverlayBounds(
+        x: rect.origin.x,
+        y: rect.origin.y,
+        width: rect.size.width,
+        height: rect.size.height
+    )
+}
+
+func rect(from windowInfo: [String: Any]) -> CGRect? {
+    guard let bounds = windowInfo[kCGWindowBounds as String] as? [String: Any] else {
+        return nil
+    }
+
+    var rect = CGRect.zero
+    guard CGRectMakeWithDictionaryRepresentation(bounds as CFDictionary, &rect) else {
+        return nil
+    }
+
+    return rect
+}
+
+func currentSurface() throws -> CurrentSurfaceResponse {
+    let selfBundleId = Bundle.main.bundleIdentifier
+    let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+
+    for windowInfo in windowList {
+        let layer = windowInfo[kCGWindowLayer as String] as? Int ?? 0
+        guard layer == 0 else {
+            continue
+        }
+
+        let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? pid_t ?? 0
+        guard ownerPID > 0,
+              let app = NSRunningApplication(processIdentifier: ownerPID),
+              let bundleId = app.bundleIdentifier,
+              bundleId != selfBundleId else {
+            continue
+        }
+
+        let appName = app.localizedName ?? bundleId
+        let frame = (try? getWindowFrame(bundleId: bundleId))
+            ?? rect(from: windowInfo)
+
+        return CurrentSurfaceResponse(
+            status: "current-surface",
+            bundleId: bundleId,
+            appName: appName,
+            frame: frame.map(overlayBounds(from:))
+        )
+    }
+
+    throw ActionHostError.windowNotFound("current-surface")
 }
 
 func getWindowFrame(bundleId: String) throws -> CGRect {
@@ -1553,6 +1619,7 @@ final class StageOverlayController: NSObject {
     private var lastStateData: Data?
     private var pollTimer: Timer?
     private var currentPhase: String = "staging"
+    private var panicRegistrationID: String?
 
     init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?, controlFile: String?) {
         self.stateFile = stateFile
@@ -1627,6 +1694,7 @@ final class StageOverlayController: NSObject {
         }
         overlayWindow?.orderFrontRegardless()
         controlWindow?.orderFrontRegardless()
+        updatePanicRegistration(for: state)
         logger.log("stage-overlay: window ordered front viewport=\(viewportRect)")
     }
 
@@ -1664,7 +1732,7 @@ final class StageOverlayController: NSObject {
             defer: false,
             screen: screen
         )
-        controlWindow.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) - 1)
+        controlWindow.level = actionHUDPanelLevel()
         controlWindow.isOpaque = false
         controlWindow.backgroundColor = .clear
         controlWindow.hasShadow = true
@@ -1672,7 +1740,7 @@ final class StageOverlayController: NSObject {
         controlWindow.isMovable = false
         controlWindow.isFloatingPanel = true
         controlWindow.hidesOnDeactivate = false
-        controlWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        controlWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle, .transient]
         controlWindow.isReleasedWhenClosed = false
         let controlViewModel = StageHUDViewModel()
         controlViewModel.onCommand = { [weak self] command in
@@ -1703,6 +1771,8 @@ final class StageOverlayController: NSObject {
             return
         }
 
+        enforceTopOrder()
+
         if shouldHandleControlCommandsLocally() {
             let commands = consumeControlCommands()
             if commands.contains("clear") || commands.contains("quit") {
@@ -1724,6 +1794,10 @@ final class StageOverlayController: NSObject {
         pollTimer = nil
         overlayWindow?.orderOut(nil)
         controlWindow?.orderOut(nil)
+        if let panicRegistrationID {
+            ActionPanicRegistry.unregister(id: panicRegistrationID)
+            self.panicRegistrationID = nil
+        }
         NSApplication.shared.stop(nil)
     }
 
@@ -1792,6 +1866,38 @@ final class StageOverlayController: NSObject {
 
         try? "".write(toFile: controlFile, atomically: true, encoding: .utf8)
         return commands
+    }
+
+    private func enforceTopOrder() {
+        overlayWindow?.orderFrontRegardless()
+        controlWindow?.orderFrontRegardless()
+    }
+
+    private func updatePanicRegistration(for state: StageOverlayState) {
+        guard controlFile != nil || !stopFile.isEmpty else {
+            return
+        }
+
+        let registrationID = "stage-overlay-\(state.sessionId)"
+        if panicRegistrationID != registrationID {
+            if let panicRegistrationID {
+                ActionPanicRegistry.unregister(id: panicRegistrationID)
+            }
+            panicRegistrationID = registrationID
+        }
+
+        let detail = state.targetApp.map { "\($0) · \(state.phase)" } ?? "Action · \(state.phase)"
+        do {
+            try ActionPanicRegistry.register(
+                id: registrationID,
+                title: "Stop Action",
+                detail: detail,
+                controlFile: controlFile,
+                stopFile: stopFile
+            )
+        } catch {
+            logger.log("stage-overlay: panic registration failed \(error.localizedDescription)")
+        }
     }
 }
 
@@ -1878,6 +1984,19 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         openSettingsPane(anchor: "Privacy_Accessibility")
     case .openScreenRecordingSettings:
         openSettingsPane(anchor: "Privacy_ScreenCapture")
+    case .currentSurface:
+        try writer.write(try currentSurface())
+    case .panicOverlay:
+        throw ActionHostError.unsupportedOS("panic-overlay should be started via runUICommand")
+    case .panicStop:
+        let count = ActionPanicRegistry.triggerStopAll()
+        try writer.write(
+            ActionHostResponse(
+                status: "stopping",
+                outputPath: nil,
+                detail: "\(count)"
+            )
+        )
     case .recordAppWindow:
         guard #available(macOS 15.0, *) else {
             throw ActionHostError.unsupportedOS("Window recording requires macOS 15.0 or newer.")
@@ -2039,12 +2158,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             WindowFrameResponse(
                 status: "capture-window-frame",
                 bundleId: bundleId,
-                frame: OverlayBounds(
-                    x: rect.origin.x,
-                    y: rect.origin.y,
-                    width: rect.size.width,
-                    height: rect.size.height
-                )
+                frame: overlayBounds(from: rect)
             )
         )
     case .composeRoundedScreenshot:
@@ -2116,6 +2230,17 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         try writer.write(calculatorButtons())
     case .inspectCalculatorUI:
         try writer.write(ActionNativeAutomation.calculatorAccessibilityNodes())
+    case .inspectAppUI:
+        let bundleId = try options.required("bundle-id")
+        let maxDepth = Int(options.double("max-depth", default: 6))
+        let maxNodes = Int(options.double("max-nodes", default: 250))
+        try writer.write(
+            ActionNativeAutomation.accessibilityNodes(
+                bundleId: bundleId,
+                maxDepth: maxDepth,
+                maxNodes: maxNodes
+            )
+        )
     case .getCalculatorDisplay:
         try writer.write(
             ActionHostResponse(
@@ -2136,12 +2261,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             WindowFrameResponse(
                 status: "window-frame",
                 bundleId: bundleId,
-                frame: OverlayBounds(
-                    x: rect.origin.x,
-                    y: rect.origin.y,
-                    width: rect.size.width,
-                    height: rect.size.height
-                )
+                frame: overlayBounds(from: rect)
             )
         )
     }
@@ -2202,6 +2322,22 @@ struct ActionHostMain {
 
     private static func runUICommandIfNeeded(command: ActionHostCommand, options: CommandOptions) -> Bool {
         switch command {
+        case .panicOverlay:
+            let replyFile = options.options["reply-file"]
+            let debugLogPath = options.options["debug-log"]
+            MainActor.assumeIsolated {
+                let controller = ActionPanicOverlayController(
+                    replyFile: replyFile,
+                    debugLogPath: debugLogPath
+                )
+                do {
+                    try controller.run()
+                } catch {
+                    FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                    Darwin.exit(1)
+                }
+            }
+            return true
         case .stageOverlay:
             let stateFile: String
             let stopFile: String

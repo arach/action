@@ -41,5 +41,8 @@
     "@arach/dewey": "/Users/arach/dev/dewey/packages/docs",
     "@types/node": "^24.0.0",
     "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1"
   }
 }

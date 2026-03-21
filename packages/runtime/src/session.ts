@@ -3,6 +3,7 @@ import type {
   ResolvedTarget,
   RuntimeAction,
   RuntimeArtifact,
+  SessionMode,
   SessionSnapshot,
   SessionState,
   TargetQuery,
@@ -43,11 +44,15 @@ export class Session {
   private readonly createdAt = now();
   private updatedAt = this.createdAt;
 
-  constructor(public readonly id: string) {}
+  constructor(
+    public readonly id: string,
+    public readonly mode: SessionMode = "capture",
+  ) {}
 
   snapshot(): SessionSnapshot {
     return {
       id: this.id,
+      mode: this.mode,
       state: this.state,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,

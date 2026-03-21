@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { compileScenario } from "@action/compiler";
+import { inspectCurrentSurface, settleCurrentSurfaceViewport } from "@action/runtime";
 
 import { runScenarioGuidedCaptureDemo } from "./index.js";
 import { loadScenario } from "./scenarios.js";
@@ -18,8 +19,47 @@ function printJson(value: unknown): void {
   runtime.process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function parseFlags(args: string[]): {
+  positionals: string[];
+  flags: Record<string, string>;
+} {
+  const positionals: string[] = [];
+  const flags: Record<string, string> = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (!value.startsWith("--")) {
+      positionals.push(value);
+      continue;
+    }
+
+    const name = value.slice(2);
+    const next = args[index + 1];
+    if (!next || next.startsWith("--")) {
+      flags[name] = "true";
+      continue;
+    }
+
+    flags[name] = next;
+    index += 1;
+  }
+
+  return { positionals, flags };
+}
+
+function requiredNumber(flags: Record<string, string>, key: string): number {
+  const raw = flags[key];
+  const value = raw === undefined ? Number.NaN : Number(raw);
+  if (!Number.isFinite(value)) {
+    throw new Error(`Missing or invalid --${key}`);
+  }
+  return value;
+}
+
 async function main(argv: string[]): Promise<void> {
-  const [command, arg, extra] = argv;
+  const [command, ...rest] = argv;
+  const { positionals, flags } = parseFlags(rest);
+  const [arg, extra] = positionals;
 
   if (command === "demo" && arg) {
     const scenario = await loadScenario(arg);
@@ -47,8 +87,31 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  if (command === "inspect" && arg === "current-surface") {
+    const result = await inspectCurrentSurface();
+    printJson(result);
+    return;
+  }
+
+  if (command === "settle" && arg === "current-surface") {
+    const result = await settleCurrentSurfaceViewport({
+      targetViewport: {
+        x: requiredNumber(flags, "x"),
+        y: requiredNumber(flags, "y"),
+        width: requiredNumber(flags, "width"),
+        height: requiredNumber(flags, "height"),
+      },
+      providerId: flags.provider === "mock" ? "mock" : "pie-minimax",
+      maxTurns: flags["max-turns"] ? requiredNumber(flags, "max-turns") : undefined,
+    });
+    printJson(result);
+    return;
+  }
+
   printJson({
     commands: [
+      "bun packages/cli/src/main.ts inspect current-surface",
+      "bun packages/cli/src/main.ts settle current-surface --x <x> --y <y> --width <w> --height <h> [--provider mock|pie-minimax]",
       "bun run demo:calculator",
       "bun run demo:notes",
       "bun run demo:calculator:macos",

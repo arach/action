@@ -12,6 +12,14 @@ export const sessionStates = [
 
 export type SessionState = (typeof sessionStates)[number];
 
+export const sessionModes = [
+  "capture",
+  "inspection",
+  "hybrid",
+] as const;
+
+export type SessionMode = (typeof sessionModes)[number];
+
 export const targetResolutionModes = [
   "semantic",
   "accessibility",
@@ -222,6 +230,7 @@ export interface HudLogEntry {
 
 export interface HudSnapshot {
   sessionId: string;
+  mode: SessionMode;
   state: SessionState;
   phase: GuidedSessionPhase;
   targetApp?: string;
@@ -268,11 +277,45 @@ export interface InspectionResult {
 
 export interface SessionSnapshot {
   id: string;
+  mode: SessionMode;
   state: SessionState;
   createdAt: string;
   updatedAt: string;
   traceCount: number;
   artifactCount: number;
+}
+
+export interface SessionArtifactEntry {
+  kind: RuntimeArtifact["kind"];
+  path: string;
+  relativePath: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SessionArtifactManifest {
+  sessionId: string;
+  mode: SessionMode;
+  generatedAt: string;
+  outputDir: string;
+  tracePath: string;
+  artifacts: SessionArtifactEntry[];
+}
+
+export interface PersistedRuntimeSession {
+  id: string;
+  mode: SessionMode;
+  state: SessionState;
+  phase: GuidedSessionPhase;
+  createdAt: string;
+  updatedAt: string;
+  targetApp?: string;
+  outputDir: string;
+  tracePath: string;
+  manifestPath: string;
+  artifactCount: number;
+  traceCount: number;
+  artifacts: SessionArtifactEntry[];
+  stage: StageScene;
 }
 
 export interface TransitionOptions {

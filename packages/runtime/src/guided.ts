@@ -26,6 +26,7 @@ import type {
 } from "@action/protocol";
 
 import { Session } from "./session.js";
+import { buildPersistedSession, buildSessionManifest } from "./session-storage.js";
 
 function now(): string {
   return new Date().toISOString();
@@ -108,6 +109,9 @@ export class GuidedCaptureSession {
   private readonly countdownSeconds: number;
   private readonly outputDir: string;
   private readonly captureProfile: CaptureProfile;
+  private readonly manifestPath: string;
+  private readonly sessionPath: string;
+  private readonly tracePath: string;
   private readonly stageHoldMsAfterComplete: number;
   private readonly initialActionDelayMs: number;
   private readonly actionCadenceMs: number;
@@ -131,10 +135,13 @@ export class GuidedCaptureSession {
     private readonly engine: CaptureEngine,
     options: GuidedCaptureSessionOptions,
   ) {
-    this.session = new Session(options.sessionId);
+    this.session = new Session(options.sessionId, "capture");
     this.countdownSeconds = options.countdownSeconds ?? 3;
     this.outputDir = options.outputDir;
     this.captureProfile = options.captureProfile ?? "draft";
+    this.manifestPath = `${this.outputDir}/manifest.json`;
+    this.sessionPath = `${this.outputDir}/session.json`;
+    this.tracePath = `${this.outputDir}/trace.json`;
     this.stageHoldMsAfterComplete = options.stageHoldMsAfterComplete ?? 0;
     this.initialActionDelayMs = options.initialActionDelayMs ?? 650;
     this.actionCadenceMs = options.actionCadenceMs ?? 900;
@@ -153,6 +160,7 @@ export class GuidedCaptureSession {
 
     return {
       sessionId: sessionSnapshot.id,
+      mode: sessionSnapshot.mode,
       state: sessionSnapshot.state,
       phase: this.phase,
       targetApp: this.targetApp?.name,
@@ -217,6 +225,7 @@ export class GuidedCaptureSession {
 
     this.session.transition("ready", { reason: "stage prepared" });
     this.addLog("info", "stage.ready", `${input.targetApp.name} is ready to record`);
+    await this.persistSessionFiles();
 
     return this.snapshot();
   }
@@ -284,6 +293,7 @@ export class GuidedCaptureSession {
     this.emit("recording.started", "Capture started", {
       outputPath: capturePath,
     });
+    await this.persistSessionFiles();
 
     if (this.initialActionDelayMs > 0) {
       await sleep(this.initialActionDelayMs);
@@ -303,6 +313,7 @@ export class GuidedCaptureSession {
     this.session.transition("paused", { reason: "user paused recording" });
     this.setPhase("paused", "Recording paused");
     this.emit("recording.paused", "Capture paused", {});
+    await this.persistSessionFiles();
 
     return this.snapshot();
   }
@@ -316,6 +327,7 @@ export class GuidedCaptureSession {
     this.session.transition("running", { reason: "resume recording" });
     this.setPhase("recording", "Recording resumed");
     this.emit("recording.resumed", "Capture resumed", {});
+    await this.persistSessionFiles();
 
     return this.snapshot();
   }
@@ -332,6 +344,7 @@ export class GuidedCaptureSession {
     this.emit("artifact.created", `Saved ${artifact.kind}`, {
       artifact,
     });
+    await this.persistSessionFiles();
 
     return artifact;
   }
@@ -356,7 +369,7 @@ export class GuidedCaptureSession {
 
     this.session.registerArtifact({
       kind: "trace",
-      path: `${this.outputDir}/trace.json`,
+      path: this.tracePath,
       metadata: {
         eventCount: this.session.trace().length,
       },
@@ -532,15 +545,41 @@ export class GuidedCaptureSession {
 
   private async persistSessionFiles(): Promise<void> {
     await this.ensureOutputDir();
+    const snapshot = this.snapshot();
+    const sessionSnapshot = this.session.snapshot();
+    const trace = this.session.trace();
+    const manifest = buildSessionManifest({
+      sessionId: sessionSnapshot.id,
+      mode: sessionSnapshot.mode,
+      generatedAt: now(),
+      outputDir: this.outputDir,
+      tracePath: this.tracePath,
+      artifacts: snapshot.artifacts,
+    });
+    const persistedSession = buildPersistedSession({
+      mode: sessionSnapshot.mode,
+      outputDir: this.outputDir,
+      tracePath: this.tracePath,
+      manifestPath: this.manifestPath,
+      snapshot,
+      createdAt: sessionSnapshot.createdAt,
+      updatedAt: sessionSnapshot.updatedAt,
+      trace,
+    });
 
     await writeFile(
-      `${this.outputDir}/trace.json`,
-      JSON.stringify(this.session.trace(), null, 2),
+      this.tracePath,
+      JSON.stringify(trace, null, 2),
     );
 
     await writeFile(
-      `${this.outputDir}/session.json`,
-      JSON.stringify(this.snapshot(), null, 2),
+      this.manifestPath,
+      JSON.stringify(manifest, null, 2),
+    );
+
+    await writeFile(
+      this.sessionPath,
+      JSON.stringify(persistedSession, null, 2),
     );
   }
 
