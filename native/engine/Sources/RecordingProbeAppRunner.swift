@@ -27,7 +27,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
 
     private var window: NSWindow?
     private var statusField: NSTextField?
-    private let panicRegistrationID = "recording-probe-\(UUID().uuidString)"
+    private let supervisionRegistrationID = "recording-probe-\(UUID().uuidString)"
 
     init(configuration: Configuration, writer: ResponseWriter, debugLogger: DebugLogger) {
         self.configuration = configuration
@@ -44,7 +44,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        registerPanicStopIfNeeded()
+        registerSupervisorStopIfNeeded()
         showWindow()
         startRecording()
     }
@@ -54,7 +54,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        ActionPanicRegistry.unregister(id: panicRegistrationID)
+        ActionSupervisionRegistry.unregister(id: supervisionRegistrationID)
         Self.retainedRunner = nil
     }
 
@@ -132,21 +132,21 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
         logger.notice("\(message, privacy: .public)")
     }
 
-    private func registerPanicStopIfNeeded() {
+    private func registerSupervisorStopIfNeeded() {
         guard let stopSignalPath = configuration.stopSignalPath, !stopSignalPath.isEmpty else {
             return
         }
 
         do {
-            try ActionPanicRegistry.register(
-                id: panicRegistrationID,
+            try ActionSupervisionRegistry.register(
+                id: supervisionRegistrationID,
                 title: "Stop Recording",
-                detail: "Recording probe",
+                detail: "Recording supervision",
                 controlFile: nil,
                 stopFile: stopSignalPath
             )
         } catch {
-            logger.error("Failed to register panic stop: \(error.localizedDescription, privacy: .public)")
+            logger.error("Failed to register supervision stop: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-struct ActionPanicRegistration: Codable {
+struct ActionSupervisionRegistration: Codable {
     let id: String
     let title: String
     let detail: String?
@@ -10,7 +10,7 @@ struct ActionPanicRegistration: Codable {
     let updatedAt: String
 }
 
-enum ActionPanicRegistry {
+enum ActionSupervisionRegistry {
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -19,7 +19,7 @@ enum ActionPanicRegistry {
 
     static var baseDirectoryURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Action/runtime/panic", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/Action/runtime/supervision", isDirectory: true)
     }
 
     static var registrationsDirectoryURL: URL {
@@ -41,7 +41,7 @@ enum ActionPanicRegistry {
         controlFile: String?,
         stopFile: String?
     ) throws {
-        let registration = ActionPanicRegistration(
+        let registration = ActionSupervisionRegistration(
             id: id,
             title: title,
             detail: detail,
@@ -53,7 +53,7 @@ enum ActionPanicRegistry {
         try FileManager.default.removeItemIfExists(at: overlayStopSignalURL)
         let url = registrationURL(for: id)
         try encoder.encode(registration).write(to: url)
-        try ActionPanicOverlayLauncher.ensureRunning()
+        try ActionSupervisionOverlayLauncher.ensureRunning()
     }
 
     static func unregister(id: String) {
@@ -63,7 +63,7 @@ enum ActionPanicRegistry {
         }
     }
 
-    static func activeRegistrations() -> [ActionPanicRegistration] {
+    static func activeRegistrations() -> [ActionSupervisionRegistration] {
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: registrationsDirectoryURL,
             includingPropertiesForKeys: nil
@@ -78,7 +78,7 @@ enum ActionPanicRegistry {
                 guard let data = try? Data(contentsOf: url) else {
                     return nil
                 }
-                return try? decoder.decode(ActionPanicRegistration.self, from: data)
+                return try? decoder.decode(ActionSupervisionRegistration.self, from: data)
             }
             .sorted { $0.updatedAt < $1.updatedAt }
     }
@@ -158,16 +158,16 @@ enum ActionPanicRegistry {
     }
 }
 
-enum ActionPanicOverlayLauncher {
+enum ActionSupervisionOverlayLauncher {
     static func ensureRunning() throws {
-        if ActionPanicRegistry.overlayIsRunning() {
+        if ActionSupervisionRegistry.overlayIsRunning() {
             return
         }
 
-        try FileManager.default.removeItemIfExists(at: ActionPanicRegistry.overlayStopSignalURL)
+        try FileManager.default.removeItemIfExists(at: ActionSupervisionRegistry.overlayStopSignalURL)
         let bundleURL = try resolveAppBundleURL()
         let replyFile = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("action-panic-overlay-\(UUID().uuidString).json")
+            .appendingPathComponent("action-supervision-overlay-\(UUID().uuidString).json")
 
         defer {
             try? FileManager.default.removeItem(at: replyFile)
@@ -175,7 +175,7 @@ enum ActionPanicOverlayLauncher {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-n", bundleURL.path, "--args", "panic-overlay", "--reply-file", replyFile.path]
+        process.arguments = ["-n", bundleURL.path, "--args", "supervision-overlay", "--reply-file", replyFile.path]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.standardError
         try process.run()
@@ -219,9 +219,9 @@ enum ActionPanicOverlayLauncher {
         }
 
         throw NSError(
-            domain: "ActionPanicOverlayLauncher",
+            domain: "ActionSupervisionOverlayLauncher",
             code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Unable to resolve Action.app bundle URL for panic overlay"]
+            userInfo: [NSLocalizedDescriptionKey: "Unable to resolve Action.app bundle URL for supervision overlay"]
         )
     }
 
@@ -230,16 +230,16 @@ enum ActionPanicOverlayLauncher {
             if let data = try? Data(contentsOf: replyFile),
                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let status = object["status"] as? String,
-               status == "panic-overlay-running" {
+               status == "supervision-overlay-running" {
                 return
             }
             Thread.sleep(forTimeInterval: 0.1)
         }
 
         throw NSError(
-            domain: "ActionPanicOverlayLauncher",
+            domain: "ActionSupervisionOverlayLauncher",
             code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "Panic overlay did not acknowledge launch"]
+            userInfo: [NSLocalizedDescriptionKey: "Supervision overlay did not acknowledge launch"]
         )
     }
 }

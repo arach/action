@@ -38,8 +38,8 @@ enum ActionHostCommand: String {
     case openAccessibilitySettings = "open-accessibility-settings"
     case openScreenRecordingSettings = "open-screen-recording-settings"
     case currentSurface = "current-surface"
-    case panicOverlay = "panic-overlay"
-    case panicStop = "panic-stop"
+    case supervisionOverlay = "supervision-overlay"
+    case supervisorStop = "supervisor-stop"
     case stageOverlay = "stage-overlay"
     case prepareNotesNote = "prepare-notes-note"
     case getCaptureWindowFrame = "get-capture-window-frame"
@@ -1619,7 +1619,7 @@ final class StageOverlayController: NSObject {
     private var lastStateData: Data?
     private var pollTimer: Timer?
     private var currentPhase: String = "staging"
-    private var panicRegistrationID: String?
+    private var supervisionRegistrationID: String?
 
     init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?, controlFile: String?) {
         self.stateFile = stateFile
@@ -1694,7 +1694,7 @@ final class StageOverlayController: NSObject {
         }
         overlayWindow?.orderFrontRegardless()
         controlWindow?.orderFrontRegardless()
-        updatePanicRegistration(for: state)
+        updateSupervisionRegistration(for: state)
         logger.log("stage-overlay: window ordered front viewport=\(viewportRect)")
     }
 
@@ -1794,9 +1794,9 @@ final class StageOverlayController: NSObject {
         pollTimer = nil
         overlayWindow?.orderOut(nil)
         controlWindow?.orderOut(nil)
-        if let panicRegistrationID {
-            ActionPanicRegistry.unregister(id: panicRegistrationID)
-            self.panicRegistrationID = nil
+        if let supervisionRegistrationID {
+            ActionSupervisionRegistry.unregister(id: supervisionRegistrationID)
+            self.supervisionRegistrationID = nil
         }
         NSApplication.shared.stop(nil)
     }
@@ -1873,30 +1873,30 @@ final class StageOverlayController: NSObject {
         controlWindow?.orderFrontRegardless()
     }
 
-    private func updatePanicRegistration(for state: StageOverlayState) {
+    private func updateSupervisionRegistration(for state: StageOverlayState) {
         guard controlFile != nil || !stopFile.isEmpty else {
             return
         }
 
         let registrationID = "stage-overlay-\(state.sessionId)"
-        if panicRegistrationID != registrationID {
-            if let panicRegistrationID {
-                ActionPanicRegistry.unregister(id: panicRegistrationID)
+        if supervisionRegistrationID != registrationID {
+            if let supervisionRegistrationID {
+                ActionSupervisionRegistry.unregister(id: supervisionRegistrationID)
             }
-            panicRegistrationID = registrationID
+            supervisionRegistrationID = registrationID
         }
 
         let detail = state.targetApp.map { "\($0) · \(state.phase)" } ?? "Action · \(state.phase)"
         do {
-            try ActionPanicRegistry.register(
+            try ActionSupervisionRegistry.register(
                 id: registrationID,
-                title: "Stop Action",
+                title: "Action Supervision",
                 detail: detail,
                 controlFile: controlFile,
                 stopFile: stopFile
             )
         } catch {
-            logger.log("stage-overlay: panic registration failed \(error.localizedDescription)")
+            logger.log("stage-overlay: supervision registration failed \(error.localizedDescription)")
         }
     }
 }
@@ -1986,10 +1986,10 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         openSettingsPane(anchor: "Privacy_ScreenCapture")
     case .currentSurface:
         try writer.write(try currentSurface())
-    case .panicOverlay:
-        throw ActionHostError.unsupportedOS("panic-overlay should be started via runUICommand")
-    case .panicStop:
-        let count = ActionPanicRegistry.triggerStopAll()
+    case .supervisionOverlay:
+        throw ActionHostError.unsupportedOS("supervision-overlay should be started via runUICommand")
+    case .supervisorStop:
+        let count = ActionSupervisionRegistry.triggerStopAll()
         try writer.write(
             ActionHostResponse(
                 status: "stopping",
@@ -2322,11 +2322,11 @@ struct ActionHostMain {
 
     private static func runUICommandIfNeeded(command: ActionHostCommand, options: CommandOptions) -> Bool {
         switch command {
-        case .panicOverlay:
+        case .supervisionOverlay:
             let replyFile = options.options["reply-file"]
             let debugLogPath = options.options["debug-log"]
             MainActor.assumeIsolated {
-                let controller = ActionPanicOverlayController(
+                let controller = ActionSupervisionOverlayController(
                     replyFile: replyFile,
                     debugLogPath: debugLogPath
                 )

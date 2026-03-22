@@ -2,16 +2,16 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class ActionPanicStopViewModel: ObservableObject {
-    @Published var title: String = "Stop Action"
-    @Published var detail: String = "Cmd+Ctrl+. or Esc Esc"
+final class ActionSupervisionViewModel: ObservableObject {
+    @Published var title: String = "Action Supervision"
+    @Published var detail: String = "Supervisor stop · Cmd+Ctrl+. or Esc Esc"
     @Published var countLabel: String = "0 live"
 
     var onStop: (() -> Void)?
 }
 
-struct ActionPanicStopView: View {
-    @ObservedObject var model: ActionPanicStopViewModel
+struct ActionSupervisionView: View {
+    @ObservedObject var model: ActionSupervisionViewModel
 
     var body: some View {
         HStack(spacing: 12) {
@@ -35,7 +35,7 @@ struct ActionPanicStopView: View {
                 Button("STOP") {
                     model.onStop?()
                 }
-                .buttonStyle(ActionPanicStopButtonStyle())
+                .buttonStyle(ActionSupervisionButtonStyle())
             }
         }
         .padding(.horizontal, 14)
@@ -53,7 +53,7 @@ struct ActionPanicStopView: View {
     }
 }
 
-struct ActionPanicStopButtonStyle: ButtonStyle {
+struct ActionSupervisionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -70,10 +70,10 @@ struct ActionPanicStopButtonStyle: ButtonStyle {
 }
 
 @MainActor
-final class ActionPanicOverlayController: NSObject {
+final class ActionSupervisionOverlayController: NSObject {
     private let writer: ResponseWriter
     private let logger: DebugLogger
-    private let model = ActionPanicStopViewModel()
+    private let model = ActionSupervisionViewModel()
     private var window: StageHUDPanel?
     private var pollTimer: Timer?
     private var globalKeyMonitor: Any?
@@ -88,13 +88,13 @@ final class ActionPanicOverlayController: NSObject {
     func run() throws {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        ActionPanicRegistry.recordOverlayPID(ProcessInfo.processInfo.processIdentifier)
+        ActionSupervisionRegistry.recordOverlayPID(ProcessInfo.processInfo.processIdentifier)
         model.onStop = { [weak self] in
             self?.triggerStopAll(reason: "button")
         }
         try writer.write(
             ActionHostResponse(
-                status: "panic-overlay-running",
+                status: "supervision-overlay-running",
                 outputPath: nil,
                 detail: String(ProcessInfo.processInfo.processIdentifier)
             )
@@ -128,7 +128,7 @@ final class ActionPanicOverlayController: NSObject {
         window.hidesOnDeactivate = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle, .transient]
         window.isReleasedWhenClosed = false
-        let rootView = NSHostingView(rootView: ActionPanicStopView(model: model))
+        let rootView = NSHostingView(rootView: ActionSupervisionView(model: model))
         rootView.frame = CGRect(origin: .zero, size: size)
         rootView.autoresizingMask = [.width, .height]
         window.contentView = rootView
@@ -158,7 +158,7 @@ final class ActionPanicOverlayController: NSObject {
     }
 
     private func tick() {
-        if FileManager.default.fileExists(atPath: ActionPanicRegistry.overlayStopSignalURL.path) {
+        if FileManager.default.fileExists(atPath: ActionSupervisionRegistry.overlayStopSignalURL.path) {
             shutdown()
             return
         }
@@ -168,14 +168,14 @@ final class ActionPanicOverlayController: NSObject {
     }
 
     private func refresh() {
-        let registrations = ActionPanicRegistry.activeRegistrations()
+        let registrations = ActionSupervisionRegistry.activeRegistrations()
         guard !registrations.isEmpty else {
             shutdown()
             return
         }
 
-        let detail = registrations.last?.detail ?? "Cmd+Ctrl+. or Esc Esc"
-        model.title = registrations.count > 1 ? "Stop Action Sessions" : "Stop Action"
+        let detail = registrations.last?.detail ?? "Supervisor stop · Cmd+Ctrl+. or Esc Esc"
+        model.title = "Action Supervision"
         model.detail = detail
         model.countLabel = registrations.count == 1 ? "1 live" : "\(registrations.count) live"
         positionWindow()
@@ -197,12 +197,12 @@ final class ActionPanicOverlayController: NSObject {
     }
 
     private func handleKeyEvent(_ event: NSEvent) {
-        if isPanicShortcut(event) {
+        if isSupervisorShortcut(event) {
             triggerStopAll(reason: "shortcut")
         }
     }
 
-    private func isPanicShortcut(_ event: NSEvent) -> Bool {
+    private func isSupervisorShortcut(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let characters = event.charactersIgnoringModifiers ?? ""
         if flags.contains([.command, .control]), characters == "." {
@@ -225,8 +225,8 @@ final class ActionPanicOverlayController: NSObject {
     }
 
     private func triggerStopAll(reason: String) {
-        let count = ActionPanicRegistry.triggerStopAll()
-        logger.log("panic-overlay: triggered stop count=\(count) reason=\(reason)")
+        let count = ActionSupervisionRegistry.triggerStopAll()
+        logger.log("supervision-overlay: triggered stop count=\(count) reason=\(reason)")
         model.detail = count > 0
             ? "Sent stop to \(count) live session\(count == 1 ? "" : "s")."
             : "No live Action sessions were registered."
@@ -244,8 +244,8 @@ final class ActionPanicOverlayController: NSObject {
             self.localKeyMonitor = nil
         }
         window?.orderOut(nil)
-        ActionPanicRegistry.clearOverlayPID()
-        try? FileManager.default.removeItem(at: ActionPanicRegistry.overlayStopSignalURL)
+        ActionSupervisionRegistry.clearOverlayPID()
+        try? FileManager.default.removeItem(at: ActionSupervisionRegistry.overlayStopSignalURL)
         NSApplication.shared.stop(nil)
     }
 }
