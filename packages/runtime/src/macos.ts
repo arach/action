@@ -5,9 +5,11 @@ import { promisify } from "node:util";
 
 import type {
   BackdropPreset,
+  Bounds,
   CaptureEngine,
   CaptureProfile,
   EngineDiagnostics,
+  Point,
   ResolvedTarget,
   RuntimeAction,
   RuntimeArtifact,
@@ -97,6 +99,30 @@ interface GeometryReport {
   viewportScreenshotPixelSize?: PixelSize;
   fullScreenshotPath?: string;
   fullScreenshotPixelSize?: PixelSize;
+}
+
+interface NativeCurrentSurfaceResponse {
+  status: string;
+  bundleId: string;
+  appName: string;
+  frame?: Bounds;
+}
+
+export interface CurrentSurfaceSnapshot {
+  bundleId: string;
+  appName: string;
+  surface: SurfaceRef;
+}
+
+export interface CurrentSurfaceCaptureResult {
+  artifact: RuntimeArtifact;
+  currentSurface: CurrentSurfaceSnapshot;
+}
+
+export interface CurrentSurfaceAccessibilityResult {
+  artifact: RuntimeArtifact;
+  currentSurface: CurrentSurfaceSnapshot;
+  nodeCount: number;
 }
 
 export class MacOSCommandEngine implements CaptureEngine {
@@ -573,6 +599,146 @@ export class MacOSCommandEngine implements CaptureEngine {
 
   async replayArtifact(path: string): Promise<void> {
     await execFileAsync("open", [path]);
+  }
+
+  async currentSurface(): Promise<CurrentSurfaceSnapshot> {
+    const { stdout } = await this.runHost("current-surface");
+    const response = JSON.parse(stdout) as NativeCurrentSurfaceResponse;
+    const targetApp = {
+      name: response.appName,
+      bundleId: response.bundleId,
+    };
+    const surface: SurfaceRef = {
+      id: appSurfaceId(targetApp),
+      kind: "window",
+      label: `${response.appName} Window`,
+      bounds: response.frame,
+    };
+
+    this.surfaces.set(surface.id, targetApp);
+    this.focusedSurfaceId = surface.id;
+
+    return {
+      bundleId: response.bundleId,
+      appName: response.appName,
+      surface,
+    };
+  }
+
+  async captureCurrentSurfaceScreenshot(path: string): Promise<CurrentSurfaceCaptureResult> {
+    const currentSurface = await this.currentSurface();
+    const artifact = await this.captureSurfaceScreenshot(currentSurface, path);
+
+    return {
+      artifact,
+      currentSurface,
+    };
+  }
+
+  async captureSurfaceScreenshot(
+    currentSurface: CurrentSurfaceSnapshot,
+    path: string,
+  ): Promise<RuntimeArtifact> {
+    await mkdir(dirname(path), { recursive: true });
+    await rm(path, { force: true });
+    await this.runHost(
+      "screenshot-app-window",
+      "--bundle-id",
+      currentSurface.bundleId,
+      "--output",
+      path,
+    );
+    await this.waitForFile(path, 1);
+
+    return {
+      kind: "screenshot",
+      path,
+      metadata: {
+        bundleId: currentSurface.bundleId,
+        surfaceId: currentSurface.surface.id,
+        scope: "current-surface",
+      },
+    };
+  }
+
+  async captureCurrentSurfaceAccessibilitySnapshot(path: string): Promise<CurrentSurfaceAccessibilityResult> {
+    const currentSurface = await this.currentSurface();
+    const { artifact, nodeCount } = await this.captureSurfaceAccessibilitySnapshot(currentSurface, path);
+
+    return {
+      artifact,
+      currentSurface,
+      nodeCount,
+    };
+  }
+
+  async captureSurfaceAccessibilitySnapshot(
+    currentSurface: CurrentSurfaceSnapshot,
+    path: string,
+  ): Promise<{ artifact: RuntimeArtifact; nodeCount: number }> {
+    await mkdir(dirname(path), { recursive: true });
+    await rm(path, { force: true });
+    const { stdout } = await this.runHost(
+      "inspect-app-ui",
+      "--bundle-id",
+      currentSurface.bundleId,
+    );
+    const nodes = JSON.parse(stdout) as unknown[];
+    await writeFile(path, JSON.stringify(nodes, null, 2));
+
+    return {
+      artifact: {
+        kind: "ax-snapshot",
+        path,
+        metadata: {
+          bundleId: currentSurface.bundleId,
+          surfaceId: currentSurface.surface.id,
+          scope: "current-surface",
+          nodeCount: nodes.length,
+        },
+      },
+      nodeCount: nodes.length,
+    };
+  }
+
+  async setWindowFrame(bundleId: string, bounds: Bounds): Promise<void> {
+    await this.runHost(
+      "set-window-frame",
+      "--bundle-id",
+      bundleId,
+      "--x",
+      String(bounds.x),
+      "--y",
+      String(bounds.y),
+      "--width",
+      String(bounds.width),
+      "--height",
+      String(bounds.height),
+    )
+  }
+
+  async readWindowBounds(bundleId: string): Promise<Bounds | undefined> {
+    const [accessibilityBounds, captureBounds] = await Promise.all([
+      this.readAccessibilityWindowBounds(bundleId),
+      this.readCaptureWindowBounds(bundleId),
+    ])
+    return captureBounds ?? accessibilityBounds
+  }
+
+  async dragMouse(from: Point, to: Point, durationMs = 300): Promise<void> {
+    await this.runHost(
+      "drag",
+      "--from-x",
+      String(from.x),
+      "--from-y",
+      String(from.y),
+      "--to-x",
+      String(to.x),
+      "--to-y",
+      String(to.y),
+      "--duration-ms",
+      String(durationMs),
+    )
   }
 
   private runHost(command: string, ...args: string[]) {

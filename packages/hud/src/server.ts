@@ -314,6 +314,7 @@ class HudController {
 
     return {
       sessionId: "idle",
+      mode: "capture",
       state: "created",
       phase: "created",
       elapsedMs: 0,

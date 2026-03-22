@@ -27,6 +27,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
 
     private var window: NSWindow?
     private var statusField: NSTextField?
+    private let supervisionRegistrationID = "recording-probe-\(UUID().uuidString)"
 
     init(configuration: Configuration, writer: ResponseWriter, debugLogger: DebugLogger) {
         self.configuration = configuration
@@ -43,6 +44,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        registerSupervisorStopIfNeeded()
         showWindow()
         startRecording()
     }
@@ -52,6 +54,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        ActionSupervisionRegistry.unregister(id: supervisionRegistrationID)
         Self.retainedRunner = nil
     }
 
@@ -127,5 +130,23 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     private func report(_ message: String) {
         statusField?.stringValue = message
         logger.notice("\(message, privacy: .public)")
+    }
+
+    private func registerSupervisorStopIfNeeded() {
+        guard let stopSignalPath = configuration.stopSignalPath, !stopSignalPath.isEmpty else {
+            return
+        }
+
+        do {
+            try ActionSupervisionRegistry.register(
+                id: supervisionRegistrationID,
+                title: "Stop Recording",
+                detail: "Recording supervision",
+                controlFile: nil,
+                stopFile: stopSignalPath
+            )
+        } catch {
+            logger.error("Failed to register supervision stop: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }

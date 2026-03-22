@@ -158,12 +158,20 @@ final class GuidedCaptureSessionRunner {
     }
 
     func run() async throws {
+        enum OperatorDecision {
+            case none
+            case startNow
+            case cancelBeforeCapture
+            case interruptCapture
+        }
+
         let sessionId = "guided-\(timestampSlug())-\(UUID().uuidString.prefix(6))"
         let artifactDirectory = try makeArtifactDirectory(sessionId: sessionId)
         let overlayStatePath = artifactDirectory.appendingPathComponent("overlay-state.json").path
         let overlayStopPath = artifactDirectory.appendingPathComponent("overlay.stop").path
         let overlayReplyPath = artifactDirectory.appendingPathComponent("overlay.reply.json").path
         let overlayLogPath = artifactDirectory.appendingPathComponent("overlay.log").path
+        let overlayControlPath = artifactDirectory.appendingPathComponent("overlay.controls").path
         let recordingStopPath = artifactDirectory.appendingPathComponent("record.stop").path
         let recordingFinishedPath = artifactDirectory.appendingPathComponent("record.finished").path
         let recordingReplyPath = artifactDirectory.appendingPathComponent("record.reply.json").path
@@ -178,6 +186,10 @@ final class GuidedCaptureSessionRunner {
         var traceSteps: [GuidedCaptureTrace.Step] = []
         let startedAt = ISO8601DateFormatter().string(from: Date())
         let startTime = Date()
+        var currentStep: Int?
+        var totalSteps: Int?
+        var recordingProcess: Process?
+        var captureWasStarted = false
 
         func appendLog(_ message: String) {
             logger.log("guided-session: \(message)")
@@ -209,6 +221,70 @@ final class GuidedCaptureSessionRunner {
                 }
             }
             throw ActionHostError.accessibilityLookupFailed("Could not find Calculator clear button (AllClear/Clear)")
+        }
+
+        func consumeOverlayCommands() -> [String] {
+            guard FileManager.default.fileExists(atPath: overlayControlPath),
+                  let raw = try? String(contentsOfFile: overlayControlPath, encoding: .utf8) else {
+                return []
+            }
+
+            let commands = raw
+                .split(whereSeparator: \.isNewline)
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+            guard !commands.isEmpty else {
+                return []
+            }
+
+            try? "".write(toFile: overlayControlPath, atomically: true, encoding: .utf8)
+            return commands
+        }
+
+        func operatorDecision(for phase: String) -> OperatorDecision {
+            for command in consumeOverlayCommands() {
+                switch (phase, command) {
+                case ("countdown", "start"):
+                    appendLog("operator skipped countdown")
+                    return .startNow
+                case ("countdown", "stop"), ("countdown", "quit"), ("countdown", "clear"):
+                    appendLog("operator cancelled before capture")
+                    return .cancelBeforeCapture
+                case ("recording", "stop"), ("recording", "quit"):
+                    appendLog("operator interrupted capture")
+                    return .interruptCapture
+                default:
+                    continue
+                }
+            }
+
+            return .none
+        }
+
+        func waitForOperatorDecision(timeout: TimeInterval, phase: String) -> OperatorDecision {
+            let deadline = Date().addingTimeInterval(timeout)
+            while Date() < deadline {
+                let decision = operatorDecision(for: phase)
+                switch decision {
+                case .none:
+                    break
+                case .startNow, .cancelBeforeCapture, .interruptCapture:
+                    return decision
+                }
+                usleep(50_000)
+            }
+            return operatorDecision(for: phase)
+        }
+
+        func stopRecordingIfNeeded() throws {
+            guard captureWasStarted else {
+                return
+            }
+
+            try writeMarkerFile(path: recordingStopPath, contents: "stop\n")
+            try waitForFinishedSignal(at: recordingFinishedPath)
+            recordingProcess?.waitUntilExit()
+            captureWasStarted = false
         }
 
         let overlayViewportId = "calculator-primary"
@@ -273,6 +349,33 @@ final class GuidedCaptureSessionRunner {
             try data.write(to: URL(fileURLWithPath: overlayStatePath))
         }
 
+        func finishCancelledRun(summary: String, detail: String, captureWasLive: Bool) throws {
+            try writeOverlayState(
+                phase: "cancelled",
+                summary: summary,
+                detail: detail,
+                countdownRemaining: nil,
+                isRecording: false,
+                stepCurrent: currentStep,
+                stepTotal: totalSteps,
+                stepLabel: captureWasLive ? "operator interrupt" : "countdown cancelled"
+            )
+            usleep(500_000)
+            if captureWasLive {
+                try stopRecordingIfNeeded()
+                appendLog("capture stopped after operator interrupt")
+                appendStep("interrupt recording")
+            }
+            try writeMarkerFile(path: overlayStopPath, contents: "stop\n")
+            try writer.write(
+                ActionHostResponse(
+                    status: "cancelled",
+                    outputPath: captureWasLive ? videoPath : nil,
+                    detail: detail
+                )
+            )
+        }
+
         try writeOverlayState(
             phase: "staging",
             summary: "Viewport locked on Calculator",
@@ -291,11 +394,10 @@ final class GuidedCaptureSessionRunner {
                 "--stop-file", overlayStopPath,
                 "--reply-file", overlayReplyPath,
                 "--debug-log", overlayLogPath,
+                "--control-file", overlayControlPath,
             ]
         )
         try waitForReplyFile(at: overlayReplyPath, timeout: 5, expecting: "overlay-running")
-
-        var recordingProcess: Process?
         defer {
             try? writeMarkerFile(path: overlayStopPath, contents: "stop\n")
             if let recordingProcess, recordingProcess.isRunning {
@@ -311,11 +413,12 @@ final class GuidedCaptureSessionRunner {
         appendLog("captured staged screenshot")
         appendStep("capture stage screenshot")
 
+        var skipCountdown = false
         for remaining in stride(from: 3, through: 1, by: -1) {
             try writeOverlayState(
                 phase: "countdown",
                 summary: "Recording begins in \(remaining)",
-                detail: "Viewport locked",
+                detail: "Viewport locked and armed",
                 countdownRemaining: remaining,
                 isRecording: false,
                 stepCurrent: nil,
@@ -323,7 +426,25 @@ final class GuidedCaptureSessionRunner {
                 stepLabel: "countdown"
             )
             appendLog("countdown \(remaining)")
-            usleep(900_000)
+            switch waitForOperatorDecision(timeout: 1.0, phase: "countdown") {
+            case .none:
+                break
+            case .startNow:
+                skipCountdown = true
+            case .cancelBeforeCapture:
+                try finishCancelledRun(
+                    summary: "Capture cancelled",
+                    detail: "Countdown interrupted before recording started.",
+                    captureWasLive: false
+                )
+                return
+            case .interruptCapture:
+                break
+            }
+
+            if skipCountdown {
+                break
+            }
         }
 
         try writeOverlayState(
@@ -357,14 +478,24 @@ final class GuidedCaptureSessionRunner {
         ]
         recordingProcess = try launchChildProcess(arguments: recordingArguments)
         try waitForReplyFile(at: recordingReplyPath, timeout: 8, expecting: "recording")
+        captureWasStarted = true
         appendLog("recording started")
         appendStep("start region recording")
 
         let demoPlan = CalculatorDemoPlan.random()
+        totalSteps = demoPlan.steps.count
         try clearCalculatorInput()
-        usleep(220_000)
+        if waitForOperatorDecision(timeout: 0.22, phase: "recording") == .interruptCapture {
+            try finishCancelledRun(
+                summary: "Capture interrupted",
+                detail: "Recording stopped before the scripted demo finished.",
+                captureWasLive: true
+            )
+            return
+        }
 
         for (index, buttonLabel) in demoPlan.steps.enumerated() {
+            currentStep = index + 1
             let humanStep = "Tap \(buttonLabel)"
             try writeOverlayState(
                 phase: "recording",
@@ -372,17 +503,39 @@ final class GuidedCaptureSessionRunner {
                 detail: "\(demoPlan.expression) -> \(demoPlan.expectedResult)",
                 countdownRemaining: nil,
                 isRecording: true,
-                stepCurrent: index + 1,
+                stepCurrent: currentStep,
                 stepTotal: demoPlan.steps.count,
                 stepLabel: humanStep
             )
             appendLog(humanStep)
             appendStep(humanStep)
             try clickCalculatorButton(label: buttonLabel)
-            usleep(220_000)
+            if waitForOperatorDecision(timeout: 0.22, phase: "recording") == .interruptCapture {
+                try finishCancelledRun(
+                    summary: "Capture interrupted",
+                    detail: "Recording stopped before the scripted demo finished.",
+                    captureWasLive: true
+                )
+                return
+            }
         }
 
-        let actualResult = try waitForCalculatorResult(expected: demoPlan.expectedResult, timeout: 3)
+        var actualResult = ""
+        let resultDeadline = Date().addingTimeInterval(3)
+        while Date() < resultDeadline {
+            actualResult = (try? ActionNativeAutomation.calculatorDisplayValue()) ?? actualResult
+            if actualResult == demoPlan.expectedResult {
+                break
+            }
+            if waitForOperatorDecision(timeout: 0.12, phase: "recording") == .interruptCapture {
+                try finishCancelledRun(
+                    summary: "Capture interrupted",
+                    detail: "Recording stopped before the scripted demo finished.",
+                    captureWasLive: true
+                )
+                return
+            }
+        }
         appendLog("result \(actualResult)")
         appendStep("read result \(actualResult)")
 
@@ -405,9 +558,7 @@ final class GuidedCaptureSessionRunner {
             stepLabel: "finalizing artifacts"
         )
 
-        try writeMarkerFile(path: recordingStopPath, contents: "stop\n")
-        try waitForFinishedSignal(at: recordingFinishedPath)
-        recordingProcess?.waitUntilExit()
+        try stopRecordingIfNeeded()
         appendLog("recording finished")
         appendStep("finish recording")
 

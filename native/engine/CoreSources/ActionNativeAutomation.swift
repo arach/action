@@ -260,12 +260,23 @@ public enum ActionNativeAutomation {
     }
 
     public static func calculatorAccessibilityNodes() throws -> [ActionAccessibilityNodeSnapshot] {
-        let window = try firstWindowElement(for: "com.apple.calculator")
+        try accessibilityNodes(bundleId: "com.apple.calculator")
+    }
+
+    public static func accessibilityNodes(
+        bundleId: String,
+        maxDepth: Int = 6,
+        maxNodes: Int = 250
+    ) throws -> [ActionAccessibilityNodeSnapshot] {
+        let window = try firstWindowElement(for: bundleId)
         var queue: [(AXUIElement, Int)] = [(window, 0)]
         var result: [ActionAccessibilityNodeSnapshot] = []
 
         while let (current, depth) = queue.first {
             queue.removeFirst()
+            if result.count >= maxNodes {
+                break
+            }
 
             result.append(
                 ActionAccessibilityNodeSnapshot(
@@ -278,7 +289,9 @@ public enum ActionNativeAutomation {
                 )
             )
 
-            queue.append(contentsOf: axChildren(of: current).map { ($0, depth + 1) })
+            if depth < maxDepth {
+                queue.append(contentsOf: axChildren(of: current).map { ($0, depth + 1) })
+            }
         }
 
         return result

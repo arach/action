@@ -12,6 +12,14 @@ export const sessionStates = [
 
 export type SessionState = (typeof sessionStates)[number];
 
+export const sessionModes = [
+  "capture",
+  "inspection",
+  "hybrid",
+] as const;
+
+export type SessionMode = (typeof sessionModes)[number];
+
 export const targetResolutionModes = [
   "semantic",
   "accessibility",
@@ -70,7 +78,9 @@ export interface Observation {
     | "dom"
     | "cursor"
     | "recording"
-    | "audio";
+    | "audio"
+    | "vision"
+    | "analysis";
   source: "engine" | "browser" | "runtime";
   at: string;
   surfaceId?: string;
@@ -109,6 +119,10 @@ export type ArtifactKind =
   | "screenshot"
   | "raw-capture"
   | "trace"
+  | "ax-snapshot"
+  | "inspection-request"
+  | "inspection-response"
+  | "findings"
   | "focus-metadata"
   | "subtitle"
   | "render-manifest"
@@ -133,6 +147,10 @@ export interface EngineDiagnostics {
 export const guidedSessionPhases = [
   "created",
   "staging",
+  "observing",
+  "analyzing",
+  "awaiting-decision",
+  "acting",
   "countdown",
   "recording",
   "paused",
@@ -212,6 +230,7 @@ export interface HudLogEntry {
 
 export interface HudSnapshot {
   sessionId: string;
+  mode: SessionMode;
   state: SessionState;
   phase: GuidedSessionPhase;
   targetApp?: string;
@@ -224,13 +243,79 @@ export interface HudSnapshot {
   stage: StageScene;
 }
 
+export interface InspectionFinding {
+  id: string;
+  source: string;
+  summary: string;
+  severity: "info" | "warning" | "error";
+  kind: "ui-critique" | "qa-issue" | "target-hint" | "observation" | "action-suggestion";
+  bounds?: Bounds;
+  targetHint?: TargetQuery;
+  evidence?: string;
+  recommendedAction?: RuntimeAction;
+  metadata?: Record<string, unknown>;
+}
+
+export interface InspectionRequest {
+  sessionId: string;
+  provider: string;
+  prompt: string;
+  imagePath: string;
+  surfaceId?: string;
+  contextArtifacts?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface InspectionResult {
+  sessionId: string;
+  provider: string;
+  summary: string;
+  findings: InspectionFinding[];
+  rawResponsePath?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface SessionSnapshot {
   id: string;
+  mode: SessionMode;
   state: SessionState;
   createdAt: string;
   updatedAt: string;
   traceCount: number;
   artifactCount: number;
+}
+
+export interface SessionArtifactEntry {
+  kind: RuntimeArtifact["kind"];
+  path: string;
+  relativePath: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SessionArtifactManifest {
+  sessionId: string;
+  mode: SessionMode;
+  generatedAt: string;
+  outputDir: string;
+  tracePath: string;
+  artifacts: SessionArtifactEntry[];
+}
+
+export interface PersistedRuntimeSession {
+  id: string;
+  mode: SessionMode;
+  state: SessionState;
+  phase: GuidedSessionPhase;
+  createdAt: string;
+  updatedAt: string;
+  targetApp?: string;
+  outputDir: string;
+  tracePath: string;
+  manifestPath: string;
+  artifactCount: number;
+  traceCount: number;
+  artifacts: SessionArtifactEntry[];
+  stage: StageScene;
 }
 
 export interface TransitionOptions {
@@ -294,6 +379,9 @@ export type GuidedSessionEventType =
   | "backdrop.selected"
   | "viewport.updated"
   | "app.launched"
+  | "inspection.started"
+  | "inspection.completed"
+  | "finding.recorded"
   | "countdown.tick"
   | "recording.started"
   | "recording.paused"

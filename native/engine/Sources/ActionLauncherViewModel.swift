@@ -306,9 +306,12 @@ final class ActionLauncherViewModel: ObservableObject {
 
         Task {
             do {
-                let result = try await launchGuidedDemo()
-                guidedDemoStatus = "Completed \(result.expression) = \(result.actualResult)"
-                refreshSessions()
+                if let result = try await launchGuidedDemo() {
+                    guidedDemoStatus = "Completed \(result.expression) = \(result.actualResult)"
+                    refreshSessions()
+                } else {
+                    guidedDemoStatus = "Cancelled"
+                }
             } catch {
                 guidedDemoStatus = "Failed: \(error.localizedDescription)"
                 logger.error("Guided calculator demo failed: \(error.localizedDescription, privacy: .public)")
@@ -731,7 +734,7 @@ final class ActionLauncherViewModel: ObservableObject {
         )
     }
 
-    private func launchGuidedDemo() async throws -> GuidedCaptureLauncherResult {
+    private func launchGuidedDemo() async throws -> GuidedCaptureLauncherResult? {
         let replyURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("action-guided-demo-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: replyURL) }
@@ -760,13 +763,17 @@ final class ActionLauncherViewModel: ObservableObject {
 
         for _ in 0..<300 {
             if let data = try? Data(contentsOf: replyURL), !data.isEmpty {
-                if let errorResponse = try? JSONDecoder().decode(ActionHostResponse.self, from: data),
-                   errorResponse.status == "error" {
-                    throw NSError(
-                        domain: "ActionLauncher",
-                        code: 2,
-                        userInfo: [NSLocalizedDescriptionKey: errorResponse.detail ?? "Guided demo failed"]
-                    )
+                if let response = try? JSONDecoder().decode(ActionHostResponse.self, from: data) {
+                    if response.status == "cancelled" {
+                        return nil
+                    }
+                    if response.status == "error" {
+                        throw NSError(
+                            domain: "ActionLauncher",
+                            code: 2,
+                            userInfo: [NSLocalizedDescriptionKey: response.detail ?? "Guided demo failed"]
+                        )
+                    }
                 }
 
                 return try JSONDecoder().decode(GuidedCaptureLauncherResult.self, from: data)
