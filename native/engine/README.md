@@ -32,7 +32,7 @@ native/engine/scripts/build-app.sh
 
 The built bundle lands at:
 
-`/Users/arach/dev/action/native/dist/Action.app`
+`native/dist/Action.app`
 
 ## Health Check
 
@@ -93,8 +93,8 @@ The current stability comes from keeping:
 
 ## Relevant Files
 
-- `/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift`
-- `/Users/arach/dev/action/native/engine/Sources/ActionLauncherController.swift`
-- `/Users/arach/dev/action/native/engine/Sources/ActionLauncherViewModel.swift`
-- `/Users/arach/dev/action/native/engine/CoreSources/ActionAgentRuntime.swift`
-- `/Users/arach/dev/action/native/engine/Sources/RecordingProbeAppRunner.swift`
+- `native/engine/Sources/ActionHostMain.swift`
+- `native/engine/Sources/ActionLauncherController.swift`
+- `native/engine/Sources/ActionLauncherViewModel.swift`
+- `native/engine/CoreSources/ActionAgentRuntime.swift`
+- `native/engine/Sources/RecordingProbeAppRunner.swift`

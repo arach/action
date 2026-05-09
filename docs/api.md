@@ -7,7 +7,7 @@ health checks, permissions, window control, screenshots, and recording.
 
 Primary source:
 
-- [ActionAgentProtocol.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentProtocol.swift)
+- [ActionAgentProtocol.swift](native/engine/CoreSources/ActionAgentProtocol.swift)
 
 ## Transport
 

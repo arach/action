@@ -6,14 +6,27 @@ final class ActionSupervisionViewModel: ObservableObject {
     @Published var title: String = "Action Supervision"
     @Published var detail: String = "Supervisor stop · Cmd+Ctrl+. or Esc Esc"
     @Published var countLabel: String = "0 live"
+    @Published var isMinimized: Bool = false
 
     var onStop: (() -> Void)?
+    var onToggleMinimized: (() -> Void)?
 }
 
 struct ActionSupervisionView: View {
     @ObservedObject var model: ActionSupervisionViewModel
 
     var body: some View {
+        Group {
+            if model.isMinimized {
+                minimizedBody
+            } else {
+                expandedBody
+            }
+        }
+        .help("Drag to reposition. Use Stop to halt supervised Action sessions.")
+    }
+
+    private var expandedBody: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.title)
@@ -28,9 +41,23 @@ struct ActionSupervisionView: View {
             Spacer(minLength: 10)
 
             VStack(alignment: .trailing, spacing: 8) {
-                Text(model.countLabel)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.7))
+                HStack(spacing: 8) {
+                    Text(model.countLabel)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.7))
+
+                    Button {
+                        model.onToggleMinimized?()
+                    } label: {
+                        Image(systemName: "minus")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(0.86))
+                            .frame(width: 22, height: 22)
+                            .background(Circle().fill(Color.white.opacity(0.10)))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Minimize supervision")
+                }
 
                 Button("STOP") {
                     model.onStop?()
@@ -49,6 +76,47 @@ struct ActionSupervisionView: View {
                         .stroke(Color.white.opacity(0.09), lineWidth: 1)
                 )
                 .shadow(color: Color.black.opacity(0.28), radius: 18, x: 0, y: 12)
+        )
+    }
+
+    private var minimizedBody: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color(red: 0.92, green: 0.20, blue: 0.19))
+                .frame(width: 8, height: 8)
+
+            Text(model.countLabel)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.86))
+
+            Spacer(minLength: 4)
+
+            Button {
+                model.onToggleMinimized?()
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.86))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Expand supervision")
+
+            Button("STOP") {
+                model.onStop?()
+            }
+            .buttonStyle(ActionSupervisionButtonStyle())
+        }
+        .padding(.horizontal, 12)
+        .frame(width: 206, height: 44, alignment: .leading)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color(red: 0.18, green: 0.04, blue: 0.05).opacity(0.96))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(0.09), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.28), radius: 16, x: 0, y: 10)
         )
     }
 }
@@ -71,6 +139,13 @@ struct ActionSupervisionButtonStyle: ButtonStyle {
 
 @MainActor
 final class ActionSupervisionOverlayController: NSObject {
+    private enum OverlayLayout {
+        static let expandedSize = CGSize(width: 296, height: 84)
+        static let minimizedSize = CGSize(width: 206, height: 44)
+        static let frameDefaultsKey = "Action.SupervisionOverlay.Frame"
+        static let minimizedDefaultsKey = "Action.SupervisionOverlay.Minimized"
+    }
+
     private let writer: ResponseWriter
     private let logger: DebugLogger
     private let model = ActionSupervisionViewModel()
@@ -78,7 +153,9 @@ final class ActionSupervisionOverlayController: NSObject {
     private var pollTimer: Timer?
     private var globalKeyMonitor: Any?
     private var localKeyMonitor: Any?
+    private var windowMoveObserver: NSObjectProtocol?
     private var lastEscapeTimestamp: Date?
+    private var hasPositionedWindow = false
 
     init(replyFile: String?, debugLogPath: String?) {
         self.writer = ResponseWriter(replyFile: replyFile)
@@ -89,8 +166,12 @@ final class ActionSupervisionOverlayController: NSObject {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         ActionSupervisionRegistry.recordOverlayPID(ProcessInfo.processInfo.processIdentifier)
+        model.isMinimized = UserDefaults.standard.bool(forKey: OverlayLayout.minimizedDefaultsKey)
         model.onStop = { [weak self] in
             self?.triggerStopAll(reason: "button")
+        }
+        model.onToggleMinimized = { [weak self] in
+            self?.toggleMinimized()
         }
         try writer.write(
             ActionHostResponse(
@@ -111,7 +192,7 @@ final class ActionSupervisionOverlayController: NSObject {
             return
         }
 
-        let size = CGSize(width: 296, height: 84)
+        let size = currentWindowSize
         let window = StageHUDPanel(
             contentRect: CGRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -123,7 +204,8 @@ final class ActionSupervisionOverlayController: NSObject {
         window.backgroundColor = .clear
         window.hasShadow = true
         window.ignoresMouseEvents = false
-        window.isMovable = false
+        window.isMovable = true
+        window.isMovableByWindowBackground = true
         window.isFloatingPanel = true
         window.hidesOnDeactivate = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle, .transient]
@@ -133,6 +215,16 @@ final class ActionSupervisionOverlayController: NSObject {
         rootView.autoresizingMask = [.width, .height]
         window.contentView = rootView
         self.window = window
+        windowMoveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.persistWindowFrame()
+            }
+        }
+        positionWindow()
     }
 
     private func startPolling() {
@@ -178,7 +270,9 @@ final class ActionSupervisionOverlayController: NSObject {
         model.title = "Action Supervision"
         model.detail = detail
         model.countLabel = registrations.count == 1 ? "1 live" : "\(registrations.count) live"
-        positionWindow()
+        if !hasPositionedWindow {
+            positionWindow()
+        }
         window?.orderFrontRegardless()
     }
 
@@ -189,11 +283,76 @@ final class ActionSupervisionOverlayController: NSObject {
 
         let screen = NSScreen.main ?? NSScreen.screens.first
         let visibleFrame = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let width: CGFloat = 296
-        let height: CGFloat = 84
-        let x = visibleFrame.maxX - width - 18
-        let y = visibleFrame.maxY - height - 18
-        window.setFrame(CGRect(x: x, y: y, width: width, height: height), display: true)
+        let size = currentWindowSize
+
+        if let savedFrame = savedWindowFrame(size: size),
+           visibleFrame.intersects(savedFrame.insetBy(dx: min(savedFrame.width - 24, 0), dy: min(savedFrame.height - 24, 0))) {
+            window.setFrame(clamped(frame: savedFrame, to: visibleFrame), display: true)
+            hasPositionedWindow = true
+            return
+        }
+
+        let x = visibleFrame.maxX - size.width - 18
+        let y = visibleFrame.maxY - size.height - 18
+        window.setFrame(CGRect(origin: CGPoint(x: x, y: y), size: size), display: true)
+        hasPositionedWindow = true
+        persistWindowFrame()
+    }
+
+    private var currentWindowSize: CGSize {
+        model.isMinimized ? OverlayLayout.minimizedSize : OverlayLayout.expandedSize
+    }
+
+    private func toggleMinimized() {
+        model.isMinimized.toggle()
+        UserDefaults.standard.set(model.isMinimized, forKey: OverlayLayout.minimizedDefaultsKey)
+        resizeWindowForCurrentPresentation()
+    }
+
+    private func resizeWindowForCurrentPresentation() {
+        guard let window else {
+            return
+        }
+
+        let oldFrame = window.frame
+        let size = currentWindowSize
+        let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first
+        let visibleFrame = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let resizedFrame = CGRect(
+            x: oldFrame.minX,
+            y: oldFrame.maxY - size.height,
+            width: size.width,
+            height: size.height
+        )
+        window.setFrame(clamped(frame: resizedFrame, to: visibleFrame), display: true, animate: true)
+        persistWindowFrame()
+    }
+
+    private func persistWindowFrame() {
+        guard let window else {
+            return
+        }
+
+        UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: OverlayLayout.frameDefaultsKey)
+    }
+
+    private func savedWindowFrame(size: CGSize) -> CGRect? {
+        guard let raw = UserDefaults.standard.string(forKey: OverlayLayout.frameDefaultsKey), !raw.isEmpty else {
+            return nil
+        }
+
+        let saved = NSRectFromString(raw)
+        guard saved.width > 0, saved.height > 0 else {
+            return nil
+        }
+
+        return CGRect(origin: saved.origin, size: size)
+    }
+
+    private func clamped(frame: CGRect, to visibleFrame: CGRect) -> CGRect {
+        let x = min(max(frame.minX, visibleFrame.minX + 8), visibleFrame.maxX - frame.width - 8)
+        let y = min(max(frame.minY, visibleFrame.minY + 8), visibleFrame.maxY - frame.height - 8)
+        return CGRect(x: x, y: y, width: frame.width, height: frame.height)
     }
 
     private func handleKeyEvent(_ event: NSEvent) {
@@ -242,6 +401,10 @@ final class ActionSupervisionOverlayController: NSObject {
         if let localKeyMonitor {
             NSEvent.removeMonitor(localKeyMonitor)
             self.localKeyMonitor = nil
+        }
+        if let windowMoveObserver {
+            NotificationCenter.default.removeObserver(windowMoveObserver)
+            self.windowMoveObserver = nil
         }
         window?.orderOut(nil)
         ActionSupervisionRegistry.clearOverlayPID()

@@ -163,9 +163,11 @@ jobs:
 
           release_tag="v$VERSION"
           dmg_path="$RUNNER_TEMP/Action.dmg"
+          versioned_dmg_path="$RUNNER_TEMP/Action-$VERSION.dmg"
           notes_path="$RUNNER_TEMP/release-notes.md"
 
           cp Installer/Action-for-Mac.dmg "$dmg_path"
+          cp Installer/Action-for-Mac.dmg "$versioned_dmg_path"
           cat > "$notes_path" <<EOF
           Release $VERSION
 
@@ -173,12 +175,12 @@ jobs:
           EOF
 
           if gh release view "$release_tag" >/dev/null 2>&1; then
-            gh release upload "$release_tag" "$dmg_path" --clobber
+            gh release upload "$release_tag" "$dmg_path" "$versioned_dmg_path" --clobber
             gh release edit "$release_tag" \
               --title "Action $VERSION" \
               --notes-file "$notes_path"
           else
-            gh release create "$release_tag" "$dmg_path" \
+            gh release create "$release_tag" "$dmg_path" "$versioned_dmg_path" \
               --title "Action $VERSION" \
               --notes-file "$notes_path"
           fi

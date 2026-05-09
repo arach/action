@@ -12,7 +12,7 @@ Use when:
 
 Instructions:
 
-1. read [docs/native-runtime.md](/Users/arach/dev/action/docs/native-runtime.md)
+1. read [docs/native-runtime.md](docs/native-runtime.md)
 2. verify whether the change belongs in app code or agent code
 3. keep AppKit-owned behavior in `Action.app`
 4. verify the signed app still builds
@@ -27,7 +27,7 @@ Use when:
 
 Instructions:
 
-1. read [docs/recording.md](/Users/arach/dev/action/docs/recording.md)
+1. read [docs/recording.md](docs/recording.md)
 2. inspect the probe launcher and probe app runner
 3. preserve `.mov` + `.finished` behavior
 4. test a real recording path, not just a unit-level refactor
@@ -42,7 +42,7 @@ Use when:
 
 Instructions:
 
-1. read [docs/api.md](/Users/arach/dev/action/docs/api.md)
+1. read [docs/api.md](docs/api.md)
 2. update the protocol source of truth
 3. confirm method names remain documented
 4. verify callers still match the transport contract

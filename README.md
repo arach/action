@@ -1,6 +1,6 @@
 # action
 
-Native-first macOS capture and demo workstation.
+**[arach.github.io/action](https://arach.github.io/action/)** · Native-first macOS capture and demo workstation.
 
 `action` is an AppKit-based macOS app for staging flows, recording them, reviewing the output, and handing the result to an agent or post-production toolchain.
 
@@ -106,7 +106,7 @@ granting Accessibility and Screen Recording permissions on first launch.
 For the tightest local loop, use the repo-local dev CLI:
 
 ```bash
-alias action-dev='bun /Users/arach/dev/action/packages/cli/src/action-dev.ts'
+alias action-dev='bun packages/cli/src/action-dev.ts'
 action-dev relaunch
 action-dev host guided-calculator-demo
 action-dev logs
@@ -154,10 +154,10 @@ Useful commands:
 
 ## Read Next
 
-- [Getting Started](/Users/arach/dev/action/docs/getting-started.md)
-- [Native Runtime](/Users/arach/dev/action/docs/native-runtime.md)
-- [Recording](/Users/arach/dev/action/docs/recording.md)
-- [Architecture](/Users/arach/dev/action/docs/ARCHITECTURE.md)
+- [Getting Started](docs/getting-started.md)
+- [Native Runtime](docs/native-runtime.md)
+- [Recording](docs/recording.md)
+- [Architecture](docs/ARCHITECTURE.md)
 
 ## Status
 

@@ -11,11 +11,11 @@ Use this folder when you want dense context instead of narrative docs.
 
 ## Core Files
 
-- [ActionHostMain.swift](/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift)
-- [ActionAgentRuntime.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentRuntime.swift)
-- [ActionRecordingProbeLauncher.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionRecordingProbeLauncher.swift)
-- [RecordingProbeAppRunner.swift](/Users/arach/dev/action/native/engine/Sources/RecordingProbeAppRunner.swift)
-- [ActionAgentProtocol.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentProtocol.swift)
+- [ActionHostMain.swift](native/engine/Sources/ActionHostMain.swift)
+- [ActionAgentRuntime.swift](native/engine/CoreSources/ActionAgentRuntime.swift)
+- [ActionRecordingProbeLauncher.swift](native/engine/CoreSources/ActionRecordingProbeLauncher.swift)
+- [RecordingProbeAppRunner.swift](native/engine/Sources/RecordingProbeAppRunner.swift)
+- [ActionAgentProtocol.swift](native/engine/CoreSources/ActionAgentProtocol.swift)
 
 ## Key Rules
 

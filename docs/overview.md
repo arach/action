@@ -37,11 +37,11 @@ runtime also own WebKit and recording behavior leads to brittle failures.
 
 ## Repository Shape
 
-- [README.md](/Users/arach/dev/action/README.md): top-level project framing
-- [docs/ARCHITECTURE.md](/Users/arach/dev/action/docs/ARCHITECTURE.md): deeper product and systems architecture
-- [docs/VISION.md](/Users/arach/dev/action/docs/VISION.md): product intent and precedent learnings
-- [native/engine](/Users/arach/dev/action/native/engine): Swift native engine, app host, local agent, and scripts
-- [packages](/Users/arach/dev/action/packages): JS-side tooling and operator surfaces
+- [README.md](README.md): top-level project framing
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): deeper product and systems architecture
+- [docs/VISION.md](docs/VISION.md): product intent and precedent learnings
+- [native/engine](native/engine): Swift native engine, app host, local agent, and scripts
+- [packages](packages): JS-side tooling and operator surfaces
 
 ## What Matters Most Right Now
 

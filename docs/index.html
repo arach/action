@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Action — Native macOS capture and demo workstation</title>
+  <meta name="description" content="A native macOS runtime for staging scenes, recording deterministic sessions, and feeding structured output to agents or post-production.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0e0f0d;
+      --canvas:  #181916;
+      --panel:   #201f1b;
+      --text:    #f0ece4;
+      --muted:   #a09890;
+      --accent:  #c8854a;
+      --border:  #2e2d28;
+      --serif:   'EB Garamond', Georgia, serif;
+      --mono:    'JetBrains Mono', 'Menlo', 'Monaco', monospace;
+    }
+
+    html {
+      color-scheme: only dark;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--serif);
+      font-size: 18px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background-image:
+        linear-gradient(hsla(28, 60%, 55%, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, hsla(28, 60%, 55%, 0.035) 1px, transparent 1px);
+      background-size: 32px 32px;
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 64rem;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    nav {
+      padding: 1.5rem 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-brand {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: var(--text);
+      text-decoration: none;
+      letter-spacing: -0.01em;
+    }
+    .nav-brand .dim { color: var(--muted); }
+
+    .nav-links {
+      display: flex;
+      gap: 1.5rem;
+      list-style: none;
+    }
+    .nav-links a {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .nav-links a:hover { color: var(--accent); }
+
+    .hero {
+      padding: 6rem 0 5rem;
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--accent);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 1.25rem;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.4rem, 5vw, 3.75rem);
+      font-weight: 500;
+      line-height: 1.1;
+      margin-bottom: 1.5rem;
+      max-width: 20ch;
+    }
+
+    .hero-sub {
+      font-size: 1.2rem;
+      color: var(--muted);
+      max-width: 52ch;
+      margin-bottom: 3rem;
+    }
+
+    .terminal {
+      background: var(--canvas);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      max-width: 44rem;
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+    .terminal-title {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+      margin-left: auto;
+    }
+
+    .terminal-body {
+      padding: 1.2rem 1.5rem;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 2;
+      overflow-x: auto;
+    }
+    .prompt { color: var(--muted); user-select: none; }
+    .cmd    { color: var(--text); white-space: nowrap; }
+    .out    { color: var(--muted); padding-left: 1.2rem; white-space: nowrap; }
+
+    section {
+      padding: 4.5rem 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .label {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--accent);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 0.9rem;
+    }
+
+    h2 {
+      font-size: clamp(1.6rem, 3vw, 2.25rem);
+      font-weight: 500;
+      margin-bottom: 0.75rem;
+      line-height: 1.2;
+    }
+
+    .lead {
+      font-size: 1.05rem;
+      color: var(--muted);
+      max-width: 55ch;
+      margin-bottom: 2.75rem;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+    }
+    @media (max-width: 700px) {
+      .cards { grid-template-columns: 1fr; }
+      .wrap { padding: 0 1.25rem; }
+      nav { align-items: flex-start; gap: 1rem; flex-direction: column; }
+    }
+
+    .card {
+      background: var(--canvas);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1.5rem;
+    }
+    .card-name {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: var(--accent);
+      margin-bottom: 0.6rem;
+    }
+    .card-desc {
+      font-size: 0.95rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+      max-width: 50rem;
+    }
+    .step {
+      display: flex;
+      gap: 1.75rem;
+    }
+    .step-n {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--accent);
+      flex-shrink: 0;
+      padding-top: 0.25rem;
+      width: 1.5rem;
+    }
+    .step h3 {
+      font-size: 1rem;
+      font-weight: 500;
+      margin-bottom: 0.25rem;
+    }
+    .step p {
+      font-size: 0.95rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.82em;
+      color: var(--accent);
+      background: var(--panel);
+      padding: 0.1em 0.35em;
+      border-radius: 2px;
+    }
+
+    .reqs {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+    .reqs li {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .reqs li::before {
+      content: '—';
+      color: var(--accent);
+    }
+
+    footer {
+      padding: 2.5rem 0 3rem;
+      border-top: 1px solid var(--border);
+    }
+    .footer-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .footer-row p {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .footer-row a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .footer-row a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <nav>
+      <a class="nav-brand" href="/">action<span class="dim">.app</span></a>
+      <ul class="nav-links">
+        <li><a href="getting-started.md">Docs</a></li>
+        <li><a href="https://github.com/arach/action">GitHub</a></li>
+      </ul>
+    </nav>
+
+    <div class="hero">
+      <p class="eyebrow">macOS native runtime</p>
+      <h1>Stage. Record. Review. Hand off.</h1>
+      <p class="hero-sub">A native macOS workstation for capturing deterministic sessions, building structured trace artifacts, and feeding output to agents or post-production.</p>
+
+      <div class="terminal">
+        <div class="terminal-bar">
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <span class="terminal-title">quick start</span>
+        </div>
+        <div class="terminal-body">
+          <div><span class="prompt">$ </span><span class="cmd">bun install && bun run native:app:build</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">bun run action-dev -- launch</span></div>
+          <div class="out"># Action.app running · console ready</div>
+          <div><span class="prompt">$ </span><span class="cmd">action-dev host guided-calculator-demo</span></div>
+          <div class="out"># capture started · artifact writing…</div>
+        </div>
+      </div>
+    </div>
+
+    <section>
+      <p class="label">What it is</p>
+      <h2>Not just screen recording.</h2>
+      <p class="lead">Action is a runtime where a human or an agent can stage a scene, run deterministic actions, and produce machine-readable output with every capture.</p>
+
+      <div class="cards">
+        <div class="card">
+          <p class="card-name">Action.app</p>
+          <p class="card-desc">Signed AppKit host. Owns permissions UX, WebKit console, recording-probe lifecycle, and the supervision overlay.</p>
+        </div>
+        <div class="card">
+          <p class="card-name">agent runtime</p>
+          <p class="card-desc">Local orchestration process for transport, automation-facing methods, and agent-to-app coordination.</p>
+        </div>
+        <div class="card">
+          <p class="card-name">session artifacts</p>
+          <p class="card-desc">Every capture produces raw media, structured trace data, screenshots, and a finished marker file.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <p class="label">The loop</p>
+      <h2>One tight cycle.</h2>
+      <p class="lead">Action is organized around a single repeatable loop you can run manually or drive with an agent.</p>
+
+      <div class="steps">
+        <div class="step">
+          <span class="step-n">01</span>
+          <div>
+            <h3>Launch and stage</h3>
+            <p>Start <code>Action.app</code>, open the embedded console, and set up the scene you want to capture.</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-n">02</span>
+          <div>
+            <h3>Run a guided capture</h3>
+            <p>Use <code>action-dev host &lt;scenario&gt;</code> to start a recording probe. The probe runs in a fresh app instance for clean, deterministic output.</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-n">03</span>
+          <div>
+            <h3>Review in-app</h3>
+            <p>The session library surfaces the playable artifact plus trace data. Completion is marker-based, not response-based — the artifact is authoritative.</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-n">04</span>
+          <div>
+            <h3>Hand off</h3>
+            <p>Leave machine-readable feedback or pass the artifact directly to an editor, composer, or downstream agent.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <p class="label">Developer CLI</p>
+      <h2>One alias, all commands.</h2>
+      <p class="lead">The repo-local CLI covers the full build and runtime loop.</p>
+
+      <div class="terminal">
+        <div class="terminal-bar">
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <span class="terminal-title">action-dev</span>
+        </div>
+        <div class="terminal-body">
+          <div><span class="prompt">$ </span><span class="cmd">alias action-dev='bun packages/cli/src/action-dev.ts'</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">action-dev build</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">action-dev relaunch</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">action-dev doctor</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">action-dev hud</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">action-dev logs</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <p class="label">Requirements</p>
+      <h2>What you need.</h2>
+      <ul class="reqs">
+        <li>macOS on Apple Silicon</li>
+        <li>Bun (package manager and script runner)</li>
+        <li>Xcode command line tools or a full Swift toolchain</li>
+        <li>Accessibility and Screen Recording permissions granted on first launch</li>
+      </ul>
+    </section>
+
+    <footer>
+      <div class="footer-row">
+        <p>Native-first macOS capture workstation · <a href="https://github.com/arach/action">github.com/arach/action</a></p>
+        <p><a href="ARCHITECTURE.md">Architecture docs</a></p>
+      </div>
+    </footer>
+
+  </div>
+</body>
+</html>

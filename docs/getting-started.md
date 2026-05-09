@@ -23,7 +23,7 @@ bun run native:app:build
 
 This produces a signed app bundle at:
 
-`/Users/arach/dev/action/native/dist/Action.app`
+`native/dist/Action.app`
 
 ## Check Native Health
 
@@ -82,6 +82,6 @@ If you are debugging recording, inspect:
 
 ## Where To Read Next
 
-- [docs/native-runtime.md](/Users/arach/dev/action/docs/native-runtime.md)
-- [docs/recording.md](/Users/arach/dev/action/docs/recording.md)
-- [docs/ARCHITECTURE.md](/Users/arach/dev/action/docs/ARCHITECTURE.md)
+- [docs/native-runtime.md](docs/native-runtime.md)
+- [docs/recording.md](docs/recording.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

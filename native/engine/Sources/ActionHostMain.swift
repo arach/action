@@ -41,6 +41,8 @@ enum ActionHostCommand: String {
     case supervisionOverlay = "supervision-overlay"
     case supervisorStop = "supervisor-stop"
     case stageOverlay = "stage-overlay"
+    case demoCursorOverlay = "demo-cursor-overlay"
+    case terminalSession = "terminal-session"
     case prepareNotesNote = "prepare-notes-note"
     case getCaptureWindowFrame = "get-capture-window-frame"
     case composeRoundedScreenshot = "compose-rounded-screenshot"
@@ -50,9 +52,16 @@ enum ActionHostCommand: String {
     case screenshotAppWindow = "screenshot-app-window"
     case activateApp = "activate-app"
     case typeText = "type-text"
+    case typeAppText = "type-app-text"
     case pressKey = "press-key"
+    case pressAppKey = "press-app-key"
     case clickPoint = "click-point"
     case drag
+    case pressAccessibilityElement = "press-accessibility-element"
+    case performAccessibilityAction = "perform-accessibility-action"
+    case setAccessibilityValue = "set-accessibility-value"
+    case setFocusedAccessibilityValue = "set-focused-accessibility-value"
+    case setAccessibilityRoleValue = "set-accessibility-role-value"
     case clickCalculatorButton = "click-calculator-button"
     case inspectCalculatorButtons = "inspect-calculator-buttons"
     case inspectCalculatorUI = "inspect-calculator-ui"
@@ -380,6 +389,30 @@ func postKeyPress(_ key: String, modifiers: [String] = []) throws {
     keyUp.post(tap: .cghidEventTap)
 }
 
+func postKeyPressToApp(bundleId: String, key: String, modifiers: [String] = []) throws {
+    let app = try runningApplication(bundleId: bundleId)
+    guard let source = CGEventSource(stateID: .hidSystemState) else {
+        throw ActionHostError.accessibilityActionFailed("Unable to create event source")
+    }
+
+    let normalized = key.lowercased()
+    guard let keyCode = keyCodes[normalized] else {
+        throw ActionHostError.accessibilityActionFailed("Unsupported direct app key: \(key)")
+    }
+
+    let flags = modifierFlags(for: modifiers)
+    guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+          let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+        throw ActionHostError.accessibilityActionFailed("Unable to create app keyboard events")
+    }
+
+    keyDown.flags = flags
+    keyUp.flags = flags
+    keyDown.postToPid(app.processIdentifier)
+    usleep(50000)
+    keyUp.postToPid(app.processIdentifier)
+}
+
 func clickPoint(_ point: CGPoint) throws {
     CGWarpMouseCursorPosition(point)
     usleep(10000)
@@ -419,6 +452,32 @@ func postText(_ text: String, delayMs: Int?) throws {
     }
 }
 
+func postTextToApp(bundleId: String, text: String, delayMs: Int?) throws {
+    let app = try runningApplication(bundleId: bundleId)
+    guard let source = CGEventSource(stateID: .hidSystemState) else {
+        throw ActionHostError.accessibilityActionFailed("Unable to create event source")
+    }
+
+    for scalar in text.utf16 {
+        var unicode = [scalar]
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+            throw ActionHostError.accessibilityActionFailed("Unable to create app text events")
+        }
+
+        keyDown.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unicode)
+        keyUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unicode)
+        keyDown.postToPid(app.processIdentifier)
+        if let delayMs, delayMs > 0 {
+            usleep(useconds_t(delayMs * 500))
+        }
+        keyUp.postToPid(app.processIdentifier)
+        if let delayMs, delayMs > 0 {
+            usleep(useconds_t(delayMs * 500))
+        }
+    }
+}
+
 func axValue(_ element: AXUIElement, attribute: String) -> AnyObject? {
     var value: CFTypeRef?
     let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
@@ -442,11 +501,22 @@ func firstWindowElement(for bundleId: String) throws -> AXUIElement {
     let application = AXUIElementCreateApplication(app.processIdentifier)
 
     if let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
-       let window = windows.first {
-        return window
+       !windows.isEmpty {
+        return windows.max { lhs, rhs in
+            windowArea(lhs) < windowArea(rhs)
+        } ?? windows[0]
     }
 
     throw ActionHostError.accessibilityLookupFailed("No accessibility window found for \(bundleId)")
+}
+
+func windowArea(_ element: AXUIElement) -> CGFloat {
+    guard let position = point(from: axValue(element, attribute: kAXPositionAttribute)),
+          let size = size(from: axValue(element, attribute: kAXSizeAttribute)) else {
+        return 0
+    }
+    _ = position
+    return max(0, size.width) * max(0, size.height)
 }
 
 func pointValue(_ point: CGPoint) -> AXValue {
@@ -903,6 +973,7 @@ func composeRoundedScreenshot(
 }
 
 @available(macOS 15.0, *)
+@MainActor
 final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegate {
     private var stream: SCStream?
     private var recordingOutput: SCRecordingOutput?
@@ -1101,40 +1172,60 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         try Data(contents.utf8).write(to: url)
     }
 
-    func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: any Error) {
+    private func handleRecordingFailure(message: String, logPrefix: String, stderrPrefix: String) {
+        let error = NSError(
+            domain: "ActionHostRecording",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
         recordingError = error
-        logger.log("record: recordingOutput failed \(error.localizedDescription)")
-        try? writeSignalFile(path: finishedSignalPath, contents: "error:\(error.localizedDescription)\n")
+        logger.log("\(logPrefix) \(message)")
+        try? writeSignalFile(path: finishedSignalPath, contents: "error:\(message)\n")
         startContinuation?.resume(throwing: error)
         startContinuation = nil
         finishContinuation?.resume(throwing: error)
         finishContinuation = nil
-        FileHandle.standardError.write(Data("ActionHost recording failed: \(error.localizedDescription)\n".utf8))
+        FileHandle.standardError.write(Data("\(stderrPrefix): \(message)\n".utf8))
     }
 
-    func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
-        logger.log("record: recording output started")
-        recordingStarted = true
-        startContinuation?.resume()
-        startContinuation = nil
+    nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: any Error) {
+        let message = error.localizedDescription
+        Task { @MainActor in
+            self.handleRecordingFailure(
+                message: message,
+                logPrefix: "record: recordingOutput failed",
+                stderrPrefix: "ActionHost recording failed"
+            )
+        }
     }
 
-    func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
-        logger.log("record: recording output finished")
-        recordingFinished = true
-        finishContinuation?.resume()
-        finishContinuation = nil
+    nonisolated func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
+        Task { @MainActor in
+            logger.log("record: recording output started")
+            recordingStarted = true
+            startContinuation?.resume()
+            startContinuation = nil
+        }
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        recordingError = error
-        logger.log("record: stream stopped with error \(error.localizedDescription)")
-        try? writeSignalFile(path: finishedSignalPath, contents: "error:\(error.localizedDescription)\n")
-        startContinuation?.resume(throwing: error)
-        startContinuation = nil
-        finishContinuation?.resume(throwing: error)
-        finishContinuation = nil
-        FileHandle.standardError.write(Data("ActionHost stream stopped: \(error.localizedDescription)\n".utf8))
+    nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
+        Task { @MainActor in
+            logger.log("record: recording output finished")
+            recordingFinished = true
+            finishContinuation?.resume()
+            finishContinuation = nil
+        }
+    }
+
+    nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
+        let message = error.localizedDescription
+        Task { @MainActor in
+            self.handleRecordingFailure(
+                message: message,
+                logPrefix: "record: stream stopped with error",
+                stderrPrefix: "ActionHost stream stopped"
+            )
+        }
     }
 }
 
@@ -1606,6 +1697,1109 @@ final class StageOverlayView: NSView {
 }
 
 @MainActor
+final class DemoCursorOverlayController: NSObject {
+    private let writer: ResponseWriter
+    private let duration: TimeInterval
+    private let startPoint: CGPoint?
+    private let endPoint: CGPoint?
+    private let clickProgress: Double
+    private let labelOverride: String?
+    private let statusDetail: String?
+    private let keyLabel: String?
+    private let typingText: String?
+    private let playsTimedTypingSound: Bool
+    private let statusOnly: Bool
+    private let traceFile: String?
+    private let traceTitle: String
+    private let previewImagePath: String?
+    private var overlayWindow: NSWindow?
+    private var overlayView: DemoCursorOverlayView?
+    private var timer: Timer?
+    private let startedAt = Date()
+    private let soundPlayer = DemoCueSoundPlayer()
+    private var didPlayClickSound = false
+    private var nextTypingSoundProgress = 0.18
+    private var nextTracePoll = 0.0
+    private var lastTraceData: Data?
+
+    init(
+        writer: ResponseWriter,
+        durationMs: Double,
+        startPoint: CGPoint?,
+        endPoint: CGPoint?,
+        clickProgress: Double,
+        labelOverride: String?,
+        statusDetail: String?,
+        keyLabel: String?,
+        typingText: String?,
+        playsTimedTypingSound: Bool,
+        statusOnly: Bool,
+        traceFile: String?,
+        traceTitle: String,
+        previewImagePath: String?
+    ) {
+        self.writer = writer
+        self.duration = max(0.28, durationMs / 1000.0)
+        self.startPoint = startPoint
+        self.endPoint = endPoint
+        self.clickProgress = min(0.92, max(0.08, clickProgress))
+        self.labelOverride = labelOverride
+        self.statusDetail = statusDetail
+        self.keyLabel = keyLabel
+        self.typingText = typingText
+        self.playsTimedTypingSound = playsTimedTypingSound
+        self.statusOnly = statusOnly
+        self.traceFile = traceFile
+        self.traceTitle = traceTitle
+        self.previewImagePath = previewImagePath
+    }
+
+    func run() throws {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else {
+            throw ActionHostError.unsupportedOS("Could not resolve a screen for demo cursor overlay")
+        }
+
+        createWindow(screen: screen)
+        try writer.write(
+            ActionHostResponse(
+                status: "cursor-overlay-running",
+                outputPath: nil,
+                detail: String(ProcessInfo.processInfo.processIdentifier)
+            )
+        )
+
+        timer = Timer.scheduledTimer(
+            timeInterval: 1.0 / 60.0,
+            target: self,
+            selector: #selector(tick(_:)),
+            userInfo: nil,
+            repeats: true
+        )
+
+        app.run()
+    }
+
+    @objc
+    private func tick(_ timer: Timer) {
+        let elapsed = Date().timeIntervalSince(startedAt)
+        if elapsed >= duration {
+            timer.invalidate()
+            overlayWindow?.orderOut(nil)
+            NSApplication.shared.terminate(nil)
+            return
+        }
+        let progress = elapsed / duration
+        overlayView?.progress = progress
+        reloadTraceLines(elapsed: elapsed)
+        playCueSounds(progress: progress)
+    }
+
+    private func reloadTraceLines(elapsed: TimeInterval) {
+        guard elapsed >= nextTracePoll else {
+            return
+        }
+        nextTracePoll = elapsed + 0.16
+
+        guard let traceFile, !traceFile.isEmpty else {
+            return
+        }
+        let url = URL(fileURLWithPath: traceFile)
+        guard let data = try? Data(contentsOf: url), data != lastTraceData else {
+            return
+        }
+        lastTraceData = data
+        let text = String(decoding: data, as: UTF8.self)
+        let lines = text
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .suffix(7)
+        overlayView?.traceLines = Array(lines)
+    }
+
+    private func playCueSounds(progress: Double) {
+        if typingText?.isEmpty == false {
+            guard playsTimedTypingSound else {
+                return
+            }
+            while progress >= nextTypingSoundProgress && nextTypingSoundProgress < 0.92 {
+                soundPlayer.playTyping()
+                nextTypingSoundProgress += 0.13
+            }
+            return
+        }
+
+        guard shouldPlayClickSound, !didPlayClickSound, progress >= clickProgress else {
+            return
+        }
+        didPlayClickSound = true
+        soundPlayer.playClick()
+    }
+
+    private var shouldPlayClickSound: Bool {
+        guard keyLabel?.isEmpty != false, typingText?.isEmpty != false else {
+            return false
+        }
+        guard let label = labelOverride?.lowercased(), !label.isEmpty else {
+            return true
+        }
+        return label.contains("click") || label.contains("tap") || label.contains("press")
+    }
+
+    private func createWindow(screen: NSScreen) {
+        let overlayWindow = NSPanel(
+            contentRect: screen.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false,
+            screen: screen
+        )
+        overlayWindow.level = .screenSaver
+        overlayWindow.isOpaque = false
+        overlayWindow.backgroundColor = .clear
+        overlayWindow.hasShadow = false
+        overlayWindow.ignoresMouseEvents = true
+        overlayWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+
+        let size = screen.frame.size
+        let resolvedStart = startPoint ?? CGPoint(x: size.width * 0.58, y: size.height * 0.74)
+        let resolvedEnd = endPoint ?? CGPoint(x: size.width * 0.93, y: size.height * 0.40)
+        let previewImage = previewImagePath.flatMap { NSImage(contentsOfFile: $0) }
+        let overlayView = DemoCursorOverlayView(
+            frame: CGRect(origin: .zero, size: size),
+            startPoint: resolvedStart,
+            endPoint: resolvedEnd,
+            clickProgress: clickProgress,
+            labelOverride: labelOverride,
+            statusDetail: statusDetail,
+            keyLabel: keyLabel,
+            typingText: typingText,
+            playsTimedTypingSound: playsTimedTypingSound,
+            statusOnly: statusOnly,
+            traceLines: [],
+            traceTitle: traceTitle,
+            previewImage: previewImage
+        )
+        overlayWindow.contentView = overlayView
+        overlayWindow.orderFrontRegardless()
+
+        self.overlayWindow = overlayWindow
+        self.overlayView = overlayView
+    }
+}
+
+@MainActor
+final class DemoCueSoundPlayer {
+    private let clickData: Data
+    private let typingData: [Data]
+    private var typingSoundIndex = 0
+    private var activeSounds: [NSSound] = []
+
+    init() {
+        self.clickData = DemoCueSoundPlayer.makeToneData(
+            duration: 0.075,
+            volume: 0.24,
+            body: { time, phase in
+                let bend = 1.0 - phase
+                return sin(2.0 * .pi * (620.0 + 280.0 * bend) * time) * 0.78
+                    + sin(2.0 * .pi * 1240.0 * time) * 0.18
+            }
+        )
+        let installedTypingData = DemoCueSoundPlayer.loadInstalledTypingKeyData()
+        self.typingData = installedTypingData.isEmpty
+            ? (0..<4).map { index in
+                DemoCueSoundPlayer.makeCreamyTypingKeyData(seed: UInt64(0xA17C10 + index * 73))
+            }
+            : installedTypingData
+    }
+
+    func playClick() {
+        play(data: clickData, duration: 0.075, volume: 0.72)
+    }
+
+    func playTyping() {
+        guard !typingData.isEmpty else {
+            return
+        }
+        let data = typingData[typingSoundIndex % typingData.count]
+        typingSoundIndex += 1
+        play(data: data, duration: 0.096, volume: 0.38)
+    }
+
+    private func play(data: Data, duration: TimeInterval, volume: Float) {
+        activeSounds.removeAll { !$0.isPlaying }
+        guard let sound = NSSound(data: data) else {
+            return
+        }
+        sound.volume = volume
+        activeSounds.append(sound)
+        sound.play()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.25) { [weak self, weak sound] in
+            guard let sound else {
+                return
+            }
+            self?.activeSounds.removeAll { $0 === sound }
+        }
+    }
+
+    private static func makeToneData(
+        duration: Double,
+        volume: Double,
+        body: (Double, Double) -> Double
+    ) -> Data {
+        let sampleRate = 44_100
+        let sampleCount = max(1, Int(duration * Double(sampleRate)))
+        var samples = Data(capacity: sampleCount * 2)
+
+        for index in 0..<sampleCount {
+            let phase = Double(index) / Double(sampleCount - 1)
+            let time = Double(index) / Double(sampleRate)
+            let attack = min(1.0, phase / 0.12)
+            let decay = pow(max(0.0, 1.0 - phase), 2.4)
+            let value = max(-1.0, min(1.0, body(time, phase) * attack * decay * volume))
+            appendInt16(Int16(value * Double(Int16.max)), to: &samples)
+        }
+
+        var data = Data()
+        appendASCII("RIFF", to: &data)
+        appendUInt32(UInt32(36 + samples.count), to: &data)
+        appendASCII("WAVE", to: &data)
+        appendASCII("fmt ", to: &data)
+        appendUInt32(16, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt32(UInt32(sampleRate), to: &data)
+        appendUInt32(UInt32(sampleRate * 2), to: &data)
+        appendUInt16(2, to: &data)
+        appendUInt16(16, to: &data)
+        appendASCII("data", to: &data)
+        appendUInt32(UInt32(samples.count), to: &data)
+        data.append(samples)
+        return data
+    }
+
+    private static func makeCreamyTypingKeyData(seed: UInt64) -> Data {
+        let sampleRate = 44_100
+        let duration = 0.096
+        let sampleCount = max(1, Int(duration * Double(sampleRate)))
+        let pitchOffset = Double(Int(seed % 5) - 2) * 2.0
+        let releaseCenter = 0.047 + Double(seed % 4) * 0.0014
+        var randomState = seed == 0 ? 1 : seed
+        var feltNoise = 0.0
+        var clothNoise = 0.0
+        var samples = Data(capacity: sampleCount * 2)
+
+        for index in 0..<sampleCount {
+            let phase = Double(index) / Double(sampleCount - 1)
+            let time = Double(index) / Double(sampleRate)
+            randomState = randomState &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let rawNoise = (Double((randomState >> 33) & 0xFFFF) / 32_767.5) - 1.0
+            feltNoise = feltNoise * 0.94 + rawNoise * 0.06
+            clothNoise = clothNoise * 0.985 + rawNoise * 0.015
+
+            let pressEnvelope = exp(-time * 34.0)
+            let releaseDistance = (time - releaseCenter) / 0.012
+            let releaseEnvelope = exp(-(releaseDistance * releaseDistance)) * 0.12
+            let bodyEnvelope = exp(-time * 27.0)
+            let feltEnvelope = exp(-time * 40.0)
+            let airEnvelope = exp(-time * 88.0)
+
+            let body = sin(2.0 * .pi * (96.0 + pitchOffset) * time) * bodyEnvelope * 0.34
+                + sin(2.0 * .pi * (188.0 + pitchOffset * 1.4) * time) * bodyEnvelope * 0.21
+            let felt = sin(2.0 * .pi * (360.0 + pitchOffset * 2.0) * time) * feltEnvelope * 0.075
+            let softPress = feltNoise * pressEnvelope * 0.055
+            let softRelease = clothNoise * releaseEnvelope * 0.09
+            let air = rawNoise * airEnvelope * 0.018
+            let attack = min(1.0, phase / 0.045)
+            let value = max(-1.0, min(1.0, (body + felt + softPress + softRelease + air) * attack * 0.42))
+            appendInt16(Int16(value * Double(Int16.max)), to: &samples)
+        }
+
+        var data = Data()
+        appendASCII("RIFF", to: &data)
+        appendUInt32(UInt32(36 + samples.count), to: &data)
+        appendASCII("WAVE", to: &data)
+        appendASCII("fmt ", to: &data)
+        appendUInt32(16, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt32(UInt32(sampleRate), to: &data)
+        appendUInt32(UInt32(sampleRate * 2), to: &data)
+        appendUInt16(2, to: &data)
+        appendUInt16(16, to: &data)
+        appendASCII("data", to: &data)
+        appendUInt32(UInt32(samples.count), to: &data)
+        data.append(samples)
+        return data
+    }
+
+    private static func loadInstalledTypingKeyData() -> [Data] {
+        let fileManager = FileManager.default
+        var directories: [URL] = []
+
+        if let override = ProcessInfo.processInfo.environment["ACTION_TYPING_SOUNDS_DIR"],
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            directories.append(URL(fileURLWithPath: override, isDirectory: true))
+        }
+
+        if let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            directories.append(applicationSupport.appendingPathComponent("Action/Typing", isDirectory: true))
+        }
+
+        for directory in directories {
+            guard let files = try? fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            let soundFiles = files
+                .filter { ["wav", "aif", "aiff", "m4a", "mp3"].contains($0.pathExtension.lowercased()) }
+                .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            let data = soundFiles.compactMap { try? Data(contentsOf: $0) }
+            if !data.isEmpty {
+                return data
+            }
+        }
+
+        return []
+    }
+
+    private static func appendASCII(_ string: String, to data: inout Data) {
+        data.append(contentsOf: string.utf8)
+    }
+
+    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+
+    private static func appendUInt32(_ value: UInt32, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+
+    private static func appendInt16(_ value: Int16, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+}
+
+final class DemoCursorOverlayView: NSView {
+    private let startPoint: CGPoint
+    private let endPoint: CGPoint
+    private let clickProgress: Double
+    private let labelOverride: String?
+    private let statusDetail: String?
+    private let keyLabel: String?
+    private let typingText: String?
+    private let playsTimedTypingSound: Bool
+    private let statusOnly: Bool
+    private let traceTitle: String
+    private let previewImage: NSImage?
+    var traceLines: [String] {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    var progress: Double = 0 {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    init(
+        frame frameRect: CGRect,
+        startPoint: CGPoint,
+        endPoint: CGPoint,
+        clickProgress: Double,
+        labelOverride: String?,
+        statusDetail: String?,
+        keyLabel: String?,
+        typingText: String?,
+        playsTimedTypingSound: Bool,
+        statusOnly: Bool,
+        traceLines: [String],
+        traceTitle: String,
+        previewImage: NSImage?
+    ) {
+        self.startPoint = startPoint
+        self.endPoint = endPoint
+        self.clickProgress = clickProgress
+        self.labelOverride = labelOverride
+        self.statusDetail = statusDetail
+        self.keyLabel = keyLabel
+        self.typingText = typingText
+        self.playsTimedTypingSound = playsTimedTypingSound
+        self.statusOnly = statusOnly
+        self.traceLines = traceLines
+        self.traceTitle = traceTitle
+        self.previewImage = previewImage
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        if statusOnly {
+            drawScreenStatusHUD()
+            drawPreviewPanel()
+            drawTraceStrip()
+            return
+        }
+
+        let point = cursorPoint(for: progress)
+
+        drawTrail(progress: progress)
+        drawClickFeedback(at: point)
+        if isTypingCue {
+            drawTypingCaret(at: point)
+        } else {
+            drawCursor(at: point, scale: cursorScale())
+        }
+        drawKeyChordCue(at: point)
+        drawTypingCue(at: point)
+        drawActionPill(at: point)
+        drawScreenStatusHUD()
+        drawPreviewPanel()
+        drawTraceStrip()
+    }
+
+    private func cursorPoint(for rawProgress: Double) -> CGPoint {
+        if isTypingCue {
+            return startPoint
+        }
+
+        let clipped = min(1, max(0, rawProgress))
+        let eased = playfulEase(clipped)
+        let base = CGPoint(
+            x: startPoint.x + (endPoint.x - startPoint.x) * eased,
+            y: startPoint.y + (endPoint.y - startPoint.y) * eased
+        )
+        let dx = endPoint.x - startPoint.x
+        let dy = endPoint.y - startPoint.y
+        let distance = max(1, hypot(dx, dy))
+        let arc = sin(.pi * clipped) * min(62, distance * 0.09)
+        let bob = sin(.pi * clipped * 5.0) * (1 - clipped) * min(12, distance * 0.018)
+
+        return CGPoint(
+            x: base.x + (-dy / distance) * arc,
+            y: base.y + (dx / distance) * arc + bob
+        )
+    }
+
+    private func drawTrail(progress: Double) {
+        guard !isTypingCue else {
+            return
+        }
+
+        let steps = 10
+        for index in 0..<steps {
+            let t = max(0, progress - Double(index + 1) * 0.028)
+            let p = cursorPoint(for: t)
+            let alpha = max(0, 0.09 - Double(index) * 0.009)
+            let radius = CGFloat(max(1.8, 5.8 - Double(index) * 0.38))
+            let warmth = CGFloat(index) / CGFloat(max(1, steps - 1))
+            NSColor(
+                calibratedRed: 0.48 + 0.12 * warmth,
+                green: 0.60 + 0.08 * (1 - warmth),
+                blue: 0.74,
+                alpha: alpha
+            ).setFill()
+            NSBezierPath(ovalIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)).fill()
+        }
+    }
+
+    private func drawClickFeedback(at point: CGPoint) {
+        guard showsClickFeedback else {
+            return
+        }
+
+        let distance = abs(progress - clickProgress)
+        guard distance < 0.30 else {
+            return
+        }
+
+        let normalized = max(0, 1 - (distance / 0.30))
+        let alpha = CGFloat(0.32 * normalized)
+        for index in 0..<3 {
+            let spread = CGFloat(index) * 18
+            let radius = CGFloat(24 + (1 - normalized) * 54) + spread
+            let ring = NSBezierPath(
+                ovalIn: CGRect(
+                    x: point.x - radius,
+                    y: point.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )
+            )
+            NSColor(calibratedRed: 0.45, green: 0.62, blue: 0.76, alpha: alpha * (1 - CGFloat(index) * 0.22))
+                .setStroke()
+            ring.lineWidth = 2.4
+            ring.stroke()
+        }
+
+        NSColor(calibratedRed: 0.66, green: 0.78, blue: 0.86, alpha: alpha * 0.24).setFill()
+        NSBezierPath(ovalIn: CGRect(x: point.x - 13, y: point.y - 13, width: 26, height: 26)).fill()
+
+        let font = NSFont.systemFont(ofSize: 16, weight: .bold)
+        let text = "CLICK"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor(calibratedRed: 0.88, green: 0.92, blue: 0.93, alpha: alpha * 0.84),
+        ]
+        let size = (text as NSString).size(withAttributes: attrs)
+        (text as NSString).draw(
+            in: CGRect(x: point.x - size.width / 2, y: point.y + 38, width: size.width, height: size.height),
+            withAttributes: attrs
+        )
+    }
+
+    private func drawCursor(at point: CGPoint, scale: CGFloat) {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: point.x + (x * scale), y: point.y + (y * scale))
+        }
+
+        let path = NSBezierPath()
+        path.move(to: p(0, 0))
+        path.line(to: p(0, -43))
+        path.line(to: p(12, -32))
+        path.line(to: p(20, -52))
+        path.line(to: p(29, -48))
+        path.line(to: p(21, -29))
+        path.line(to: p(38, -29))
+        path.close()
+
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 12
+        shadow.shadowOffset = CGSize(width: 0, height: -5)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.30)
+        shadow.set()
+
+        NSColor(calibratedWhite: 1, alpha: 0.98).setFill()
+        path.fill()
+        NSColor(calibratedWhite: 0.04, alpha: 0.96).setStroke()
+        path.lineWidth = 2.2
+        path.stroke()
+    }
+
+    private func drawTypingCaret(at point: CGPoint) {
+        let pulse = 0.76 + 0.24 * abs(sin(progress * .pi * 7.0))
+        let height: CGFloat = 44
+        let width: CGFloat = 4
+        let caretRect = CGRect(
+            x: point.x - width / 2,
+            y: point.y - height * 0.46,
+            width: width,
+            height: height
+        )
+
+        let halo = NSBezierPath(
+            roundedRect: caretRect.insetBy(dx: -10, dy: -6),
+            xRadius: 12,
+            yRadius: 12
+        )
+        NSColor(calibratedRed: 0.79, green: 0.74, blue: 0.60, alpha: 0.055 * pulse).setFill()
+        halo.fill()
+
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 6
+        shadow.shadowOffset = CGSize(width: 0, height: -2)
+        shadow.shadowColor = NSColor(calibratedRed: 0.66, green: 0.62, blue: 0.48, alpha: 0.14 * pulse)
+        shadow.set()
+
+        let caret = NSBezierPath(roundedRect: caretRect, xRadius: 2.5, yRadius: 2.5)
+        NSColor(calibratedRed: 0.92, green: 0.86, blue: 0.70, alpha: 0.76 * pulse).setFill()
+        caret.fill()
+
+        let capWidth: CGFloat = 20
+        let topCap = NSBezierPath(
+            roundedRect: CGRect(x: point.x - capWidth / 2, y: caretRect.maxY - 2, width: capWidth, height: 4),
+            xRadius: 2,
+            yRadius: 2
+        )
+        let bottomCap = NSBezierPath(
+            roundedRect: CGRect(x: point.x - capWidth / 2, y: caretRect.minY - 2, width: capWidth, height: 4),
+            xRadius: 2,
+            yRadius: 2
+        )
+        NSColor(calibratedRed: 0.92, green: 0.86, blue: 0.70, alpha: 0.36 * pulse).setFill()
+        topCap.fill()
+        bottomCap.fill()
+    }
+
+    private var showsClickFeedback: Bool {
+        guard keyLabel?.isEmpty != false, typingText?.isEmpty != false else {
+            return false
+        }
+        guard let label = labelOverride?.lowercased(), !label.isEmpty else {
+            return true
+        }
+        return label.contains("click") || label.contains("tap") || label.contains("press")
+    }
+
+    private var isTypingCue: Bool {
+        typingText?.isEmpty == false
+    }
+
+    private func cursorScale() -> CGFloat {
+        if isTypingCue {
+            return CGFloat(1.08 + sin(progress * .pi * 10.0) * 0.035)
+        }
+
+        let travelBounce = sin(.pi * progress * 2.4) * max(0, 1 - progress) * 0.075
+        let clickDistance = abs(progress - clickProgress)
+        let clickBounce = showsClickFeedback
+            ? max(0, 1 - clickDistance / 0.12) * 0.13
+            : 0
+        return CGFloat(1.08 + travelBounce + clickBounce)
+    }
+
+    private func drawActionPill(at point: CGPoint) {
+        let label: String
+        let accent: NSColor
+        if let labelOverride, !labelOverride.isEmpty {
+            label = labelOverride
+            accent = accentColor(for: labelOverride)
+        } else if progress < clickProgress - 0.08 {
+            label = "Move"
+            accent = accentColor(for: label)
+        } else if progress < clickProgress + 0.12 {
+            label = "Click"
+            accent = accentColor(for: label)
+        } else {
+            label = "Typing"
+            accent = accentColor(for: label)
+        }
+
+        let font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        let textSize = (label as NSString).size(withAttributes: [.font: font])
+        let pillRect = CGRect(
+            x: min(bounds.maxX - textSize.width - 46, point.x + 34),
+            y: max(bounds.minY + 18, point.y - 62),
+            width: textSize.width + 30,
+            height: 32
+        )
+
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 9
+        shadow.shadowOffset = CGSize(width: 0, height: -4)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.14)
+        shadow.set()
+
+        let path = NSBezierPath(roundedRect: pillRect, xRadius: 16, yRadius: 16)
+        NSColor(calibratedWhite: 0.06, alpha: 0.62).setFill()
+        path.fill()
+        accent.withAlphaComponent(0.34).setStroke()
+        path.lineWidth = 1.1
+        path.stroke()
+
+        accent.withAlphaComponent(0.58).setFill()
+        NSBezierPath(ovalIn: CGRect(x: pillRect.minX + 11, y: pillRect.midY - 4, width: 8, height: 8)).fill()
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.96),
+        ]
+        (label as NSString).draw(
+            in: CGRect(
+                x: pillRect.minX + 25,
+                y: pillRect.midY - textSize.height / 2,
+                width: textSize.width,
+                height: textSize.height
+            ),
+            withAttributes: attrs
+        )
+    }
+
+    private func drawKeyChordCue(at point: CGPoint) {
+        guard let keyLabel, !keyLabel.isEmpty else {
+            return
+        }
+        let alpha = cueAlpha()
+        guard alpha > 0 else {
+            return
+        }
+
+        let rect = anchoredRect(near: point, width: 292, height: 92, yOffset: 58)
+        drawOverlayPanel(rect: rect, alpha: alpha, accent: accentColor(for: "key"))
+
+        drawText(
+            text: "Key chord",
+            in: CGRect(x: rect.minX + 18, y: rect.maxY - 31, width: rect.width - 36, height: 18),
+            font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            color: NSColor(calibratedWhite: 1, alpha: 0.48 * alpha)
+        )
+        drawText(
+            text: keyLabel,
+            in: CGRect(x: rect.minX + 18, y: rect.minY + 19, width: rect.width - 36, height: 42),
+            font: NSFont.monospacedSystemFont(ofSize: 28, weight: .bold),
+            color: NSColor(calibratedWhite: 1, alpha: 0.90 * alpha),
+            alignment: .center
+        )
+    }
+
+    private func drawTypingCue(at point: CGPoint) {
+        guard let typingText, !typingText.isEmpty else {
+            return
+        }
+        let alpha = cueAlpha()
+        guard alpha > 0 else {
+            return
+        }
+
+        let rect = anchoredRect(near: point, width: 430, height: 86, yOffset: 58)
+        drawOverlayPanel(rect: rect, alpha: alpha, accent: accentColor(for: "typing"))
+
+        drawText(
+            text: "Typing",
+            in: CGRect(x: rect.minX + 18, y: rect.maxY - 30, width: rect.width - 36, height: 18),
+            font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            color: NSColor(calibratedRed: 0.88, green: 0.84, blue: 0.74, alpha: 0.50 * alpha)
+        )
+
+        let displayText = summarizeOverlayText(typingText)
+        drawText(
+            text: "\(displayText)|",
+            in: CGRect(x: rect.minX + 18, y: rect.minY + 20, width: rect.width - 36, height: 32),
+            font: NSFont.monospacedSystemFont(ofSize: 20, weight: .semibold),
+            color: NSColor(calibratedRed: 0.95, green: 0.92, blue: 0.84, alpha: 0.88 * alpha)
+        )
+    }
+
+    private func drawScreenStatusHUD() {
+        let label = currentActionLabel()
+        let alpha = cueAlpha()
+        guard alpha > 0 else {
+            return
+        }
+
+        let rect = CGRect(
+            x: bounds.maxX - 294,
+            y: bounds.maxY - 86,
+            width: 262,
+            height: statusDetail?.isEmpty == false ? 56 : 42
+        )
+        let accent = accentColor(for: label)
+
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 10
+        shadow.shadowOffset = CGSize(width: 0, height: -4)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.12 * alpha)
+        shadow.set()
+
+        let panel = NSBezierPath(roundedRect: rect, xRadius: 13, yRadius: 13)
+        NSColor(calibratedWhite: 0.045, alpha: 0.42 * alpha).setFill()
+        panel.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.055 * alpha).setStroke()
+        panel.lineWidth = 1
+        panel.stroke()
+
+        accent.withAlphaComponent(0.50 * alpha).setFill()
+        NSBezierPath(ovalIn: CGRect(x: rect.minX + 13, y: rect.midY - 4, width: 8, height: 8)).fill()
+
+        drawText(
+            text: "Action",
+            in: CGRect(x: rect.minX + 29, y: rect.maxY - 22, width: 62, height: 15),
+            font: NSFont.systemFont(ofSize: 10, weight: .medium),
+            color: NSColor(calibratedWhite: 1, alpha: 0.36 * alpha)
+        )
+        drawText(
+            text: label,
+            in: CGRect(x: rect.minX + 29, y: rect.maxY - 40, width: rect.width - 42, height: 18),
+            font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            color: NSColor(calibratedWhite: 1, alpha: 0.78 * alpha)
+        )
+
+        if let statusDetail, !statusDetail.isEmpty {
+            drawText(
+                text: statusDetail,
+                in: CGRect(x: rect.minX + 29, y: rect.minY + 8, width: rect.width - 42, height: 15),
+                font: NSFont.systemFont(ofSize: 10.5, weight: .regular),
+                color: NSColor(calibratedWhite: 1, alpha: 0.46 * alpha)
+            )
+        }
+
+        let trackRect = CGRect(x: rect.maxX - 76, y: rect.maxY - 16, width: 48, height: 2)
+        NSColor(calibratedWhite: 1, alpha: 0.08 * alpha).setFill()
+        NSBezierPath(roundedRect: trackRect, xRadius: 1, yRadius: 1).fill()
+        accent.withAlphaComponent(0.38 * alpha).setFill()
+        NSBezierPath(
+            roundedRect: CGRect(
+                x: trackRect.minX,
+                y: trackRect.minY,
+                width: trackRect.width * CGFloat(min(1, max(0, progress))),
+                height: trackRect.height
+            ),
+            xRadius: 1,
+            yRadius: 1
+        ).fill()
+    }
+
+    private func drawPreviewPanel() {
+        guard let previewImage else {
+            return
+        }
+        let alpha = cueAlpha()
+        guard alpha > 0 else {
+            return
+        }
+
+        let rect = CGRect(
+            x: bounds.maxX - 392,
+            y: bounds.maxY - 336,
+            width: 360,
+            height: 222
+        )
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 12
+        shadow.shadowOffset = CGSize(width: 0, height: -5)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.16 * alpha)
+        shadow.set()
+
+        let panel = NSBezierPath(roundedRect: rect, xRadius: 13, yRadius: 13)
+        NSColor(calibratedWhite: 0.045, alpha: 0.42 * alpha).setFill()
+        panel.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.055 * alpha).setStroke()
+        panel.lineWidth = 1
+        panel.stroke()
+
+        drawText(
+            text: "Preview",
+            in: CGRect(x: rect.minX + 14, y: rect.maxY - 25, width: rect.width - 28, height: 15),
+            font: NSFont.systemFont(ofSize: 10.5, weight: .semibold),
+            color: NSColor(calibratedWhite: 1, alpha: 0.48 * alpha)
+        )
+
+        let imageBounds = CGRect(x: rect.minX + 12, y: rect.minY + 12, width: rect.width - 24, height: rect.height - 46)
+        let imageSize = previewImage.size
+        guard imageSize.width > 0, imageSize.height > 0 else {
+            return
+        }
+        let scale = min(imageBounds.width / imageSize.width, imageBounds.height / imageSize.height)
+        let drawSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let imageRect = CGRect(
+            x: imageBounds.midX - drawSize.width / 2,
+            y: imageBounds.midY - drawSize.height / 2,
+            width: drawSize.width,
+            height: drawSize.height
+        )
+
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: imageBounds, xRadius: 9, yRadius: 9).addClip()
+        NSColor(calibratedWhite: 0, alpha: 0.20 * alpha).setFill()
+        NSBezierPath(rect: imageBounds).fill()
+        previewImage.draw(in: imageRect, from: .zero, operation: .sourceOver, fraction: 0.92 * alpha)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func currentActionLabel() -> String {
+        if let keyLabel, !keyLabel.isEmpty {
+            return keyLabel
+        }
+        if typingText?.isEmpty == false {
+            return "Typing"
+        }
+        if let labelOverride, !labelOverride.isEmpty {
+            return labelOverride
+        }
+        if progress < clickProgress - 0.08 {
+            return "Move"
+        }
+        if progress < clickProgress + 0.12 {
+            return "Click"
+        }
+        return "Typing"
+    }
+
+    private func drawTraceStrip() {
+        guard !traceLines.isEmpty else {
+            return
+        }
+        let alpha = cueAlpha()
+        guard alpha > 0 else {
+            return
+        }
+
+        let visibleLines = Array(traceLines.suffix(7))
+        let width: CGFloat = 360
+        let rowHeight: CGFloat = 20
+        let height = CGFloat(42 + visibleLines.count * Int(rowHeight))
+        let rect = CGRect(
+            x: bounds.maxX - width - 32,
+            y: bounds.maxY - (previewImage == nil ? 104 : 354) - height,
+            width: width,
+            height: height
+        )
+
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 10
+        shadow.shadowOffset = CGSize(width: 0, height: -4)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.12 * alpha)
+        shadow.set()
+
+        let panel = NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12)
+        NSColor(calibratedWhite: 0.045, alpha: 0.36 * alpha).setFill()
+        panel.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.045 * alpha).setStroke()
+        panel.lineWidth = 1
+        panel.stroke()
+
+        drawText(
+            text: traceTitle,
+            in: CGRect(x: rect.minX + 14, y: rect.maxY - 27, width: rect.width - 28, height: 15),
+            font: NSFont.systemFont(ofSize: 10.5, weight: .semibold),
+            color: NSColor(calibratedWhite: 1, alpha: 0.46 * alpha)
+        )
+
+        for (index, line) in visibleLines.enumerated() {
+            let parsed = parseTraceLine(line)
+            let y = rect.maxY - 49 - CGFloat(index) * rowHeight
+            let dotRect = CGRect(x: rect.minX + 15, y: y + 4, width: 7, height: 7)
+            accentColor(for: parsed.kind).withAlphaComponent(0.54 * alpha).setFill()
+            NSBezierPath(ovalIn: dotRect).fill()
+
+            drawText(
+                text: parsed.text,
+                in: CGRect(x: rect.minX + 30, y: y - 1, width: rect.width - 46, height: 16),
+                font: NSFont.systemFont(ofSize: 11, weight: index == visibleLines.count - 1 ? .semibold : .regular),
+                color: NSColor(calibratedWhite: 1, alpha: (index == visibleLines.count - 1 ? 0.72 : 0.48) * alpha)
+            )
+        }
+    }
+
+    private func parseTraceLine(_ line: String) -> (kind: String, text: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let separator = trimmed.firstIndex(of: "|") {
+            let kind = String(trimmed[..<separator])
+            let text = String(trimmed[trimmed.index(after: separator)...])
+            return (kind: kind, text: summarizeTraceText(text))
+        }
+        return (kind: trimmed, text: summarizeTraceText(trimmed))
+    }
+
+    private func summarizeTraceText(_ text: String) -> String {
+        let compact = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard compact.count > 52 else {
+            return compact
+        }
+        let index = compact.index(compact.startIndex, offsetBy: 49)
+        return "\(compact[..<index])..."
+    }
+
+    private func accentColor(for label: String) -> NSColor {
+        let lower = label.lowercased()
+        if lower.contains("observe") {
+            return NSColor(calibratedRed: 0.56, green: 0.61, blue: 0.76, alpha: 1)
+        }
+        if lower.contains("act") {
+            return NSColor(calibratedRed: 0.70, green: 0.61, blue: 0.47, alpha: 1)
+        }
+        if lower.contains("type") || lower.contains("typing") {
+            return NSColor(calibratedRed: 0.76, green: 0.69, blue: 0.51, alpha: 1)
+        }
+        if lower.contains("inspect") {
+            return NSColor(calibratedRed: 0.66, green: 0.57, blue: 0.78, alpha: 1)
+        }
+        if lower.contains("resolve") {
+            return NSColor(calibratedRed: 0.52, green: 0.69, blue: 0.66, alpha: 1)
+        }
+        if lower.contains("verify") {
+            return NSColor(calibratedRed: 0.58, green: 0.72, blue: 0.50, alpha: 1)
+        }
+        if lower.contains("open") {
+            return NSColor(calibratedRed: 0.72, green: 0.60, blue: 0.48, alpha: 1)
+        }
+        if lower.contains("click") || lower.contains("tap") || lower.contains("press") {
+            return NSColor(calibratedRed: 0.50, green: 0.64, blue: 0.73, alpha: 1)
+        }
+        if lower.contains("key") || lower.contains("command") {
+            return NSColor(calibratedRed: 0.58, green: 0.64, blue: 0.75, alpha: 1)
+        }
+        return NSColor(calibratedRed: 0.56, green: 0.63, blue: 0.69, alpha: 1)
+    }
+
+    private func cueAlpha() -> CGFloat {
+        let fadeIn = min(1, max(0, progress / 0.16))
+        let fadeOut = min(1, max(0, (1 - progress) / 0.18))
+        return CGFloat(min(fadeIn, fadeOut))
+    }
+
+    private func anchoredRect(near point: CGPoint, width: CGFloat, height: CGFloat, yOffset: CGFloat) -> CGRect {
+        let x = min(bounds.maxX - width - 24, max(bounds.minX + 24, point.x - width / 2))
+        let y = min(bounds.maxY - height - 24, max(bounds.minY + 24, point.y + yOffset))
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    private func drawOverlayPanel(rect: CGRect, alpha: CGFloat, accent: NSColor) {
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 10
+        shadow.shadowOffset = CGSize(width: 0, height: -7)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.14 * alpha)
+        shadow.set()
+
+        let path = NSBezierPath(roundedRect: rect, xRadius: 14, yRadius: 14)
+        NSColor(calibratedWhite: 0.05, alpha: 0.64 * alpha).setFill()
+        path.fill()
+        accent.withAlphaComponent(0.30 * alpha).setStroke()
+        path.lineWidth = 1.1
+        path.stroke()
+    }
+
+    private func summarizeOverlayText(_ text: String) -> String {
+        let compact = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard compact.count > 34 else {
+            return compact
+        }
+        let index = compact.index(compact.startIndex, offsetBy: 31)
+        return "\(compact[..<index])..."
+    }
+
+    private func drawText(
+        text: String,
+        in rect: CGRect,
+        font: NSFont,
+        color: NSColor,
+        alignment: NSTextAlignment = .left
+    ) {
+        let style = NSMutableParagraphStyle()
+        style.alignment = alignment
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: style,
+        ]
+        text.draw(in: rect, withAttributes: attrs)
+    }
+
+    private func playfulEase(_ value: Double) -> Double {
+        let clipped = min(1, max(0, value))
+        let shifted = clipped - 1
+        return 1 + 2.18 * shifted * shifted * shifted + 1.18 * shifted * shifted
+    }
+}
+
+@MainActor
 final class StageOverlayController: NSObject {
     private let stateFile: String
     private let stopFile: String
@@ -1953,6 +3147,7 @@ func terminateRunningActionApps(timeout: TimeInterval = 2.5) -> Bool {
     return NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
 }
 
+@MainActor
 func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWriter, logger: DebugLogger) async throws {
     let agentBridge = ActionAgentCommandBridge()
     switch command {
@@ -1964,6 +3159,10 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         throw ActionHostError.unsupportedOS("webkit-smoke should be started via runUICommand")
     case .stageOverlay:
         throw ActionHostError.unsupportedOS("stage-overlay should be started via runUICommand")
+    case .demoCursorOverlay:
+        throw ActionHostError.unsupportedOS("demo-cursor-overlay should be started via runUICommand")
+    case .terminalSession:
+        throw ActionHostError.unsupportedOS("terminal-session should be started via runUICommand")
     case .guidedCalculatorDemo:
         let runner = GuidedCaptureSessionRunner(writer: writer, logger: logger, options: options)
         try await runner.run()
@@ -1982,8 +3181,10 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         try writer.write(snapshot(promptAccessibility: true, requestScreenRecordingPermission: true))
     case .openAccessibilitySettings:
         openSettingsPane(anchor: "Privacy_Accessibility")
+        try writer.write(ActionHostResponse(status: "opened", outputPath: nil, detail: "accessibility"))
     case .openScreenRecordingSettings:
         openSettingsPane(anchor: "Privacy_ScreenCapture")
+        try writer.write(ActionHostResponse(status: "opened", outputPath: nil, detail: "screen-recording"))
     case .currentSurface:
         try writer.write(try currentSurface())
     case .supervisionOverlay:
@@ -2005,7 +3206,6 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         let bundleId = try options.required("bundle-id")
         let outputPath = try options.required("output")
         let finishedSignalPath = resolvedFinishedSignalPath(from: options)
-        try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
         var params: [String: String] = [
             "bundleId": bundleId,
             "output": outputPath,
@@ -2021,6 +3221,13 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         if !response.ok {
             throw ActionHostError.captureFailed(response.error ?? "Failed to start app-window recording")
         }
+        try writer.write(
+            ActionHostResponse(
+                status: response.result?["status"] ?? "recording",
+                outputPath: response.result?["outputPath"] ?? outputPath,
+                detail: response.result?["detail"]
+            )
+        )
         try waitForFinishedSignal(at: finishedSignalPath)
     case .recordAppWindowLocal:
         guard #available(macOS 15.0, *) else {
@@ -2044,7 +3251,6 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         let outputPath = try options.required("output")
         let rect = try rectFromOptions(options)
         let finishedSignalPath = resolvedFinishedSignalPath(from: options)
-        try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
         var params: [String: String] = [
             "output": outputPath,
             "finishedFile": finishedSignalPath,
@@ -2065,6 +3271,13 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         if !response.ok {
             throw ActionHostError.captureFailed(response.error ?? "Failed to start region recording")
         }
+        try writer.write(
+            ActionHostResponse(
+                status: response.result?["status"] ?? "recording",
+                outputPath: response.result?["outputPath"] ?? outputPath,
+                detail: response.result?["detail"]
+            )
+        )
         try waitForFinishedSignal(at: finishedSignalPath)
     case .recordRegionLocal:
         guard #available(macOS 15.0, *) else {
@@ -2184,6 +3397,12 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         let delayMs = Int(options.double("delay-ms", default: 0))
         try postText(text, delayMs: delayMs > 0 ? delayMs : nil)
         try writer.write(ActionHostResponse(status: "typed", outputPath: nil, detail: text))
+    case .typeAppText:
+        let bundleId = try options.required("bundle-id")
+        let text = try options.required("text")
+        let delayMs = Int(options.double("delay-ms", default: 0))
+        try postTextToApp(bundleId: bundleId, text: text, delayMs: delayMs > 0 ? delayMs : nil)
+        try writer.write(ActionHostResponse(status: "typed-app-text", outputPath: nil, detail: "\(bundleId) \(text)"))
     case .pressKey:
         let key = try options.required("key")
         let modifiers = options.options["modifiers"]?
@@ -2193,6 +3412,16 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         try postKeyPress(key, modifiers: modifiers)
         let detail = modifiers.isEmpty ? key : "\(modifiers.joined(separator: "+"))+\(key)"
         try writer.write(ActionHostResponse(status: "pressed", outputPath: nil, detail: detail))
+    case .pressAppKey:
+        let bundleId = try options.required("bundle-id")
+        let key = try options.required("key")
+        let modifiers = options.options["modifiers"]?
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty } ?? []
+        try postKeyPressToApp(bundleId: bundleId, key: key, modifiers: modifiers)
+        let detail = modifiers.isEmpty ? "\(bundleId) \(key)" : "\(bundleId) \(modifiers.joined(separator: "+"))+\(key)"
+        try writer.write(ActionHostResponse(status: "pressed-app-key", outputPath: nil, detail: detail))
     case .clickPoint:
         let x = options.double("x", default: .nan)
         let y = options.double("y", default: .nan)
@@ -2222,6 +3451,90 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             try ActionNativeAutomation.drag(from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), durationMs: durationMs)
             try writer.write(ActionHostResponse(status: "dragged", outputPath: nil, detail: "\(Int(fromX)),\(Int(fromY))->\(Int(toX)),\(Int(toY))"))
         }
+    case .pressAccessibilityElement:
+        let bundleId = try options.required("bundle-id")
+        let label = try options.required("label")
+        let role = options.options["role"]
+        let match = try ActionNativeAutomation.pressAccessibilityElement(
+            bundleId: bundleId,
+            label: label,
+            role: role
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: "pressed",
+                outputPath: nil,
+                detail: "\(bundleId) \(match.role) \(label)"
+            )
+        )
+    case .performAccessibilityAction:
+        let bundleId = try options.required("bundle-id")
+        let label = try options.required("label")
+        let action = try options.required("action")
+        let role = options.options["role"]
+        let match = try ActionNativeAutomation.performAccessibilityAction(
+            bundleId: bundleId,
+            label: label,
+            action: action,
+            role: role
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: "performed",
+                outputPath: nil,
+                detail: "\(bundleId) \(match.role) \(label) \(action)"
+            )
+        )
+    case .setAccessibilityValue:
+        let bundleId = try options.required("bundle-id")
+        let label = try options.required("label")
+        let value = try options.required("value")
+        let role = options.options["role"]
+        let match = try ActionNativeAutomation.setAccessibilityValue(
+            bundleId: bundleId,
+            label: label,
+            role: role,
+            value: value
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: "value-set",
+                outputPath: nil,
+                detail: "\(bundleId) \(match.role) \(label)"
+            )
+        )
+    case .setFocusedAccessibilityValue:
+        let bundleId = try options.required("bundle-id")
+        let value = try options.required("value")
+        let role = options.options["role"]
+        let match = try ActionNativeAutomation.setFocusedAccessibilityValue(
+            bundleId: bundleId,
+            role: role,
+            value: value
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: "focused-value-set",
+                outputPath: nil,
+                detail: "\(bundleId) \(match.role)"
+            )
+        )
+    case .setAccessibilityRoleValue:
+        let bundleId = try options.required("bundle-id")
+        let role = try options.required("role")
+        let value = try options.required("value")
+        let match = try ActionNativeAutomation.setAccessibilityRoleValue(
+            bundleId: bundleId,
+            role: role,
+            value: value
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: "role-value-set",
+                outputPath: nil,
+                detail: "\(bundleId) \(match.role)"
+            )
+        )
     case .clickCalculatorButton:
         let button = try options.required("button")
         try clickCalculatorButton(label: button)
@@ -2358,6 +3671,81 @@ struct ActionHostMain {
                     replyFile: replyFile,
                     debugLogPath: debugLogPath,
                     controlFile: controlFile
+                )
+                do {
+                    try controller.run()
+                } catch {
+                    FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                    Darwin.exit(1)
+                }
+            }
+            return true
+        case .demoCursorOverlay:
+            let writer = ResponseWriter(replyFile: options.options["reply-file"])
+            let durationMs = options.double("duration-ms", default: 1700)
+            let startX = options.double("start-x", default: .nan)
+            let startY = options.double("start-y", default: .nan)
+            let endX = options.double("end-x", default: .nan)
+            let endY = options.double("end-y", default: .nan)
+            let clickProgress = options.double("click-progress", default: 0.68)
+            let labelOverride = options.options["label"]
+            let statusDetail = options.options["status-detail"]
+            let keyLabel = options.options["key-label"]
+            let typingText = options.options["typing-text"]
+            let typingSoundMode = options.options["typing-sound"]?.lowercased() ?? "actual"
+            let playsTimedTypingSound = typingSoundMode == "timed"
+            let statusOnly = ["1", "true", "yes"].contains(options.options["status-only"]?.lowercased() ?? "")
+            let traceFile = options.options["trace-file"]
+            let traceTitle = options.options["trace-title"] ?? "Action trace"
+            let previewImagePath = options.options["preview-image"]
+            let startPoint = startX.isFinite && startY.isFinite
+                ? CGPoint(x: startX, y: startY)
+                : nil
+            let endPoint = endX.isFinite && endY.isFinite
+                ? CGPoint(x: endX, y: endY)
+                : nil
+            MainActor.assumeIsolated {
+                let controller = DemoCursorOverlayController(
+                    writer: writer,
+                    durationMs: durationMs,
+                    startPoint: startPoint,
+                    endPoint: endPoint,
+                    clickProgress: clickProgress,
+                    labelOverride: labelOverride,
+                    statusDetail: statusDetail,
+                    keyLabel: keyLabel,
+                    typingText: typingText,
+                    playsTimedTypingSound: playsTimedTypingSound,
+                    statusOnly: statusOnly,
+                    traceFile: traceFile,
+                    traceTitle: traceTitle,
+                    previewImagePath: previewImagePath
+                )
+                do {
+                    try controller.run()
+                } catch {
+                    FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                    Darwin.exit(1)
+                }
+            }
+            return true
+        case .terminalSession:
+            let writer = ResponseWriter(replyFile: options.options["reply-file"])
+            let controlFile = options.options["control-file"]
+                ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("action-terminal-\(UUID().uuidString).controls").path
+            let stopFile = options.options["stop-file"]
+            let shellPath = options.options["shell"] ?? "/bin/sh"
+            let workingDirectory = options.options["cwd"]
+            let homeDirectory = options.options["home"]
+                ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("action-terminal-home", isDirectory: true).path
+            MainActor.assumeIsolated {
+                let controller = ActionTerminalSessionController(
+                    writer: writer,
+                    controlFile: controlFile,
+                    stopFile: stopFile,
+                    shellPath: shellPath,
+                    workingDirectory: workingDirectory,
+                    homeDirectory: homeDirectory
                 )
                 do {
                     try controller.run()

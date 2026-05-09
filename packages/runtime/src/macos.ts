@@ -581,12 +581,13 @@ export class MacOSCommandEngine implements CaptureEngine {
   }
 
   async resolveTarget(query: TargetQuery): Promise<ResolvedTarget> {
+    const surfaceId = query.surfaceId ?? this.focusedSurfaceId;
     return {
       id: query.semanticId ?? query.text ?? "target",
       mode: query.point ? "coordinate" : "semantic",
       confidence: 0.92,
       label: query.semanticId ?? query.text ?? "Resolved Target",
-      surfaceId: query.surfaceId,
+      surfaceId,
     };
   }
 
@@ -594,6 +595,13 @@ export class MacOSCommandEngine implements CaptureEngine {
     await executeInteractionAction(action, target, {
       runHost: this.runHost.bind(this),
       resolveCalculatorButton: (query) => calculatorButtonName(query),
+      resolveBundleId: (surfaceId) => {
+        const resolvedSurfaceId = surfaceId ?? this.focusedSurfaceId;
+        if (!resolvedSurfaceId) {
+          return undefined;
+        }
+        return this.surfaces.get(resolvedSurfaceId)?.bundleId;
+      },
     });
   }
 

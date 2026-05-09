@@ -57,9 +57,9 @@ This direction matches the repo's existing split well:
 
 The existing design already points this way:
 
-- `observe` is a first-class tool family in [packages/mcp/src/index.ts](/Users/arach/dev/action/packages/mcp/src/index.ts)
+- `observe` is a first-class tool family in [packages/mcp/src/index.ts](packages/mcp/src/index.ts)
 - the architecture document already centers `observe`, `resolve`, and `act`
-- there are already native inspection-style commands such as [ActionHostMain.swift](/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift#L2115)
+- there are already native inspection-style commands such as [ActionHostMain.swift](native/engine/Sources/ActionHostMain.swift#L2115)
 
 ## New Product Primitive
 
@@ -238,4 +238,4 @@ The value of `action` is that it can:
 5. add optional “act on finding” follow-up commands
 
 For the precise implementation checklist, see
-[RUNTIME_BUILD_CHECKLIST.md](/Users/arach/dev/action/docs/RUNTIME_BUILD_CHECKLIST.md).
+[RUNTIME_BUILD_CHECKLIST.md](docs/RUNTIME_BUILD_CHECKLIST.md).

@@ -44,9 +44,9 @@ For a region recording request:
 
 Core files:
 
-- [ActionRecordingProbeLauncher.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionRecordingProbeLauncher.swift)
-- [RecordingProbeAppRunner.swift](/Users/arach/dev/action/native/engine/Sources/RecordingProbeAppRunner.swift)
-- [ActionHostMain.swift](/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift)
+- [ActionRecordingProbeLauncher.swift](native/engine/CoreSources/ActionRecordingProbeLauncher.swift)
+- [RecordingProbeAppRunner.swift](native/engine/Sources/RecordingProbeAppRunner.swift)
+- [ActionHostMain.swift](native/engine/Sources/ActionHostMain.swift)
 
 ## Testing Recording
 

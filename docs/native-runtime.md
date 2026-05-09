@@ -20,7 +20,7 @@ Owns:
 
 Main file:
 
-- [ActionHostMain.swift](/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift)
+- [ActionHostMain.swift](native/engine/Sources/ActionHostMain.swift)
 
 ## Local Agent Runtime
 
@@ -33,9 +33,9 @@ Owns:
 
 Main files:
 
-- [ActionAgentRuntime.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentRuntime.swift)
-- [ActionAgentClient.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentClient.swift)
-- [ActionAgentCommandBridge.swift](/Users/arach/dev/action/native/engine/Sources/ActionAgentCommandBridge.swift)
+- [ActionAgentRuntime.swift](native/engine/CoreSources/ActionAgentRuntime.swift)
+- [ActionAgentClient.swift](native/engine/CoreSources/ActionAgentClient.swift)
+- [ActionAgentCommandBridge.swift](native/engine/Sources/ActionAgentCommandBridge.swift)
 
 ## Why This Exists
 
@@ -86,7 +86,7 @@ Keep these rules intact:
 
 Useful native scripts live in:
 
-- [native/engine/scripts](/Users/arach/dev/action/native/engine/scripts)
+- [native/engine/scripts](native/engine/scripts)
 
 The most important ones right now are:
 
