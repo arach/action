@@ -10,6 +10,11 @@ on:
         description: 'Release version, for example 0.1.0'
         required: true
         type: string
+      publish_release:
+        description: 'Create/update the vX.Y.Z tag and public GitHub Release after the DMG verifies'
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -52,8 +57,10 @@ jobs:
 
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
+            publish_release="true"
           else
             version="${{ inputs.version }}"
+            publish_release="${{ inputs.publish_release }}"
           fi
 
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -61,12 +68,41 @@ jobs:
             exit 1
           fi
 
+          if [[ "$publish_release" != "true" && "$publish_release" != "false" ]]; then
+            echo "Invalid publish_release value: $publish_release" >&2
+            exit 1
+          fi
+
           build_number="${GITHUB_RUN_NUMBER:-1}"
+          release_tag="v$version"
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "publish_release=$publish_release" >> "$GITHUB_OUTPUT"
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
+          echo "PUBLISH_RELEASE=$publish_release" >> "$GITHUB_ENV"
+
+      - name: Check release tag
+        if: ${{ steps.version.outputs.publish_release == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --tags origin
+
+          target_sha="$(git rev-parse HEAD)"
+          existing_sha="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG^{}" | awk '{print $1; exit}')"
+          if [[ -z "$existing_sha" ]]; then
+            existing_sha="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" | awk '{print $1; exit}')"
+          fi
+
+          if [[ -n "$existing_sha" && "$existing_sha" != "$target_sha" ]]; then
+            echo "Release tag $RELEASE_TAG already exists at $existing_sha, not $target_sha." >&2
+            exit 1
+          fi
 
       - name: Install dependencies
         shell: bash
@@ -153,15 +189,36 @@ jobs:
           path: Installer/Action-for-Mac.dmg
           if-no-files-found: error
 
+      - name: Create release tag
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.version.outputs.publish_release == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target_sha="$(git rev-parse HEAD)"
+          existing_sha="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG^{}" | awk '{print $1; exit}')"
+          if [[ -z "$existing_sha" ]]; then
+            existing_sha="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" | awk '{print $1; exit}')"
+          fi
+
+          if [[ -n "$existing_sha" ]]; then
+            echo "Release tag already exists at $existing_sha"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$RELEASE_TAG" -m "Action $VERSION" "$target_sha"
+          git push origin "refs/tags/$RELEASE_TAG"
+
       - name: Publish GitHub release
-        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+        if: ${{ steps.version.outputs.publish_release == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
 
-          release_tag="v$VERSION"
           dmg_path="$RUNNER_TEMP/Action.dmg"
           versioned_dmg_path="$RUNNER_TEMP/Action-$VERSION.dmg"
           notes_path="$RUNNER_TEMP/release-notes.md"
@@ -174,13 +231,13 @@ jobs:
           Download and install Action for Mac.
           EOF
 
-          if gh release view "$release_tag" >/dev/null 2>&1; then
-            gh release upload "$release_tag" "$dmg_path" "$versioned_dmg_path" --clobber
-            gh release edit "$release_tag" \
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$dmg_path" "$versioned_dmg_path" --clobber
+            gh release edit "$RELEASE_TAG" \
               --title "Action $VERSION" \
               --notes-file "$notes_path"
           else
-            gh release create "$release_tag" "$dmg_path" "$versioned_dmg_path" \
+            gh release create "$RELEASE_TAG" "$dmg_path" "$versioned_dmg_path" \
               --title "Action $VERSION" \
               --notes-file "$notes_path"
           fi

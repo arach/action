@@ -17,6 +17,7 @@
     "action-dev": "bun packages/cli/src/action-dev.ts",
     "mcp": "bun packages/mcp/src/index.ts",
     "release:tag": "scripts/tag-release",
+    "release:ship": "scripts/ship-release",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "docs:generate": "dewey generate",
     "docs:agent": "dewey agent",
