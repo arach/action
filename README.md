@@ -98,6 +98,17 @@ The output is:
 Installer/Action-for-Mac.dmg
 ```
 
+Ship a public GitHub release from `main`:
+
+```bash
+bun run release:ship -- 0.1.0 --watch
+```
+
+The release workflow builds, signs, notarizes, verifies, and uploads the DMG. On
+the publishing path it creates the `vX.Y.Z` tag only after verification passes,
+then creates or updates the GitHub Release with generic and versioned DMG assets.
+For an artifact-only run, add `--no-publish`.
+
 Users install it by opening the DMG, dragging `Action.app` to Applications, then
 granting Accessibility and Screen Recording permissions on first launch.
 
