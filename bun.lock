@@ -13,6 +13,10 @@
         "typescript": "^5.7.3",
       },
     },
+    "packages/chrome-companion": {
+      "name": "@action/chrome-companion",
+      "version": "0.0.0",
+    },
     "packages/cli": {
       "name": "@action/cli",
       "version": "0.0.0",
@@ -47,6 +51,8 @@
     },
   },
   "packages": {
+    "@action/chrome-companion": ["@action/chrome-companion@workspace:packages/chrome-companion"],
+
     "@action/cli": ["@action/cli@workspace:packages/cli"],
 
     "@action/compiler": ["@action/compiler@workspace:packages/compiler"],
