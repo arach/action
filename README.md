@@ -1,6 +1,6 @@
 # action
 
-Native-first macOS capture and demo workstation.
+**[arach.github.io/action](https://arach.github.io/action/)** · Native-first macOS capture and demo workstation.
 
 `action` is an AppKit-based macOS app for staging flows, recording them, reviewing the output, and handing the result to an agent or post-production toolchain.
 
