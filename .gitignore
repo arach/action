@@ -6,3 +6,7 @@ coverage
 artifacts
 .build
 native/dist
+Installer/staging
+Installer/releases
+Installer/*.dmg
+Installer/*-temp.dmg

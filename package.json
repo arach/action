@@ -29,6 +29,7 @@
     "hud": "bun packages/hud/src/server.ts",
     "native:dev": "bun packages/cli/src/action-dev.ts",
     "native:app:build": "native/engine/scripts/build-app.sh",
+    "native:dmg:build": "Installer/build.sh",
     "native:doctor": "native/engine/scripts/doctor.sh",
     "native:verify": "native/engine/scripts/verify-app.sh",
     "native:permissions:status": "native/engine/scripts/run-app-host.sh status",

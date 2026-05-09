@@ -75,6 +75,32 @@ Launch the app:
 bun run action-dev -- launch
 ```
 
+## Distribution
+
+Action uses the same installer shape as Talkie: an `Installer/` directory with a
+single DMG builder that creates a drag-to-Applications disk image.
+
+Build a signed and notarized DMG:
+
+```bash
+bun run native:dmg:build
+```
+
+For local packaging without Apple notarization:
+
+```bash
+SKIP_NOTARIZE=1 bun run native:dmg:build
+```
+
+The output is:
+
+```text
+Installer/Action-for-Mac.dmg
+```
+
+Users install it by opening the DMG, dragging `Action.app` to Applications, then
+granting Accessibility and Screen Recording permissions on first launch.
+
 ## Developer CLI
 
 For the tightest local loop, use the repo-local dev CLI:
