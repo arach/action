@@ -4,8 +4,11 @@ Minimal Manifest V3 companion extension for Action browser-surface experiments.
 
 It contains:
 
-- a service worker that relays `action.*` messages to the active tab
-- a content script with a small DOM observer/actor stub
+- a service worker that can route `action.*` messages to a tab selected by URL
+- a localhost WebSocket bridge for Action runtime experiments
+- a bridge extension page for a long-lived connection in Action-owned profiles
+- a content script with DOM observe/resolve/act helpers
+- Midjourney Create helpers for prompt submission and result extraction
 - self-contained Bun scripts for typechecking and building the unpacked extension
 
 ## Commands
@@ -13,20 +16,127 @@ It contains:
 ```bash
 bun run typecheck
 bun run build
+bun run install:dev
+bun run launch:profile
+bun run bridge
+bun run health
 ```
 
 The build output is written to `dist/` and can be loaded in Chrome as an unpacked
 extension.
 
+`bun run install:dev` builds the extension, opens `chrome://extensions`, and
+reveals `dist/` in Finder. Chrome still requires the user to approve the unpacked
+extension in the UI for their real profile.
+
+The local bridge listens on `http://127.0.0.1:4321`. When the extension is
+installed, its service worker connects to `ws://127.0.0.1:4321/chrome-companion`.
+`bun run health` exits successfully only when that bridge connection is live.
+
+## Profile Policy
+
+Action should run Chrome browser-surface work in an Action-owned Chrome profile
+by default. This keeps extension state, tabs, cookies, cache, and other browser
+settings deterministic and avoids mutating the user's daily Chrome profile.
+
+For authenticated tools, use a named persistent Action profile and let the user
+sign in there once. Attaching to the user's existing Chrome profile should be an
+explicit mode.
+
+Create and prepare a named profile with:
+
+```bash
+bun run profile -- setup mira
+```
+
+This builds the extension, creates the profile directory, opens that profile to
+`chrome://extensions`, and reveals the extension `dist/` folder in Finder.
+`mira` is the example Action browser identity: a friendly, persistent Chrome
+profile for observing and acting in web tools without touching the daily browser.
+
+Launch it later with:
+
+```bash
+bun run profile -- launch mira
+```
+
+Check the repeatable setup state with:
+
+```bash
+bun run profile -- check mira
+```
+
+If `check` reports a companion extension id, open the persistent bridge page:
+
+```bash
+bun run profile -- bridge mira --extension-id <id-from-check>
+```
+
+Profiles live under:
+
+`~/Library/Application Support/Action/ChromeProfiles/default`
+
+Named profiles use sibling directories, for example:
+
+`~/Library/Application Support/Action/ChromeProfiles/mira`
+
+Override the root with `ACTION_CHROME_COMPANION_PROFILE_ROOT` or a single profile
+with `ACTION_CHROME_COMPANION_PROFILE_DIR`.
+
+Chrome Stable may ignore command-line `--load-extension`, so the reliable setup
+is:
+
+1. Launch the Action-owned profile.
+2. Load `dist/` as an unpacked extension once in that profile.
+3. Click the extension reload button after rebuilding `dist/`.
+4. Keep using that profile for Action browser-surface work.
+
+When the extension is installed, it opens `bridge.html` to keep the localhost
+bridge alive. If you need the launch script to open that page explicitly, pass
+`ACTION_CHROME_COMPANION_EXTENSION_ID`.
+
+## Surface Routing
+
+Messages can include a `surface` target so Action does not depend on whichever
+tab is frontmost:
+
+```json
+{
+  "method": "midjourney.submitPrompt",
+  "params": {
+    "surface": {
+      "urlMatches": ["https://www.midjourney.com/imagine*"],
+      "createUrl": "https://www.midjourney.com/imagine",
+      "activate": false
+    },
+    "prompt": "Action app logo, abstract A cursor mark, no text"
+  }
+}
+```
+
+Send it through the bridge:
+
+```bash
+curl -s http://127.0.0.1:4321/rpc \
+  -H 'content-type: application/json' \
+  -d @message.json
+```
+
 ## Message API
 
 Send messages to the extension service worker with one of these methods:
 
+- `action.tabs.query`
+- `action.tabs.ensure`
 - `action.observe`
 - `action.resolve`
 - `action.setValue`
 - `action.click`
 - `action.rect`
+- `midjourney.observe`
+- `midjourney.setPrompt`
+- `midjourney.submitPrompt`
+- `midjourney.readResults`
 
 Example:
 

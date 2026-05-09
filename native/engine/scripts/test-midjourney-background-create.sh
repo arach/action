@@ -12,6 +12,10 @@ CHROME_BUNDLE_ID="${ACTION_CHROME_BG_BUNDLE_ID:-com.google.Chrome}"
 TARGET_URL="${ACTION_MIDJOURNEY_URL:-https://www.midjourney.com/imagine}"
 PROMPT="${ACTION_MIDJOURNEY_PROMPT:-a polished product demo frame of a tiny translucent cursor arranging warm cream mechanical keyboard switches on a moonlit desk, cinematic macro lighting, soft editorial composition}"
 MOONDREAM_PYTHON="${ACTION_MOONDREAM_PYTHON:-/Users/art/dev/moondream-local-poc/.venv/bin/python}"
+SHOW_OVERLAY="${ACTION_MIDJOURNEY_SHOW_OVERLAY:-0}"
+USE_COMPANION="${ACTION_MIDJOURNEY_USE_COMPANION:-auto}"
+COMPANION_RPC_URL="${ACTION_CHROME_COMPANION_RPC_URL:-http://127.0.0.1:4321/rpc}"
+COMPANION_HEALTH_URL="${ACTION_CHROME_COMPANION_HEALTH_URL:-http://127.0.0.1:4321/health}"
 
 if [[ ! -x "$APP_EXECUTABLE" ]]; then
   "$SCRIPT_DIR/build-app.sh" >/dev/stderr
@@ -42,6 +46,10 @@ log_event() {
 }
 
 overlay() {
+  if [[ "$SHOW_OVERLAY" != "1" ]]; then
+    return 0
+  fi
+
   local label="$1"
   local duration_ms="$2"
   local detail="$3"
@@ -57,6 +65,10 @@ overlay() {
 }
 
 start_action_overlay() {
+  if [[ "$SHOW_OVERLAY" != "1" ]]; then
+    return 0
+  fi
+
   local label="$1"
   local duration_ms="$2"
   local detail="$3"
@@ -89,6 +101,42 @@ snapshot_chrome() {
     --max-depth 18 \
     --max-nodes 6000 > "$path"
   printf '%s\n' "$path"
+}
+
+activate_bundle() {
+  local bundle_id="$1"
+  [[ -n "$bundle_id" ]] || return 0
+  "$APP_EXECUTABLE" activate-app --bundle-id "$bundle_id" >/dev/null 2>&1 || true
+}
+
+restore_frontmost() {
+  if [[ -n "${FRONT_BEFORE:-}" && "$FRONT_BEFORE" != "$CHROME_BUNDLE_ID" ]]; then
+    activate_bundle "$FRONT_BEFORE"
+    sleep 0.35
+  fi
+}
+
+select_midjourney_tab() {
+  /usr/bin/osascript "$TARGET_URL" <<'APPLESCRIPT'
+on run argv
+  set targetUrl to item 1 of argv
+  tell application "Google Chrome"
+    repeat with windowIndex from 1 to count of windows
+      set candidateWindow to window windowIndex
+      repeat with tabIndex from 1 to count of tabs of candidateWindow
+        set candidateTab to tab tabIndex of candidateWindow
+        set candidateUrl to URL of candidateTab
+        if candidateUrl starts with targetUrl or candidateUrl contains "midjourney.com/imagine" then
+          set active tab index of candidateWindow to tabIndex
+          set index of candidateWindow to 1
+          return candidateUrl
+        end if
+      end repeat
+    end repeat
+  end tell
+  error "No Midjourney Create tab found"
+end run
+APPLESCRIPT
 }
 
 summarize_snapshot() {
@@ -191,18 +239,138 @@ verify_with_moondream() {
   "$MOONDREAM_PYTHON" "$SCRIPT_DIR/moondream-verify-screenshot.py" "$image_path" "$PROMPT" > "$output_path"
 }
 
+companion_available() {
+  "$BUN_BIN" - "$COMPANION_HEALTH_URL" <<'BUN' >/dev/null
+const healthURL = process.argv[2];
+const controller = new AbortController();
+const timeout = setTimeout(() => controller.abort(), 900);
+try {
+  const response = await fetch(healthURL, { signal: controller.signal });
+  const json = await response.json();
+  process.exit(json.connected ? 0 : 1);
+} catch {
+  process.exit(1);
+} finally {
+  clearTimeout(timeout);
+}
+BUN
+}
+
+companion_rpc() {
+  local method="$1"
+  local output_path="$2"
+  "$BUN_BIN" - "$COMPANION_RPC_URL" "$method" "$PROMPT" > "$output_path" <<'BUN'
+const [rpcURL, method, prompt] = process.argv.slice(2);
+const message = {
+  method,
+  params: {
+    surface: {
+      urlMatches: ["https://www.midjourney.com/imagine*"],
+      createUrl: "https://www.midjourney.com/imagine",
+      activate: false,
+    },
+  },
+};
+
+if (method === "midjourney.setPrompt" || method === "midjourney.submitPrompt") {
+  message.params.prompt = prompt;
+}
+
+const response = await fetch(rpcURL, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(message),
+});
+const text = await response.text();
+process.stdout.write(text);
+let parsed;
+try {
+  parsed = JSON.parse(text);
+} catch {
+  process.exit(1);
+}
+process.exit(parsed.ok ? 0 : 1);
+BUN
+}
+
+companion_result_count() {
+  local path="$1"
+  "$BUN_BIN" - "$path" <<'BUN'
+const fs = require("fs");
+const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const result = response.result;
+if (Array.isArray(result)) {
+  console.log(result.length);
+} else if (Array.isArray(result?.results)) {
+  console.log(result.results.length);
+} else {
+  console.log(0);
+}
+BUN
+}
+
+run_companion_flow() {
+  log_event "policy" "using Action Chrome Companion bridge at $COMPANION_RPC_URL"
+  local before_json="$OUTPUT_DIR/companion-before.json"
+  local submit_json="$OUTPUT_DIR/companion-submit.json"
+  local poll_json="$OUTPUT_DIR/companion-poll.json"
+
+  companion_rpc "midjourney.readResults" "$before_json" || return 1
+  local before_count
+  before_count=$(companion_result_count "$before_json")
+
+  companion_rpc "midjourney.submitPrompt" "$submit_json" || return 1
+  log_event "act" "submitted prompt through Chrome Companion DOM bridge"
+
+  for attempt in {1..24}; do
+    sleep 6
+    companion_rpc "midjourney.observe" "$poll_json" || return 1
+    local count
+    count=$(companion_result_count "$poll_json")
+    log_event "observe" "companion poll $attempt: results=$count before=$before_count"
+    if [[ "$count" -gt "$before_count" ]]; then
+      break
+    fi
+  done
+
+  PREVIEW_IMAGE="$OUTPUT_DIR/midjourney-window.png"
+  "$APP_EXECUTABLE" screenshot-app-window \
+    --bundle-id "$CHROME_BUNDLE_ID" \
+    --output "$PREVIEW_IMAGE" >/dev/null
+
+  log_event "done" "captured current Midjourney Create page"
+  printf 'Trace: %s\n' "$TRACE_FILE"
+  printf 'Artifacts: %s\n' "$OUTPUT_DIR"
+  printf 'Preview: %s\n' "$PREVIEW_IMAGE"
+  printf 'Companion: %s\n' "$poll_json"
+}
+
 navigate_background() {
-  log_event "act" "navigate Chrome to Midjourney Create without activation"
+  log_event "act" "open Midjourney Create without activation"
+  open -gj -a "Google Chrome" "$TARGET_URL" >/dev/null 2>&1 || true
+  sleep 2
+  select_midjourney_tab >/dev/null
+  restore_frontmost
+}
+
+ensure_midjourney_surface() {
+  if select_midjourney_tab >/dev/null 2>&1; then
+    log_event "resolve" "selected existing Midjourney Create tab"
+    restore_frontmost
+    return 0
+  fi
+
+  navigate_background
+}
+
+submit_prompt_background() {
+  log_event "act" "set prompt through Chrome AXTextArea without frontmost focus"
   "$APP_EXECUTABLE" set-accessibility-value \
     --bundle-id "$CHROME_BUNDLE_ID" \
-    --role AXTextField \
-    --label "Address and search bar" \
-    --value "$TARGET_URL" >/dev/null
-  "$APP_EXECUTABLE" perform-accessibility-action \
-    --bundle-id "$CHROME_BUNDLE_ID" \
-    --role AXTextField \
-    --label "Address and search bar" \
-    --action AXPress >/dev/null
+    --role AXTextArea \
+    --value "$PROMPT" >/dev/null
+  sleep 0.25
+  log_event "act" "submit prompt with process-directed Return"
   "$APP_EXECUTABLE" press-app-key --bundle-id "$CHROME_BUNDLE_ID" --key return >/dev/null
 }
 
@@ -220,84 +388,45 @@ if [[ "${FRONT_BEFORE:-}" == "$CHROME_BUNDLE_ID" ]]; then
 fi
 log_event "observe" "frontmost before: ${FRONT_BEFORE:-unknown}"
 log_event "policy" "submitting the prompt may consume Midjourney generation credits"
-log_event "policy" "decorative cursor disabled for background targets"
+log_event "policy" "frontmost app should be preserved; no global typing is used"
+if [[ "$SHOW_OVERLAY" == "1" ]]; then
+  log_event "policy" "overlay enabled for visible dogfood capture"
+else
+  log_event "policy" "overlay disabled for hidden background operation"
+fi
 overlay "Observe" 1200 "scan Create page"
 
+if [[ "$USE_COMPANION" != "0" ]] && companion_available; then
+  if run_companion_flow; then
+    exit 0
+  fi
+  if [[ "$USE_COMPANION" == "1" ]]; then
+    log_event "abort" "Chrome Companion bridge failed and fallback was disabled"
+    exit 1
+  fi
+  log_event "warn" "Chrome Companion bridge failed; falling back to native AX path"
+elif [[ "$USE_COMPANION" == "1" ]]; then
+  log_event "abort" "Chrome Companion bridge is required but not connected"
+  exit 1
+else
+  log_event "policy" "Chrome Companion bridge not connected; using native AX fallback"
+fi
+
+ensure_midjourney_surface
 BEFORE_JSON=$(snapshot_chrome "01-before")
 log_event "resolve" "before: $(summarize_snapshot "$BEFORE_JSON")"
 if ! grep -qi "midjourney.com" "$BEFORE_JSON" || ! grep -qi "AXTextArea" "$BEFORE_JSON"; then
-  navigate_background
-  sleep 3
-  BEFORE_JSON=$(snapshot_chrome "01-before-navigated")
-  log_event "resolve" "after navigation: $(summarize_snapshot "$BEFORE_JSON")"
+  log_event "abort" "Midjourney Create tab is not exposing an AXTextArea; refusing to type globally"
+  exit 1
 fi
 
 BEFORE_REFS="$OUTPUT_DIR/before-refs.txt"
 extract_image_refs "$BEFORE_JSON" > "$BEFORE_REFS"
 
-SCREEN_PROBE="$OUTPUT_DIR/screen.png"
-POINT_JSON="$OUTPUT_DIR/prompt-point.json"
-"$SCRIPT_DIR/run-app-host.sh" screenshot-screen --output "$SCREEN_PROBE" >/dev/null
-resolve_text_area_point "$BEFORE_JSON" "$SCREEN_PROBE" "$POINT_JSON"
-
-PROMPT_X=$("$BUN_BIN" -e "console.log(require('$POINT_JSON').overlayPoint.x)")
-PROMPT_Y=$("$BUN_BIN" -e "console.log(require('$POINT_JSON').overlayPoint.y)")
-START_X=$("$BUN_BIN" -e "console.log(require('$POINT_JSON').startPoint.x)")
-START_Y=$("$BUN_BIN" -e "console.log(require('$POINT_JSON').startPoint.y)")
-
-log_event "resolve" "resolved prompt field at $PROMPT_X,$PROMPT_Y"
-log_event "act" "visual click/focus prompt field"
-CLICK_PID=$(start_action_overlay \
-  "Click" \
-  950 \
-  "focus prompt via AX" \
-  --start-x "$START_X" \
-  --start-y "$START_Y" \
-  --end-x "$PROMPT_X" \
-  --end-y "$PROMPT_Y" \
-  --click-progress 0.62)
-sleep 0.52
-"$APP_EXECUTABLE" set-accessibility-role-value \
-  --bundle-id "$CHROME_BUNDLE_ID" \
-  --role AXTextArea \
-  --value " " >/dev/null
-wait "$CLICK_PID" || true
-
-log_event "act" "visual typing prompt"
-TYPE_DURATION_MS=$(( 1600 + ${#PROMPT} * 34 ))
-TYPE_PID=$(start_action_overlay \
-  "Typing" \
-  "$TYPE_DURATION_MS" \
-  "prompt into background AXTextArea" \
-  --start-x "$PROMPT_X" \
-  --start-y "$PROMPT_Y" \
-  --end-x "$PROMPT_X" \
-  --end-y "$PROMPT_Y" \
-  --click-progress 0.50 \
-  --typing-text "$PROMPT" \
-  --typing-sound timed)
-sleep 0.20
-"$APP_EXECUTABLE" press-app-key --bundle-id "$CHROME_BUNDLE_ID" --key a --modifiers cmd >/dev/null
-"$APP_EXECUTABLE" type-app-text --bundle-id "$CHROME_BUNDLE_ID" --text "$PROMPT" --delay-ms 4 >/dev/null
-wait "$TYPE_PID" || true
+submit_prompt_background
 
 AFTER_TYPE_JSON=$(snapshot_chrome "02-after-type")
-log_event "observe" "after typing: $(summarize_snapshot "$AFTER_TYPE_JSON")"
-
-log_event "act" "submit prompt with process-directed Return"
-RETURN_PID=$(start_action_overlay \
-  "Return" \
-  900 \
-  "submit prompt" \
-  --start-x "$PROMPT_X" \
-  --start-y "$PROMPT_Y" \
-  --end-x "$PROMPT_X" \
-  --end-y "$PROMPT_Y" \
-  --click-progress 0.50 \
-  --key-label "Return")
-sleep 0.35
-"$APP_EXECUTABLE" press-app-key --bundle-id "$CHROME_BUNDLE_ID" --key return >/dev/null
-wait "$RETURN_PID" || true
+log_event "observe" "after submit: $(summarize_snapshot "$AFTER_TYPE_JSON")"
 
 RESULT_JSON=""
 RESULT_REFS="$OUTPUT_DIR/result-refs.txt"
@@ -315,7 +444,7 @@ for attempt in {1..24}; do
 done
 
 PREVIEW_IMAGE="$OUTPUT_DIR/midjourney-window.png"
-"$SCRIPT_DIR/run-app-host.sh" screenshot-app-window \
+"$APP_EXECUTABLE" screenshot-app-window \
   --bundle-id "$CHROME_BUNDLE_ID" \
   --output "$PREVIEW_IMAGE" >/dev/null
 
