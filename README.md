@@ -133,6 +133,22 @@ Useful commands:
 - `action-dev agent <args...>`
 - `action-dev agent-cli <args...>`
 
+## Mira Companion
+
+Mira is Action's lattice-native companion. The native launcher renders her from
+the bundled pet pack, and the desktop actor path reuses Lattices'
+`overlay.actor.*` daemon API.
+
+```bash
+bun run mira:install
+bun run mira:show -- "Mira online"
+bun run mira:move -- 900 720 900
+bun run mira:hide
+```
+
+`mira:show` expects the Lattices app daemon to be reachable at
+`ws://127.0.0.1:9399`.
+
 ## Repository Layout
 
 - `native/engine` — Swift app host, agent runtime, embedded console, native scripts

@@ -167,6 +167,11 @@ cp "$HOST_EXECUTABLE" "$APP_EXECUTABLE"
 cp "$AGENT_EXECUTABLE" "$APP_AGENT_EXECUTABLE"
 cp "$PLIST_TEMPLATE" "$CONTENTS_DIR/Info.plist"
 cp "$AGENT_PLIST_TEMPLATE" "$AGENT_HELPER_CONTENTS_DIR/Info.plist"
+if [[ -f "$ROOT_DIR/assets/pets/mira/pet.json" && -f "$ROOT_DIR/assets/pets/explorer-cat/sprites/explorer-cat.sheet.webp" ]]; then
+  mkdir -p "$RESOURCES_DIR/Pets/mira"
+  cp "$ROOT_DIR/assets/pets/mira/pet.json" "$RESOURCES_DIR/Pets/mira/pet.json"
+  cp "$ROOT_DIR/assets/pets/explorer-cat/sprites/explorer-cat.sheet.webp" "$RESOURCES_DIR/Pets/mira/spritesheet.webp"
+fi
 apply_bundle_version "$CONTENTS_DIR/Info.plist"
 apply_bundle_version "$AGENT_HELPER_CONTENTS_DIR/Info.plist"
 
