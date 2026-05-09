@@ -10,6 +10,7 @@ TRACE_FILE="${ACTION_CHROME_BG_TRACE_FILE:-/tmp/action-chrome-bg-nav.trace}"
 OUTPUT_DIR="${ACTION_CHROME_BG_OUTPUT_DIR:-/tmp/action-chrome-bg-nav-$(date +%Y%m%d-%H%M%S)}"
 TARGET_URL="${ACTION_CHROME_BG_TARGET_URL:-https://www.midjourney.com/}"
 CHROME_BUNDLE_ID="${ACTION_CHROME_BG_BUNDLE_ID:-com.google.Chrome}"
+SUPPRESS_OVERLAY="${ACTION_CHROME_BG_SUPPRESS_OVERLAY:-0}"
 
 if [[ ! -x "$APP_EXECUTABLE" ]]; then
   "$SCRIPT_DIR/build-app.sh" >/dev/stderr
@@ -40,6 +41,10 @@ log_event() {
 }
 
 status_overlay() {
+  if [[ "$SUPPRESS_OVERLAY" == "1" ]]; then
+    return 0
+  fi
+
   local label="$1"
   local duration_ms="$2"
   local detail="$3"
@@ -53,6 +58,10 @@ status_overlay() {
 }
 
 start_action_overlay() {
+  if [[ "$SUPPRESS_OVERLAY" == "1" ]]; then
+    return 0
+  fi
+
   local label="$1"
   local duration_ms="$2"
   local detail="$3"
@@ -153,6 +162,32 @@ fs.writeFileSync(pointPath, JSON.stringify({
 BUN
 }
 
+write_suppressed_overlay_point() {
+  local tree_json="$1"
+  local point_json="$2"
+  "$BUN_BIN" - "$tree_json" "$point_json" <<'BUN'
+const fs = require("fs");
+const [treePath, pointPath] = process.argv.slice(2);
+const nodes = JSON.parse(fs.readFileSync(treePath, "utf8"));
+const text = (node) => [node.title, node.detail, node.value, node.identifier].filter(Boolean).join(" | ");
+const field = nodes.find((node) =>
+  node.role === "AXTextField" &&
+  /address and search bar/i.test(text(node)) &&
+  node.frame
+);
+if (!field) {
+  throw new Error("Could not resolve Chrome Address and search bar AXTextField");
+}
+
+fs.writeFileSync(pointPath, JSON.stringify({
+  field,
+  overlayPoint: { x: 0, y: 0 },
+  startPoint: { x: 0, y: 0 },
+  screen: null,
+}, null, 2));
+BUN
+}
+
 if ! pgrep -f "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >/dev/null 2>&1; then
   log_event "abort" "Google Chrome is not running; refusing to launch it because this test should stay background-safe"
   status_overlay "Chrome not running" 1800 "background-safe test stopped"
@@ -166,9 +201,13 @@ if [[ "${FRONT_BEFORE:-}" == "$CHROME_BUNDLE_ID" ]]; then
   TARGET_IS_FRONTMOST=true
 fi
 log_event "observe" "frontmost before: ${FRONT_BEFORE:-unknown}"
-log_event "policy" "decorative cursor only; real action uses Chrome AX and process-directed key events"
-if [[ "$TARGET_IS_FRONTMOST" != "true" ]]; then
-  log_event "policy" "decorative cursor disabled for background target"
+if [[ "$SUPPRESS_OVERLAY" == "1" ]]; then
+  log_event "policy" "overlay suppressed; real action uses Chrome AX and process-directed key events"
+else
+  log_event "policy" "decorative cursor only; real action uses Chrome AX and process-directed key events"
+  if [[ "$TARGET_IS_FRONTMOST" != "true" ]]; then
+    log_event "policy" "decorative cursor disabled for background target"
+  fi
 fi
 status_overlay "Observe" 1200 "scan Chrome AX without activation"
 
@@ -177,8 +216,12 @@ log_event "resolve" "before: $(summarize_snapshot "$BEFORE_JSON")"
 
 SCREEN_PROBE="$OUTPUT_DIR/screen.png"
 POINT_JSON="$OUTPUT_DIR/omnibox-point.json"
-"$SCRIPT_DIR/run-app-host.sh" screenshot-screen --output "$SCREEN_PROBE" >/dev/null
-resolve_omnibox_point "$BEFORE_JSON" "$SCREEN_PROBE" "$POINT_JSON"
+if [[ "$SUPPRESS_OVERLAY" == "1" ]]; then
+  write_suppressed_overlay_point "$BEFORE_JSON" "$POINT_JSON"
+else
+  "$SCRIPT_DIR/run-app-host.sh" screenshot-screen --output "$SCREEN_PROBE" >/dev/null
+  resolve_omnibox_point "$BEFORE_JSON" "$SCREEN_PROBE" "$POINT_JSON"
+fi
 
 OMNI_X=$("$BUN_BIN" -e "console.log(require('$POINT_JSON').overlayPoint.x)")
 OMNI_Y=$("$BUN_BIN" -e "console.log(require('$POINT_JSON').overlayPoint.y)")
@@ -188,7 +231,11 @@ FIELD_DETAIL=$("$BUN_BIN" -e "const p=require('$POINT_JSON'); const f=p.field.fr
 
 log_event "resolve" "resolved visible Chrome omnibox: $FIELD_DETAIL"
 
-log_event "act" "visual click at $OMNI_X,$OMNI_Y; AXPress Address and search bar"
+if [[ "$SUPPRESS_OVERLAY" == "1" ]]; then
+  log_event "act" "AXPress Address and search bar"
+else
+  log_event "act" "visual click at $OMNI_X,$OMNI_Y; AXPress Address and search bar"
+fi
 start_action_overlay \
   "Click" \
   1050 \
@@ -206,12 +253,20 @@ sleep 0.62
   --action AXPress >/dev/null
 
 AFTER_FOCUS_JSON=$(snapshot_chrome "02-after-focus")
-log_event "observe" "after visual click: $(summarize_snapshot "$AFTER_FOCUS_JSON")"
+if [[ "$SUPPRESS_OVERLAY" == "1" ]]; then
+  log_event "observe" "after AXPress: $(summarize_snapshot "$AFTER_FOCUS_JSON")"
+else
+  log_event "observe" "after visual click: $(summarize_snapshot "$AFTER_FOCUS_JSON")"
+fi
 
 TYPE_DURATION_MS=$(( 1250 + ${#TARGET_URL} * 42 ))
 CHAR_DELAY=$("$BUN_BIN" -e "console.log(Math.max(0.028, Math.min(0.06, (($TYPE_DURATION_MS - 650) / Math.max(1, '$TARGET_URL'.length)) / 1000)).toFixed(3))")
 
-log_event "act" "visual typing and AX value update: $TARGET_URL"
+if [[ "$SUPPRESS_OVERLAY" == "1" ]]; then
+  log_event "act" "AX value update: $TARGET_URL"
+else
+  log_event "act" "visual typing and AX value update: $TARGET_URL"
+fi
 start_action_overlay \
   "Typing" \
   "$TYPE_DURATION_MS" \
@@ -245,7 +300,11 @@ BASH
 AFTER_TYPE_JSON=$(snapshot_chrome "03-after-type")
 log_event "observe" "after typing: $(summarize_snapshot "$AFTER_TYPE_JSON")"
 
-log_event "act" "visual Return key; process-directed Return to Chrome"
+if [[ "$SUPPRESS_OVERLAY" == "1" ]]; then
+  log_event "act" "process-directed Return to Chrome"
+else
+  log_event "act" "visual Return key; process-directed Return to Chrome"
+fi
 start_action_overlay \
   "Return" \
   950 \
