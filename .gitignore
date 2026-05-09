@@ -12,4 +12,3 @@ Installer/*.dmg
 Installer/*-temp.dmg
 # OpenScout local state
 .openscout/project.json
-fabric/

@@ -30,6 +30,8 @@ Another useful way to say the same thing:
 - Not a GUI editor in v0
 - Not a vision-only “click whatever looks right” system
 - Not a scene DSL that owns business logic and runtime state
+- Not a VM/container-first automation stack for host UI, browser, or capture
+  work
 
 ## Core Layers
 
@@ -56,6 +58,14 @@ The native layer should be split into separate processes:
 
 This separation is not optional. UI lifecycle and agent lifecycle have different
 constraints, and combining them leads to brittle behavior.
+
+### Remote Workers
+
+Remote VMs and containers can still be useful for auxiliary work such as
+isolated command execution, rendering, browser-free tests, or heavyweight model
+jobs. They should not own the core Action browser, Accessibility, AppKit, or
+ScreenCaptureKit paths because those capabilities depend on the user's macOS
+host, permissions, windows, and dedicated local Chrome profiles.
 
 ### 2. Runtime
 
