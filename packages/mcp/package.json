@@ -2,6 +2,11 @@
   "name": "@action/mcp",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "bin": {
+    "action-mcp": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/index.ts"
+  }
 }
-

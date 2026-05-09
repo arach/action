@@ -46,3 +46,18 @@ Instructions:
 2. update the protocol source of truth
 3. confirm method names remain documented
 4. verify callers still match the transport contract
+
+## Hermes Action
+
+Use when:
+
+- connecting Hermes to the native Action runtime
+- using Action MCP tools from a harness
+- recording or inspecting native macOS surfaces through Hermes
+
+Instructions:
+
+1. read [docs/harnesses/hermes-action.md](harnesses/hermes-action.md)
+2. use [skills/hermes-action/SKILL.md](../skills/hermes-action/SKILL.md) as the harness doctrine
+3. prefer observe and resolve before act
+4. treat recording start as asynchronous until `.finished` or `action.record.status` confirms completion

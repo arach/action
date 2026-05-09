@@ -15,6 +15,7 @@
   "scripts": {
     "action": "bun packages/cli/src/main.ts",
     "action-dev": "bun packages/cli/src/action-dev.ts",
+    "mcp": "bun packages/mcp/src/index.ts",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "docs:generate": "dewey generate",
     "docs:agent": "dewey agent",
