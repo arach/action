@@ -1,6 +1,7 @@
 export * from "./guided.js";
 export * from "./inspection.js";
 export * from "./macos.js";
+export * from "./adapters/index.js";
 export * from "./providers/index.js";
 export * from "./interaction/index.js";
 export * from "./session.js";

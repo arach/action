@@ -71,6 +71,202 @@ export interface ResolvedTarget {
   ambiguousWith?: string[];
 }
 
+export type AdapterActionChannel =
+  | "ax"
+  | "dom"
+  | "tmux"
+  | "editor"
+  | "native"
+  | "process"
+  | "hid";
+
+export type AdapterCapability =
+  | "observe"
+  | "resolve"
+  | "act"
+  | "extract"
+  | "capture-hints"
+  | "verify";
+
+export interface AdapterMatch {
+  matched: boolean;
+  confidence: number;
+  reason: string;
+  evidence?: Record<string, unknown>;
+}
+
+export interface NativeWindowState {
+  bundleId?: string;
+  appName?: string;
+  windowTitle?: string;
+  bounds?: Bounds;
+  isFrontmost?: boolean;
+  processId?: number;
+}
+
+export interface AXNodeSnapshot {
+  role: string;
+  title?: string;
+  detail?: string;
+  value?: string;
+  identifier?: string;
+  frame?: Bounds;
+  depth?: number;
+  actions?: string[];
+  settableAttributes?: string[];
+  enabled?: boolean;
+  focused?: boolean;
+}
+
+export interface AXSnapshot {
+  source: "accessibility";
+  capturedAt: string;
+  nodes: AXNodeSnapshot[];
+}
+
+export interface SemanticElement {
+  id: string;
+  role?: string;
+  label?: string;
+  text?: string;
+  selector?: string;
+  rect?: Bounds;
+  attributes?: Record<string, string>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface BrowserPageState {
+  kind: "browser-page";
+  browser: "chrome" | "safari" | "firefox" | "unknown";
+  url?: string;
+  title?: string;
+  loading?: boolean;
+  elements?: SemanticElement[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface TerminalState {
+  kind: "terminal";
+  host?: "terminal" | "iterm" | "ghostty" | "warp" | "unknown";
+  sessions?: SemanticElement[];
+  panes?: SemanticElement[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface EditorState {
+  kind: "editor";
+  editor?: "cursor" | "vscode" | "codex" | "conductor" | "unknown";
+  workspacePath?: string;
+  activeFile?: string;
+  selection?: Record<string, unknown>;
+  panels?: SemanticElement[];
+  metadata?: Record<string, unknown>;
+}
+
+export type SurfaceSemanticState = BrowserPageState | TerminalState | EditorState | Record<string, unknown>;
+
+export interface ScreenshotReflection {
+  provider: string;
+  summary: string;
+  imagePath?: string;
+  findings?: InspectionFinding[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface SurfaceObservation {
+  surface: SurfaceRef;
+  ax: AXSnapshot;
+  native: NativeWindowState;
+  semantic?: SurfaceSemanticState;
+  vision?: ScreenshotReflection;
+  freshness: {
+    axCapturedAt: string;
+    semanticCapturedAt?: string;
+    screenshotCapturedAt?: string;
+  };
+}
+
+export interface ObserveContext {
+  surface: SurfaceRef;
+  native?: NativeWindowState;
+  ax?: AXSnapshot;
+  now?: string;
+  options?: Record<string, unknown>;
+}
+
+export interface TargetEvidence {
+  source: "ax" | "dom" | "tmux" | "editor" | "native" | "vision" | "recipe";
+  summary: string;
+  nodeId?: string;
+  rect?: Bounds;
+  confidence?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TargetCandidate {
+  id: string;
+  label: string;
+  role?: string;
+  rect?: Bounds;
+  confidence: number;
+  stabilityKey?: string;
+  evidence: TargetEvidence[];
+  preferredActionChannel: AdapterActionChannel;
+  fallbackChannels: AdapterActionChannel[];
+}
+
+export interface ExtractionQuery {
+  id?: string;
+  kind?: string;
+  text?: string;
+  role?: string;
+  schema?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ExtractionResult {
+  id: string;
+  at: string;
+  data: Record<string, unknown>;
+  evidence?: TargetEvidence[];
+}
+
+export interface CaptureHint {
+  id: string;
+  label: string;
+  rect: Bounds;
+  reason: string;
+  padding?: number;
+  preferredAspectRatio?: "1:1" | "4:3" | "16:9" | "free";
+  evidence?: TargetEvidence[];
+}
+
+export interface ActionResult {
+  id: string;
+  at: string;
+  status: "succeeded" | "failed" | "skipped" | "needs-user";
+  channel: AdapterActionChannel;
+  detail?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface VerifyContext {
+  observation?: SurfaceObservation;
+  before?: SurfaceObservation;
+  after?: SurfaceObservation;
+  action?: RuntimeAction;
+  target?: TargetCandidate;
+  artifacts?: RuntimeArtifact[];
+}
+
+export interface VerificationResult {
+  ok: boolean;
+  confidence: number;
+  summary: string;
+  evidence?: TargetEvidence[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface Observation {
   kind:
     | "window"

@@ -1,0 +1,10 @@
+{
+  "name": "@action/chrome-companion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun scripts/build.mjs",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json"
+  }
+}
