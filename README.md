@@ -6,6 +6,8 @@
 
 Today the project is centered on a signed `Action.app`, a local agent runtime, an embedded web console, and a guided review loop for captured sessions.
 
+Demo capture: [Mira uses Action to make Action a logo](https://arach.github.io/action/#demo) · [MP4](https://arach.github.io/action/assets/action-mira-midjourney-logo.mp4)
+
 ## What Exists Today
 
 - Signed `Action.app` bundle with a real AppKit lifecycle
