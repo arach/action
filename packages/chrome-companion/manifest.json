@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Action Chrome Companion",
+  "description": "Minimal Action companion for page observation and DOM-backed actions.",
+  "version": "0.0.0",
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}

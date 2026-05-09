@@ -19,10 +19,37 @@ AGENT_HELPER_MACOS_DIR="$AGENT_HELPER_CONTENTS_DIR/MacOS"
 PLIST_TEMPLATE="$APP_TEMPLATE_DIR/Info.plist"
 AGENT_PLIST_TEMPLATE="$AGENT_APP_TEMPLATE_DIR/Info.plist"
 LOCK_DIR="$ROOT_DIR/native/.action-build.lock"
+BUILD_CONFIGURATION="${ACTION_BUILD_CONFIGURATION:-debug}"
+ACTION_VERSION="${ACTION_VERSION:-}"
+ACTION_BUILD_NUMBER="${ACTION_BUILD_NUMBER:-}"
+LOCK_TIMEOUT_SECONDS="${ACTION_BUILD_LOCK_TIMEOUT_SECONDS:-120}"
+
+resolve_identity() {
+  local requested="$1"
+
+  if [[ "$requested" == "-" ]]; then
+    printf '%s\n' "$requested"
+    return
+  fi
+
+  if [[ "$requested" =~ '^[0-9A-Fa-f]{40}$' ]]; then
+    printf '%s\n' "$requested"
+    return
+  fi
+
+  local resolved
+  resolved=$(security find-identity -v -p codesigning 2>/dev/null | awk -v name="\"$requested\"" 'index($0, name) {print $2; exit}')
+  if [[ -n "$resolved" ]]; then
+    printf '%s\n' "$resolved"
+    return
+  fi
+
+  printf '%s\n' "$requested"
+}
 
 detect_identity() {
   if [[ -n "${ACTION_CODESIGN_IDENTITY:-}" ]]; then
-    printf '%s\n' "$ACTION_CODESIGN_IDENTITY"
+    resolve_identity "$ACTION_CODESIGN_IDENTITY"
     return
   fi
 
@@ -44,21 +71,90 @@ detect_identity() {
 }
 
 acquire_lock() {
+  local waited_tenths=0
+  local max_tenths=$((LOCK_TIMEOUT_SECONDS * 10))
+
   while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if [[ -f "$LOCK_DIR/pid" ]]; then
+      local owner_pid
+      owner_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+
+      if [[ -n "$owner_pid" ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+        rm -rf "$LOCK_DIR"
+        continue
+      fi
+    fi
+
+    if (( waited_tenths >= max_tenths )); then
+      if [[ ! -f "$LOCK_DIR/pid" ]]; then
+        echo "Removing stale build lock without an owner pid: $LOCK_DIR" >&2
+        rm -rf "$LOCK_DIR"
+        waited_tenths=0
+        continue
+      fi
+
+      echo "Timed out waiting for build lock: $LOCK_DIR" >&2
+      exit 1
+    fi
+
     sleep 0.1
+    waited_tenths=$((waited_tenths + 1))
   done
+
+  printf '%s\n' "$$" > "$LOCK_DIR/pid"
 }
 
 release_lock() {
+  if [[ -f "$LOCK_DIR/pid" ]] && [[ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" == "$$" ]]; then
+    rm -rf "$LOCK_DIR" 2>/dev/null || true
+    return
+  fi
+
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
+
+codesign_item() {
+  local item="$1"
+  local args=(--force --sign "$SIGNING_IDENTITY")
+
+  if [[ "${ACTION_CODESIGN_HARDENED_RUNTIME:-0}" == "1" ]]; then
+    args+=(--options runtime)
+  fi
+
+  if [[ "${ACTION_CODESIGN_TIMESTAMP:-0}" == "1" ]]; then
+    args+=(--timestamp)
+  fi
+
+  codesign "${args[@]}" "$item" >&2
+}
+
+apply_bundle_version() {
+  local plist="$1"
+
+  if [[ -n "$ACTION_VERSION" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $ACTION_VERSION" "$plist"
+  fi
+
+  if [[ -n "$ACTION_BUILD_NUMBER" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $ACTION_BUILD_NUMBER" "$plist"
+  fi
+}
+
+case "$BUILD_CONFIGURATION" in
+  debug|release)
+    ;;
+  *)
+    echo "Unsupported ACTION_BUILD_CONFIGURATION: $BUILD_CONFIGURATION" >&2
+    exit 1
+    ;;
+esac
 
 acquire_lock
 trap release_lock EXIT
 
-swift build --package-path "$PACKAGE_DIR" -c debug >&2
+swift build --package-path "$PACKAGE_DIR" -c "$BUILD_CONFIGURATION" >&2
 
-BIN_DIR=$(swift build --package-path "$PACKAGE_DIR" -c debug --show-bin-path)
+BIN_DIR=$(swift build --package-path "$PACKAGE_DIR" -c "$BUILD_CONFIGURATION" --show-bin-path)
 HOST_EXECUTABLE="$BIN_DIR/ActionHost"
 AGENT_EXECUTABLE="$BIN_DIR/ActionAgent"
 APP_EXECUTABLE="$MACOS_DIR/Action"
@@ -71,11 +167,13 @@ cp "$HOST_EXECUTABLE" "$APP_EXECUTABLE"
 cp "$AGENT_EXECUTABLE" "$APP_AGENT_EXECUTABLE"
 cp "$PLIST_TEMPLATE" "$CONTENTS_DIR/Info.plist"
 cp "$AGENT_PLIST_TEMPLATE" "$AGENT_HELPER_CONTENTS_DIR/Info.plist"
+apply_bundle_version "$CONTENTS_DIR/Info.plist"
+apply_bundle_version "$AGENT_HELPER_CONTENTS_DIR/Info.plist"
 
-codesign --force --sign "$SIGNING_IDENTITY" "$APP_EXECUTABLE" >&2
-codesign --force --sign "$SIGNING_IDENTITY" "$APP_AGENT_EXECUTABLE" >&2
-codesign --force --sign "$SIGNING_IDENTITY" "$AGENT_HELPER_APP_DIR" >&2
-codesign --force --sign "$SIGNING_IDENTITY" "$APP_DIR" >&2
+codesign_item "$APP_EXECUTABLE"
+codesign_item "$APP_AGENT_EXECUTABLE"
+codesign_item "$AGENT_HELPER_APP_DIR"
+codesign_item "$APP_DIR"
 
 printf 'codesigned-with=%s\n' "$SIGNING_IDENTITY" >&2
 
