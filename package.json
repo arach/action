@@ -46,6 +46,7 @@
     "native:chrome:ax": "native/engine/scripts/test-chrome-ax-control.sh",
     "native:chrome:bg": "native/engine/scripts/test-chrome-background-nav-overlay.sh",
     "native:chrome:record-url": "native/engine/scripts/record-chrome-url-demo.sh",
+    "native:midjourney:record-logo": "native/engine/scripts/record-mira-midjourney-logo-demo.sh",
     "chrome:companion:build": "cd packages/chrome-companion && bun run build",
     "chrome:companion:bridge": "cd packages/chrome-companion && bun run bridge",
     "chrome:companion:health": "cd packages/chrome-companion && bun run health",

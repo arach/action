@@ -39,6 +39,7 @@
         linear-gradient(90deg, hsla(28, 60%, 55%, 0.035) 1px, transparent 1px);
       background-size: 32px 32px;
       min-height: 100vh;
+      overflow-x: hidden;
     }
 
     .wrap {
@@ -111,6 +112,7 @@
       border: 1px solid var(--border);
       border-radius: 4px;
       overflow: hidden;
+      width: 100%;
       max-width: 44rem;
     }
 
@@ -172,6 +174,51 @@
       margin-bottom: 2.75rem;
     }
 
+    .demo-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(15rem, 0.65fr);
+      gap: 1.75rem;
+      align-items: start;
+      min-width: 0;
+    }
+    .demo-video {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1280 / 1050;
+      background: #050504;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    .demo-copy {
+      padding-top: 0.2rem;
+    }
+    .demo-copy p {
+      font-size: 0.96rem;
+      color: var(--muted);
+      line-height: 1.55;
+      margin-bottom: 1rem;
+    }
+    .demo-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem;
+      margin-top: 1.25rem;
+    }
+    .demo-links a {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--text);
+      text-decoration: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.45rem 0.65rem;
+      background: var(--canvas);
+    }
+    .demo-links a:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
     .cards {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -179,7 +226,10 @@
     }
     @media (max-width: 700px) {
       .cards { grid-template-columns: 1fr; }
+      .demo-grid { grid-template-columns: 1fr; }
       .wrap { padding: 0 1.25rem; }
+      .hero h1 { font-size: 2.25rem; }
+      .terminal-body { font-size: 0.72rem; }
       nav { align-items: flex-start; gap: 1rem; flex-direction: column; }
     }
 
@@ -287,6 +337,7 @@
     <nav>
       <a class="nav-brand" href="/">action<span class="dim">.app</span></a>
       <ul class="nav-links">
+        <li><a href="#demo">Demo</a></li>
         <li><a href="getting-started.md">Docs</a></li>
         <li><a href="https://github.com/arach/action">GitHub</a></li>
       </ul>
@@ -313,6 +364,26 @@
         </div>
       </div>
     </div>
+
+    <section id="demo">
+      <p class="label">Dogfood capture</p>
+      <h2>Mira uses Action to make Action a logo.</h2>
+      <p class="lead">A real take captured from Mira's persistent Chrome profile while Midjourney explored the mark that became the favorite.</p>
+
+      <div class="demo-grid">
+        <video class="demo-video" controls playsinline preload="metadata" poster="assets/action-mira-logo-poster.png">
+          <source src="assets/action-mira-midjourney-logo.mp4" type="video/mp4">
+        </video>
+        <div class="demo-copy">
+          <p>The capture uses Action's native recording path against the exact Mira Chrome window region, with a finished marker proving the recording completed.</p>
+          <p>The selected direction keeps the abstract A, cursor form, cyan stroke, coral recording dot, and capture-corner ticks.</p>
+          <div class="demo-links">
+            <a href="assets/action-mira-midjourney-logo.mp4">Open MP4</a>
+            <a href="assets/action-mira-logo-poster.png">Open poster</a>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <section>
       <p class="label">What it is</p>
