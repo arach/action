@@ -82,6 +82,8 @@ struct ActionLauncherRootView: View {
 
             Spacer(minLength: 0)
 
+            miraSidebarSlot
+
             settingsRow
                 .padding(.horizontal, sidebarIconsOnly ? 4 : 8)
                 .padding(.bottom, 8)
@@ -109,14 +111,7 @@ struct ActionLauncherRootView: View {
 
                 Spacer(minLength: 0)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Action")
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundStyle(StageHUDTheme.textPrimary)
-                    Text("Capture workstation")
-                        .font(.system(size: 11, weight: .regular, design: .default))
-                        .foregroundStyle(StageHUDTheme.textMuted)
-                }
+                ActionBrandLockup()
 
                 Spacer(minLength: 0)
 
@@ -137,6 +132,20 @@ struct ActionLauncherRootView: View {
         .padding(.horizontal, sidebarIconsOnly ? 6 : 12)
         .padding(.top, 14)
         .padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private var miraSidebarSlot: some View {
+        if sidebarIconsOnly {
+            MiraSpriteView(state: "idle", width: 30, height: 34)
+                .frame(width: 36, height: 38)
+                .padding(.bottom, 8)
+                .help("Mira")
+        } else {
+            MiraCompanionBadge()
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+        }
     }
 
     private var mainPane: some View {
@@ -341,11 +350,36 @@ struct ActionLauncherRootView: View {
                     reviewStage(for: latest)
                 }
             } else {
-                surfaceCard(title: "Review") {
+                reviewEmptyState
+            }
+        }
+    }
+
+    private var reviewEmptyState: some View {
+        surfaceCard(title: "Review") {
+            HStack(alignment: .center, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 9) {
+                        ActionLatticeLogoMark(size: 34)
+                        Text("Ready for a take")
+                            .font(.system(size: 17, weight: .bold, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textPrimary)
+                    }
+
                     Text("Run the guided calculator capture to seed the review loop.")
                         .font(.system(size: 12, weight: .regular, design: .default))
                         .foregroundStyle(StageHUDTheme.textSecondary)
                 }
+
+                Spacer(minLength: 0)
+
+                ZStack {
+                    ActionLatticeLogoMark(size: 118)
+                        .opacity(0.42)
+                    MiraSpriteView(state: "thinking", width: 96, height: 104)
+                        .offset(y: 8)
+                }
+                .frame(width: 128, height: 118)
             }
         }
     }
@@ -372,6 +406,10 @@ struct ActionLauncherRootView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 10) {
+                HStack(spacing: 10) {
+                    MiraSpriteView(state: "success", width: 48, height: 52)
+                    ActionLatticeLogoMark(size: 42)
+                }
                 HStack(spacing: 8) {
                     darkStatusBadge(sessionTimestamp(session))
                     darkStatusBadge("Feedback \(session.feedbackCount)")
