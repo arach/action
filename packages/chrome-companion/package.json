@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "bridge": "bun scripts/bridge-server.mjs",
     "build": "bun scripts/build.mjs",
+    "health": "bun scripts/health.mjs",
+    "install:dev": "bun scripts/install-dev.mjs",
+    "launch:profile": "bun scripts/launch-profile.mjs",
+    "profile": "bun scripts/profile.mjs",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json"
   }
 }

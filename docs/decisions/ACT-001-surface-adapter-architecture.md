@@ -149,6 +149,20 @@ Channels:
 - Optional Chrome DevTools Protocol for development and debugging flows.
 - Native capture for screenshots, previews, and recording.
 
+Profile policy:
+
+- Action should launch and own a dedicated Chrome profile by default.
+- That profile should carry the Action Chrome Companion extension and any
+  Action-managed browser state.
+- Authenticated workflows such as Midjourney may use a named persistent Action
+  profile so the user can sign in once without mixing automation state into
+  their daily Chrome profile.
+- Attaching to the user's existing Chrome profile should be an explicit mode,
+  not the default.
+- Repeatable local setup should create and launch named Action profiles through
+  project commands. The user-owned step is approving the companion extension in
+  the Action profile when Chrome requires UI approval.
+
 Core abilities:
 
 - Inspect tab URL, title, and loading state.

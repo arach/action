@@ -10,6 +10,7 @@ await mkdir(distPath, { recursive: true });
 
 const result = await Bun.build({
   entrypoints: [
+    join(rootPath, "src/bridge-page.ts"),
     join(rootPath, "src/service-worker.ts"),
     join(rootPath, "src/content-script.ts")
   ],
@@ -27,3 +28,4 @@ if (!result.success) {
 }
 
 await cp(join(rootPath, "manifest.json"), join(distPath, "manifest.json"));
+await cp(join(rootPath, "bridge.html"), join(distPath, "bridge.html"));
