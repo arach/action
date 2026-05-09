@@ -26,14 +26,50 @@ public struct ActionAccessibilityNodeSnapshot: Codable, Sendable {
     public let value: String?
     public let identifier: String?
     public let depth: Int
+    public let frame: ActionAccessibilityBounds?
+    public let actions: [String]
+    public let settableAttributes: [String]
+    public let enabled: Bool?
+    public let focused: Bool?
 
-    public init(role: String, title: String?, detail: String?, value: String?, identifier: String?, depth: Int) {
+    public init(
+        role: String,
+        title: String?,
+        detail: String?,
+        value: String?,
+        identifier: String?,
+        depth: Int,
+        frame: ActionAccessibilityBounds? = nil,
+        actions: [String] = [],
+        settableAttributes: [String] = [],
+        enabled: Bool? = nil,
+        focused: Bool? = nil
+    ) {
         self.role = role
         self.title = title
         self.detail = detail
         self.value = value
         self.identifier = identifier
         self.depth = depth
+        self.frame = frame
+        self.actions = actions
+        self.settableAttributes = settableAttributes
+        self.enabled = enabled
+        self.focused = focused
+    }
+}
+
+public struct ActionAccessibilityBounds: Codable, Sendable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
     }
 }
 
@@ -177,6 +213,156 @@ public enum ActionNativeAutomation {
         }
     }
 
+    public static func pressAccessibilityElement(
+        bundleId: String,
+        label: String,
+        role: String? = nil
+    ) throws -> ActionAccessibilityNodeSnapshot {
+        let match = try findAccessibilityElement(
+            bundleId: bundleId,
+            label: label,
+            role: role,
+            preferWritableText: false
+        )
+
+        let result = AXUIElementPerformAction(match.element, kAXPressAction as CFString)
+        guard result == .success else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Accessibility press failed for \(bundleId) element \(label): \(result.rawValue)"
+            )
+        }
+
+        return snapshot(of: match.element, depth: match.depth)
+    }
+
+    public static func performAccessibilityAction(
+        bundleId: String,
+        label: String,
+        action: String,
+        role: String? = nil
+    ) throws -> ActionAccessibilityNodeSnapshot {
+        let match = try findAccessibilityElement(
+            bundleId: bundleId,
+            label: label,
+            role: role,
+            preferWritableText: false
+        )
+        let actionName = normalizedAccessibilityActionName(action)
+        let availableActions = axActions(of: match.element)
+        guard availableActions.contains(actionName) else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Accessibility action \(actionName) is not available for \(bundleId) element \(label). Available actions: \(availableActions.joined(separator: ", "))"
+            )
+        }
+
+        let result = AXUIElementPerformAction(match.element, actionName as CFString)
+        guard result == .success else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Accessibility action \(actionName) failed for \(bundleId) element \(label): \(result.rawValue)"
+            )
+        }
+
+        return snapshot(of: match.element, depth: match.depth)
+    }
+
+    public static func setAccessibilityValue(
+        bundleId: String,
+        label: String,
+        role: String? = nil,
+        value: String
+    ) throws -> ActionAccessibilityNodeSnapshot {
+        let match = try findAccessibilityElement(
+            bundleId: bundleId,
+            label: label,
+            role: role,
+            preferWritableText: true
+        )
+
+        let result = AXUIElementSetAttributeValue(
+            match.element,
+            kAXValueAttribute as CFString,
+            value as CFTypeRef
+        )
+        guard result == .success else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Accessibility value update failed for \(bundleId) element \(label): \(result.rawValue)"
+            )
+        }
+
+        return snapshot(of: match.element, depth: match.depth)
+    }
+
+    public static func setFocusedAccessibilityValue(
+        bundleId: String,
+        role: String? = nil,
+        value: String
+    ) throws -> ActionAccessibilityNodeSnapshot {
+        let app = try runningApplication(bundleId: bundleId)
+        let application = AXUIElementCreateApplication(app.processIdentifier)
+        var focusedValue: CFTypeRef?
+        let focusedResult = AXUIElementCopyAttributeValue(
+            application,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedValue
+        )
+        guard focusedResult == .success, let focusedElement = focusedValue else {
+            throw ActionNativeAutomationError.accessibilityLookupFailed(
+                "Could not resolve focused accessibility element in \(bundleId)"
+            )
+        }
+
+        let element = focusedElement as! AXUIElement
+        let actualRole = axValue(element, attribute: kAXRoleAttribute) as? String ?? ""
+        if let role, normalizedRole(actualRole) != normalizedRole(role) {
+            throw ActionNativeAutomationError.accessibilityLookupFailed(
+                "Focused accessibility element in \(bundleId) had role \(actualRole), expected \(role)"
+            )
+        }
+
+        let result = AXUIElementSetAttributeValue(
+            element,
+            kAXValueAttribute as CFString,
+            value as CFTypeRef
+        )
+        guard result == .success else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Accessibility value update failed for focused \(bundleId) element: \(result.rawValue)"
+            )
+        }
+
+        return snapshot(of: element, depth: 0)
+    }
+
+    public static func setAccessibilityRoleValue(
+        bundleId: String,
+        role: String,
+        value: String
+    ) throws -> ActionAccessibilityNodeSnapshot {
+        let match = try findAccessibilityElementByRole(
+            bundleId: bundleId,
+            role: role,
+            preferWritableText: true
+        )
+
+        _ = AXUIElementSetAttributeValue(
+            match.element,
+            kAXFocusedAttribute as CFString,
+            kCFBooleanTrue
+        )
+        let result = AXUIElementSetAttributeValue(
+            match.element,
+            kAXValueAttribute as CFString,
+            value as CFTypeRef
+        )
+        guard result == .success else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Accessibility value update failed for first \(role) in \(bundleId): \(result.rawValue)"
+            )
+        }
+
+        return snapshot(of: match.element, depth: match.depth)
+    }
+
     public static func drag(from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")
@@ -285,7 +471,12 @@ public enum ActionNativeAutomation {
                     detail: stringValue(axValue(current, attribute: kAXDescriptionAttribute)),
                     value: stringValue(axValue(current, attribute: kAXValueAttribute)),
                     identifier: stringValue(axValue(current, attribute: kAXIdentifierAttribute)),
-                    depth: depth
+                    depth: depth,
+                    frame: bounds(of: current),
+                    actions: axActions(of: current),
+                    settableAttributes: settableAttributes(of: current),
+                    enabled: boolValue(axValue(current, attribute: kAXEnabledAttribute)),
+                    focused: boolValue(axValue(current, attribute: kAXFocusedAttribute))
                 )
             )
 
@@ -296,6 +487,12 @@ public enum ActionNativeAutomation {
 
         return result
     }
+}
+
+private struct ActionAccessibilityElementMatch {
+    let element: AXUIElement
+    let depth: Int
+    let score: Int
 }
 
 private func axValue(_ element: AXUIElement, attribute: String) -> AnyObject? {
@@ -316,16 +513,83 @@ private func axChildren(of element: AXUIElement) -> [AXUIElement] {
     return []
 }
 
+private func snapshot(of element: AXUIElement, depth: Int) -> ActionAccessibilityNodeSnapshot {
+    ActionAccessibilityNodeSnapshot(
+        role: axValue(element, attribute: kAXRoleAttribute) as? String ?? "",
+        title: stringValue(axValue(element, attribute: kAXTitleAttribute)),
+        detail: stringValue(axValue(element, attribute: kAXDescriptionAttribute)),
+        value: stringValue(axValue(element, attribute: kAXValueAttribute)),
+        identifier: stringValue(axValue(element, attribute: kAXIdentifierAttribute)),
+        depth: depth,
+        frame: bounds(of: element),
+        actions: axActions(of: element),
+        settableAttributes: settableAttributes(of: element),
+        enabled: boolValue(axValue(element, attribute: kAXEnabledAttribute)),
+        focused: boolValue(axValue(element, attribute: kAXFocusedAttribute))
+    )
+}
+
+private func axActions(of element: AXUIElement) -> [String] {
+    var actionNames: CFArray?
+    let error = AXUIElementCopyActionNames(element, &actionNames)
+    guard error == .success, let names = actionNames as? [String] else {
+        return []
+    }
+    return names.sorted()
+}
+
+private let auditedSettableAttributes: [(String, String)] = [
+    ("value", kAXValueAttribute),
+    ("selectedText", kAXSelectedTextAttribute),
+    ("focused", kAXFocusedAttribute),
+    ("position", kAXPositionAttribute),
+    ("size", kAXSizeAttribute),
+]
+
+private func settableAttributes(of element: AXUIElement) -> [String] {
+    auditedSettableAttributes.compactMap { label, attribute in
+        var settable = DarwinBoolean(false)
+        let error = AXUIElementIsAttributeSettable(element, attribute as CFString, &settable)
+        guard error == .success, settable.boolValue else {
+            return nil
+        }
+        return label
+    }
+}
+
+private func bounds(of element: AXUIElement) -> ActionAccessibilityBounds? {
+    guard let position = point(from: axValue(element, attribute: kAXPositionAttribute)),
+          let size = size(from: axValue(element, attribute: kAXSizeAttribute)) else {
+        return nil
+    }
+
+    return ActionAccessibilityBounds(
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height
+    )
+}
+
 private func firstWindowElement(for bundleId: String) throws -> AXUIElement {
     let app = try ActionNativeAutomation.runningApplication(bundleId: bundleId)
     let application = AXUIElementCreateApplication(app.processIdentifier)
 
     if let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
-       let window = windows.first {
-        return window
+       !windows.isEmpty {
+        return windows.max { lhs, rhs in
+            windowArea(lhs) < windowArea(rhs)
+        } ?? windows[0]
     }
 
     throw ActionNativeAutomationError.accessibilityLookupFailed("No accessibility window found for \(bundleId)")
+}
+
+private func windowArea(_ element: AXUIElement) -> Double {
+    guard let bounds = bounds(of: element) else {
+        return 0
+    }
+    return max(0, bounds.width) * max(0, bounds.height)
 }
 
 private func findButton(in root: AXUIElement, label: String) -> AXUIElement? {
@@ -348,6 +612,214 @@ private func findButton(in root: AXUIElement, label: String) -> AXUIElement? {
     }
 
     return nil
+}
+
+private func findAccessibilityElement(
+    bundleId: String,
+    label: String,
+    role: String?,
+    preferWritableText: Bool,
+    maxDepth: Int = 20,
+    maxNodes: Int = 12_000
+) throws -> ActionAccessibilityElementMatch {
+    let root = try firstWindowElement(for: bundleId)
+    let expectedLabel = normalizedText(label)
+    let expectedRole = normalizedRole(role)
+    var queue: [(AXUIElement, Int)] = [(root, 0)]
+    var best: ActionAccessibilityElementMatch?
+    var visited = 0
+
+    while let (current, depth) = queue.first {
+        queue.removeFirst()
+        visited += 1
+        if visited > maxNodes {
+            break
+        }
+
+        let role = axValue(current, attribute: kAXRoleAttribute) as? String ?? ""
+        if let score = scoreAccessibilityElement(
+            current,
+            actualRole: role,
+            expectedLabel: expectedLabel,
+            expectedRole: expectedRole,
+            preferWritableText: preferWritableText
+        ) {
+            let match = ActionAccessibilityElementMatch(element: current, depth: depth, score: score)
+            if best == nil || match.score > best!.score {
+                best = match
+            }
+        }
+
+        if depth < maxDepth {
+            queue.append(contentsOf: axChildren(of: current).map { ($0, depth + 1) })
+        }
+    }
+
+    if let best {
+        return best
+    }
+
+    let roleDetail = role.map { " role \($0)" } ?? ""
+    throw ActionNativeAutomationError.accessibilityLookupFailed(
+        "Could not find accessibility element \(label)\(roleDetail) in \(bundleId)"
+    )
+}
+
+private func findAccessibilityElementByRole(
+    bundleId: String,
+    role: String,
+    preferWritableText: Bool,
+    maxDepth: Int = 24,
+    maxNodes: Int = 5_000
+) throws -> ActionAccessibilityElementMatch {
+    let expectedRole = normalizedRole(role)
+    var queue: [(AXUIElement, Int)] = [(try firstWindowElement(for: bundleId), 0)]
+    var visited = 0
+
+    while let (current, depth) = queue.first {
+        queue.removeFirst()
+        visited += 1
+        if visited > maxNodes {
+            break
+        }
+
+        let actualRole = axValue(current, attribute: kAXRoleAttribute) as? String ?? ""
+        if normalizedRole(actualRole) == expectedRole,
+           !preferWritableText || settableAttributes(of: current).contains("value") {
+            return ActionAccessibilityElementMatch(element: current, depth: depth, score: 100)
+        }
+
+        if depth < maxDepth {
+            queue.append(contentsOf: axChildren(of: current).map { ($0, depth + 1) })
+        }
+    }
+
+    throw ActionNativeAutomationError.accessibilityLookupFailed(
+        "Could not find accessibility element with role \(role) in \(bundleId)"
+    )
+}
+
+private func scoreAccessibilityElement(
+    _ element: AXUIElement,
+    actualRole: String,
+    expectedLabel: String,
+    expectedRole: String?,
+    preferWritableText: Bool
+) -> Int? {
+    guard expectedRole == nil || normalizedRole(actualRole) == expectedRole else {
+        return nil
+    }
+
+    var score = 0
+    var matched = false
+    for candidate in accessibilityLabelCandidates(for: element) {
+        let normalized = normalizedText(candidate)
+        if normalized == expectedLabel {
+            score = max(score, 100)
+            matched = true
+        } else if normalized.hasPrefix(expectedLabel) || expectedLabel.hasPrefix(normalized) {
+            score = max(score, 84)
+            matched = true
+        } else if normalized.contains(expectedLabel) || expectedLabel.contains(normalized) {
+            score = max(score, 72)
+            matched = true
+        }
+    }
+
+    guard matched else {
+        return nil
+    }
+
+    let role = normalizedRole(actualRole) ?? ""
+    if expectedRole != nil {
+        score += 24
+    }
+    if preferWritableText {
+        score += writableTextRoles.contains(role) ? 28 : -20
+    } else {
+        score += pressableRoles.contains(role) ? 18 : -10
+    }
+
+    return score
+}
+
+private func accessibilityLabelCandidates(for element: AXUIElement) -> [String] {
+    [
+        stringValue(axValue(element, attribute: kAXTitleAttribute)),
+        stringValue(axValue(element, attribute: kAXDescriptionAttribute)),
+        stringValue(axValue(element, attribute: kAXValueAttribute)),
+        stringValue(axValue(element, attribute: kAXIdentifierAttribute)),
+        stringValue(axValue(element, attribute: kAXHelpAttribute)),
+    ].compactMap { value in
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return value
+    }
+}
+
+private let pressableRoles: Set<String> = [
+    "button",
+    "checkbox",
+    "link",
+    "menuitem",
+    "popupbutton",
+    "radiobutton",
+]
+
+private let writableTextRoles: Set<String> = [
+    "combobox",
+    "searchfield",
+    "textarea",
+    "textfield",
+]
+
+private let roleAliases: [String: String] = [
+    "input": "textfield",
+    "select": "popupbutton",
+    "search": "searchfield",
+    "text": "textfield",
+]
+
+private func normalizedText(_ text: String) -> String {
+    text
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        .lowercased()
+}
+
+private func normalizedRole(_ role: String?) -> String? {
+    guard let role else {
+        return nil
+    }
+
+    let trimmed = role.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return nil
+    }
+
+    let withoutPrefix = trimmed.lowercased().hasPrefix("ax")
+        ? String(trimmed.dropFirst(2))
+        : trimmed
+
+    return withoutPrefix
+        .lowercased()
+        .replacingOccurrences(of: "[^a-z0-9]", with: "", options: .regularExpression)
+        .withRoleAlias()
+}
+
+private func normalizedAccessibilityActionName(_ action: String) -> String {
+    let trimmed = action.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return kAXPressAction as String
+    }
+    return trimmed.hasPrefix("AX") ? trimmed : "AX\(trimmed)"
+}
+
+private extension String {
+    func withRoleAlias() -> String {
+        roleAliases[self] ?? self
+    }
 }
 
 private func isCalculatorDisplayCandidate(_ string: String) -> Bool {
@@ -388,6 +860,17 @@ private func stringValue(_ value: AnyObject?) -> String? {
         return attributed.string
     default:
         return value.map { "\($0)" }
+    }
+}
+
+private func boolValue(_ value: AnyObject?) -> Bool? {
+    switch value {
+    case let bool as Bool:
+        return bool
+    case let number as NSNumber:
+        return number.boolValue
+    default:
+        return nil
     }
 }
 

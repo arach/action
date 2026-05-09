@@ -10,6 +10,7 @@ type HostRunner = (command: string, ...args: string[]) => Promise<{ stdout: stri
 export interface InteractionExecutionContext {
   runHost: HostRunner;
   resolveCalculatorButton: (query: CalculatorButtonDescriptor) => string;
+  resolveBundleId: (surfaceId: string | undefined) => string | undefined;
 }
 
 function numberFromInput(input: unknown): number | undefined {
@@ -79,6 +80,27 @@ function numberValue(input: unknown): number | undefined {
   return typeof input === "number" && Number.isFinite(input) ? input : undefined;
 }
 
+function targetLabel(action: RuntimeAction, target: ResolvedTarget | undefined): string | undefined {
+  return stringValue(action.input?.targetLabel)
+    ?? stringValue(action.input?.label)
+    ?? action.target?.text
+    ?? action.target?.semanticId
+    ?? target?.label;
+}
+
+function targetRole(action: RuntimeAction): string | undefined {
+  return stringValue(action.input?.role) ?? action.target?.role;
+}
+
+function targetBundleId(
+  action: RuntimeAction,
+  target: ResolvedTarget | undefined,
+  context: InteractionExecutionContext,
+): string | undefined {
+  return stringValue(action.input?.bundleId)
+    ?? context.resolveBundleId(action.target?.surfaceId ?? target?.surfaceId);
+}
+
 export async function executeInteractionAction(
   action: RuntimeAction,
   target: ResolvedTarget | undefined,
@@ -86,6 +108,23 @@ export async function executeInteractionAction(
 ): Promise<void> {
   if (action.kind === "type") {
     const text = String(action.input?.text ?? "");
+    const bundleId = targetBundleId(action, target, context);
+    const label = targetLabel(action, target);
+    if (bundleId && label) {
+      const args = [
+        "set-accessibility-value",
+        "--bundle-id", bundleId,
+        "--label", label,
+        "--value", text,
+      ];
+      const role = targetRole(action);
+      if (role) {
+        args.push("--role", role);
+      }
+      await context.runHost(args[0], ...args.slice(1));
+      return;
+    }
+
     const delayMs = numberValue(action.input?.delayMs);
     const args = ["type-text", "--text", text];
     if (delayMs && delayMs > 0) {
@@ -109,6 +148,22 @@ export async function executeInteractionAction(
   }
 
   if (action.kind === "click") {
+    const bundleId = targetBundleId(action, target, context);
+    const label = targetLabel(action, target);
+    if (bundleId && label) {
+      const args = [
+        "press-accessibility-element",
+        "--bundle-id", bundleId,
+        "--label", label,
+      ];
+      const role = targetRole(action);
+      if (role) {
+        args.push("--role", role);
+      }
+      await context.runHost(args[0], ...args.slice(1));
+      return;
+    }
+
     const point = action.target?.point;
     if (point) {
       await context.runHost(

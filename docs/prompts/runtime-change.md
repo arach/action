@@ -8,10 +8,10 @@ Propose a change to the `action` native runtime without regressing WebKit or rec
 
 You must:
 
-1. read [docs/native-runtime.md](/Users/arach/dev/action/docs/native-runtime.md)
-2. read [docs/api.md](/Users/arach/dev/action/docs/api.md)
-3. inspect [ActionHostMain.swift](/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift)
-4. inspect [ActionAgentRuntime.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentRuntime.swift)
+1. read [docs/native-runtime.md](docs/native-runtime.md)
+2. read [docs/api.md](docs/api.md)
+3. inspect [ActionHostMain.swift](native/engine/Sources/ActionHostMain.swift)
+4. inspect [ActionAgentRuntime.swift](native/engine/CoreSources/ActionAgentRuntime.swift)
 
 Your answer must separate:
 

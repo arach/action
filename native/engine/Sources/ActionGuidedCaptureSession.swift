@@ -146,6 +146,7 @@ private struct CalculatorDemoPlan {
     }
 }
 
+@MainActor
 final class GuidedCaptureSessionRunner {
     private let writer: ResponseWriter
     private let logger: DebugLogger

@@ -117,4 +117,16 @@ bun run native:dmg:build -- --version "$VERSION" --build "$BUILD_NUMBER"
 ```
 
 On `v*` tag pushes, it publishes the notarized DMG to the current repository's
-GitHub Release as `Action.dmg`.
+GitHub Release as `Action.dmg` and `Action-<version>.dmg`.
+
+Create and push a release tag:
+
+```bash
+bun run release:tag -- 0.1.0
+```
+
+To upload an already-built local DMG to the GitHub Release too:
+
+```bash
+bun run release:tag -- 0.1.0 --upload-bin
+```

@@ -37,6 +37,8 @@ public enum ActionAgentMethod: String, CaseIterable, Sendable {
     case activateApp = "app.activate"
     case typeText = "input.typeText"
     case drag = "input.drag"
+    case pressAccessibilityElement = "accessibility.pressElement"
+    case setAccessibilityValue = "accessibility.setValue"
     case setWindowFrame = "window.setFrame"
     case getWindowFrame = "window.getFrame"
     case calculatorButtons = "calculator.buttons"

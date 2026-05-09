@@ -121,7 +121,17 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
                 self?.report("Finished: \(configuration.outputPath)")
                 NSApplication.shared.terminate(nil)
             } catch {
-                self?.report("Failed: \(error.localizedDescription)")
+                let message = error.localizedDescription
+                self?.report("Failed: \(message)")
+                try? writer.write(ActionHostResponse(status: "error", outputPath: configuration.outputPath, detail: message))
+                if let finishedSignalPath = configuration.finishedSignalPath, !finishedSignalPath.isEmpty {
+                    let finishedSignalURL = URL(fileURLWithPath: finishedSignalPath)
+                    try? FileManager.default.createDirectory(
+                        at: finishedSignalURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true
+                    )
+                    try? Data("error:\(message)\n".utf8).write(to: finishedSignalURL)
+                }
                 NSApplication.shared.terminate(nil)
             }
         }

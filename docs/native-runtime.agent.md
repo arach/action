@@ -14,9 +14,9 @@ Owns:
 
 Primary files:
 
-- [ActionHostMain.swift](/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift)
-- [ActionLauncherController.swift](/Users/arach/dev/action/native/engine/Sources/ActionLauncherController.swift)
-- [ActionLauncherViewModel.swift](/Users/arach/dev/action/native/engine/Sources/ActionLauncherViewModel.swift)
+- [ActionHostMain.swift](native/engine/Sources/ActionHostMain.swift)
+- [ActionLauncherController.swift](native/engine/Sources/ActionLauncherController.swift)
+- [ActionLauncherViewModel.swift](native/engine/Sources/ActionLauncherViewModel.swift)
 
 ### Agent Runtime
 
@@ -29,14 +29,14 @@ Owns:
 
 Primary files:
 
-- [ActionAgentRuntime.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentRuntime.swift)
-- [ActionAgentClient.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentClient.swift)
-- [ActionAgentCommandBridge.swift](/Users/arach/dev/action/native/engine/Sources/ActionAgentCommandBridge.swift)
+- [ActionAgentRuntime.swift](native/engine/CoreSources/ActionAgentRuntime.swift)
+- [ActionAgentClient.swift](native/engine/CoreSources/ActionAgentClient.swift)
+- [ActionAgentCommandBridge.swift](native/engine/Sources/ActionAgentCommandBridge.swift)
 
 ## Recording Rule
 
 - Do not implement real recording directly in the headless agent path.
-- Use [ActionRecordingProbeLauncher.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionRecordingProbeLauncher.swift).
+- Use [ActionRecordingProbeLauncher.swift](native/engine/CoreSources/ActionRecordingProbeLauncher.swift).
 - The probe launches `Action.app` with `recording-probe` args.
 - The probe runner performs the actual `WindowRecorder` call.
 

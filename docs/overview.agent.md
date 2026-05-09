@@ -16,11 +16,11 @@
 
 ## Entry Points
 
-- Root framing: [README.md](/Users/arach/dev/action/README.md)
-- Native host main: [ActionHostMain.swift](/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift)
-- Agent runtime: [ActionAgentRuntime.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentRuntime.swift)
-- Recording probe launcher: [ActionRecordingProbeLauncher.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionRecordingProbeLauncher.swift)
-- Recording probe app runner: [RecordingProbeAppRunner.swift](/Users/arach/dev/action/native/engine/Sources/RecordingProbeAppRunner.swift)
+- Root framing: [README.md](README.md)
+- Native host main: [ActionHostMain.swift](native/engine/Sources/ActionHostMain.swift)
+- Agent runtime: [ActionAgentRuntime.swift](native/engine/CoreSources/ActionAgentRuntime.swift)
+- Recording probe launcher: [ActionRecordingProbeLauncher.swift](native/engine/CoreSources/ActionRecordingProbeLauncher.swift)
+- Recording probe app runner: [RecordingProbeAppRunner.swift](native/engine/Sources/RecordingProbeAppRunner.swift)
 
 ## Use This Page For
 

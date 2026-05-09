@@ -16,6 +16,7 @@
     "action": "bun packages/cli/src/main.ts",
     "action-dev": "bun packages/cli/src/action-dev.ts",
     "mcp": "bun packages/mcp/src/index.ts",
+    "release:tag": "scripts/tag-release",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "docs:generate": "dewey generate",
     "docs:agent": "dewey agent",
@@ -36,11 +37,16 @@
     "native:permissions:request": "native/engine/scripts/run-app-host.sh request",
     "native:permissions:open:accessibility": "native/engine/scripts/run-app-host.sh open-accessibility-settings",
     "native:permissions:open:screen-recording": "native/engine/scripts/run-app-host.sh open-screen-recording-settings",
+    "native:ax:audit": "native/engine/scripts/audit-daily-app-ax.sh",
+    "native:chrome:ax": "native/engine/scripts/test-chrome-ax-control.sh",
+    "native:chrome:bg": "native/engine/scripts/test-chrome-background-nav-overlay.sh",
+    "native:midjourney:bg": "native/engine/scripts/test-midjourney-background-create.sh",
+    "native:typing:sounds:install": "native/engine/scripts/install-typing-sounds.sh",
     "native:test:screenshot": "native/engine/scripts/test-screenshot.sh",
     "native:test:record": "native/engine/scripts/test-record.sh"
   },
   "devDependencies": {
-    "@arach/dewey": "/Users/arach/dev/dewey/packages/docs",
+    "@arach/dewey": "^0.3.6",
     "@types/node": "^24.0.0",
     "typescript": "^5.7.3"
   },

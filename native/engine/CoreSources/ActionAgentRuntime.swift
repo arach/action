@@ -207,6 +207,46 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 try ActionNativeAutomation.drag(from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), durationMs: durationMs)
             }
             return ["status": "dragged", "detail": "\(Int(fromX)),\(Int(fromY))->\(Int(toX)),\(Int(toY))"]
+        case .pressAccessibilityElement:
+            guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 22, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])
+            }
+            guard let label = request.params["label"], !label.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 23, userInfo: [NSLocalizedDescriptionKey: "Missing label"])
+            }
+            let match = try ActionNativeAutomation.pressAccessibilityElement(
+                bundleId: bundleId,
+                label: label,
+                role: request.params["role"]
+            )
+            return [
+                "status": "pressed",
+                "bundleId": bundleId,
+                "label": label,
+                "role": match.role,
+            ]
+        case .setAccessibilityValue:
+            guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 24, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])
+            }
+            guard let label = request.params["label"], !label.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 25, userInfo: [NSLocalizedDescriptionKey: "Missing label"])
+            }
+            guard let value = request.params["value"] else {
+                throw NSError(domain: "ActionAgent", code: 26, userInfo: [NSLocalizedDescriptionKey: "Missing value"])
+            }
+            let match = try ActionNativeAutomation.setAccessibilityValue(
+                bundleId: bundleId,
+                label: label,
+                role: request.params["role"],
+                value: value
+            )
+            return [
+                "status": "value-set",
+                "bundleId": bundleId,
+                "label": label,
+                "role": match.role,
+            ]
         case .setWindowFrame:
             guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
                 throw NSError(domain: "ActionAgent", code: 4, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])

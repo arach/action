@@ -196,7 +196,7 @@ Reflection is not the same thing as raw observation.
 
 The runtime should own reflection sessions, prompts, findings, and artifacts, but
 provider-specific model clients should stay outside the native engine. See
-[LIVE_INSPECTION_RUNTIME.md](/Users/arach/dev/action/docs/LIVE_INSPECTION_RUNTIME.md).
+[LIVE_INSPECTION_RUNTIME.md](docs/LIVE_INSPECTION_RUNTIME.md).
 
 ### Target
 

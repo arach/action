@@ -7,7 +7,7 @@ enum ActionAgentCLIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingMethod:
-            return "Missing method. Try: ping, status, app.launch, app.activate, input.drag, input.typeText, calculator.buttons, calculator.clickButton, calculator.displayValue"
+            return "Missing method. Try: ping, status, app.launch, app.activate, input.drag, input.typeText, accessibility.pressElement, accessibility.setValue, calculator.buttons, calculator.clickButton, calculator.displayValue"
         }
     }
 }
@@ -59,6 +59,16 @@ struct ActionAgentCLIMain {
 
             if argument == "--label", let value = iterator.next() {
                 params["label"] = value
+                continue
+            }
+
+            if argument == "--role", let value = iterator.next() {
+                params["role"] = value
+                continue
+            }
+
+            if argument == "--value", let value = iterator.next() {
+                params["value"] = value
                 continue
             }
 

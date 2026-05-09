@@ -8,11 +8,11 @@ Review the current `action` recording path and diagnose why recording is failing
 
 You must:
 
-1. read [docs/recording.md](/Users/arach/dev/action/docs/recording.md)
-2. inspect [ActionHostMain.swift](/Users/arach/dev/action/native/engine/Sources/ActionHostMain.swift)
-3. inspect [ActionAgentRuntime.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionAgentRuntime.swift)
-4. inspect [ActionRecordingProbeLauncher.swift](/Users/arach/dev/action/native/engine/CoreSources/ActionRecordingProbeLauncher.swift)
-5. inspect [RecordingProbeAppRunner.swift](/Users/arach/dev/action/native/engine/Sources/RecordingProbeAppRunner.swift)
+1. read [docs/recording.md](docs/recording.md)
+2. inspect [ActionHostMain.swift](native/engine/Sources/ActionHostMain.swift)
+3. inspect [ActionAgentRuntime.swift](native/engine/CoreSources/ActionAgentRuntime.swift)
+4. inspect [ActionRecordingProbeLauncher.swift](native/engine/CoreSources/ActionRecordingProbeLauncher.swift)
+5. inspect [RecordingProbeAppRunner.swift](native/engine/Sources/RecordingProbeAppRunner.swift)
 
 Then answer:
 
