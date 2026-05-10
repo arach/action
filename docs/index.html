@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Action — Native macOS capture and demo workstation</title>
-  <meta name="description" content="A native macOS runtime for staging scenes, recording deterministic sessions, and feeding structured output to agents or post-production.">
+  <title>Mira — Agentic macOS demo workstation</title>
+  <meta name="description" content="Mira is a native macOS agent for observing apps, resolving targets, acting through local control lanes, and recording structured demo artifacts.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -184,7 +184,7 @@
     .demo-video {
       display: block;
       width: 100%;
-      aspect-ratio: 1280 / 1050;
+      aspect-ratio: 16 / 9;
       background: #050504;
       border: 1px solid var(--border);
       border-radius: 4px;
@@ -217,6 +217,30 @@
     .demo-links a:hover {
       border-color: var(--accent);
       color: var(--accent);
+    }
+    .easter-egg {
+      display: inline-block;
+      width: 5.75rem;
+      aspect-ratio: 1;
+      margin-top: 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      background: var(--paper);
+      opacity: 0.92;
+      transform: rotate(-1deg);
+      transition: transform 160ms ease, opacity 160ms ease, border-color 160ms ease;
+    }
+    .easter-egg:hover {
+      opacity: 1;
+      transform: rotate(0deg) translateY(-2px);
+      border-color: var(--accent);
+    }
+    .easter-egg img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
     }
 
     .cards {
@@ -335,7 +359,7 @@
   <div class="wrap">
 
     <nav>
-      <a class="nav-brand" href="/">action<span class="dim">.app</span></a>
+      <a class="nav-brand" href="/">mira<span class="dim">.app</span></a>
       <ul class="nav-links">
         <li><a href="#demo">Demo</a></li>
         <li><a href="getting-started.md">Docs</a></li>
@@ -344,9 +368,9 @@
     </nav>
 
     <div class="hero">
-      <p class="eyebrow">macOS native runtime</p>
-      <h1>Stage. Record. Review. Hand off.</h1>
-      <p class="hero-sub">A native macOS workstation for capturing deterministic sessions, building structured trace artifacts, and feeding output to agents or post-production.</p>
+      <p class="eyebrow">agentic macOS demo workstation</p>
+      <h1>Mira.</h1>
+      <p class="hero-sub">A native macOS agent that observes app surfaces, resolves targets through browser and accessibility context, acts through local control lanes, and records the whole run as structured demo material.</p>
 
       <div class="terminal">
         <div class="terminal-bar">
@@ -358,7 +382,7 @@
         <div class="terminal-body">
           <div><span class="prompt">$ </span><span class="cmd">bun install && bun run native:app:build</span></div>
           <div><span class="prompt">$ </span><span class="cmd">bun run action-dev -- launch</span></div>
-          <div class="out"># Action.app running · console ready</div>
+          <div class="out"># Action.app runtime running · Mira ready</div>
           <div><span class="prompt">$ </span><span class="cmd">action-dev host guided-calculator-demo</span></div>
           <div class="out"># capture started · artifact writing…</div>
         </div>
@@ -367,20 +391,23 @@
 
     <section id="demo">
       <p class="label">Dogfood capture</p>
-      <h2>Mira uses Action to make Action a logo.</h2>
-      <p class="lead">A real take captured from Mira's persistent Chrome profile while Midjourney explored the mark that became the favorite.</p>
+      <h2>Mira shows her control lanes.</h2>
+      <p class="lead">A real take from Mira's persistent Chrome profile: vision and browser observation, AX/CDP target resolution, native input, and a visible cursor layer for dramatic education.</p>
 
       <div class="demo-grid">
-        <video class="demo-video" controls playsinline preload="metadata" poster="assets/action-mira-logo-poster.png">
-          <source src="assets/action-mira-midjourney-logo.mp4" type="video/mp4">
+        <video class="demo-video" controls playsinline preload="metadata" poster="assets/mira-control-lanes-poster.png">
+          <source src="assets/mira-control-lanes-demo.mp4" type="video/mp4">
         </video>
         <div class="demo-copy">
-          <p>The capture uses Action's native recording path against the exact Mira Chrome window region, with a finished marker proving the recording completed.</p>
-          <p>The selected direction keeps the abstract A, cursor form, cyan stroke, coral recording dot, and capture-corner ticks.</p>
+          <p>The cursor and typing are viewer-facing teaching cues. The trace records the real control path: observe, resolve, act, inspect.</p>
+          <p>The native Action runtime still does the low-level work: exact-window capture, process-directed input, recording probe lifecycle, and finished-marker artifacts.</p>
           <div class="demo-links">
-            <a href="assets/action-mira-midjourney-logo.mp4">Open MP4</a>
-            <a href="assets/action-mira-logo-poster.png">Open poster</a>
+            <a href="assets/mira-control-lanes-demo.mp4">Open MP4</a>
+            <a href="assets/mira-control-lanes-poster.png">Open poster</a>
           </div>
+          <a class="easter-egg" href="assets/mira-fast-mark-easter-egg.png" aria-label="Open Mira fast mark">
+            <img src="assets/mira-fast-mark-easter-egg.png" alt="">
+          </a>
         </div>
       </div>
     </section>
@@ -388,16 +415,16 @@
     <section>
       <p class="label">What it is</p>
       <h2>Not just screen recording.</h2>
-      <p class="lead">Action is a runtime where a human or an agent can stage a scene, run deterministic actions, and produce machine-readable output with every capture.</p>
+      <p class="lead">Mira is the agent-facing product. Action is the native runtime underneath: a reliable macOS control and capture layer with structured artifacts at the end.</p>
 
       <div class="cards">
         <div class="card">
-          <p class="card-name">Action.app</p>
-          <p class="card-desc">Signed AppKit host. Owns permissions UX, WebKit console, recording-probe lifecycle, and the supervision overlay.</p>
+          <p class="card-name">Mira</p>
+          <p class="card-desc">The operator personality and agent loop: observe the surface, decide what matters, and make the control path legible to the viewer.</p>
         </div>
         <div class="card">
-          <p class="card-name">agent runtime</p>
-          <p class="card-desc">Local orchestration process for transport, automation-facing methods, and agent-to-app coordination.</p>
+          <p class="card-name">Action runtime</p>
+          <p class="card-desc">Signed AppKit host and local orchestration process for permissions UX, native capture, WebKit, and automation-facing methods.</p>
         </div>
         <div class="card">
           <p class="card-name">session artifacts</p>
@@ -409,7 +436,7 @@
     <section>
       <p class="label">The loop</p>
       <h2>One tight cycle.</h2>
-      <p class="lead">Action is organized around a single repeatable loop you can run manually or drive with an agent.</p>
+      <p class="lead">Mira is organized around a single repeatable loop you can run manually or drive with an agent.</p>
 
       <div class="steps">
         <div class="step">

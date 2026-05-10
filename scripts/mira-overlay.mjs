@@ -33,7 +33,7 @@ try {
     case "show":
       await installMiraPet();
       await assertLatticesDaemon();
-      console.log(JSON.stringify(await showMira(rest.join(" ").trim()), null, 2));
+      console.log(JSON.stringify(await showMira(parseShowArgs(rest)), null, 2));
       break;
     case "hide":
       await assertLatticesDaemon();
@@ -68,21 +68,28 @@ async function installMiraPet() {
   await copyFile(sourceSpritesheetPath, join(installedPetRoot, "spritesheet.webp"));
 }
 
-async function showMira(message) {
-  const result = await daemonCall("overlay.actor.publish", {
+async function showMira(options = {}) {
+  const { message = "", noMessage = false } =
+    typeof options === "string" ? { message: options } : options;
+  const payload = {
     id: ACTOR_ID,
     renderer: "sprite",
     asset: PET_ID,
     state: "idle",
-    name: "Mira",
-    message: message || "Ready on the lattice.",
-    placement: "bottom",
-    style: "playful",
     ttlMs: 0,
     opacity: 1,
     zIndex: 540,
     dismissible: false,
-  });
+  };
+  if (!noMessage) {
+    payload.name = "Mira";
+    payload.message = message || "Ready on the lattice.";
+    payload.placement = "bottom";
+    payload.style = "playful";
+  } else {
+    await daemonCall("overlay.clear", { id: ACTOR_ID }).catch(() => undefined);
+  }
+  const result = await daemonCall("overlay.actor.publish", payload);
   return { ok: true, petRoot: installedPetRoot, result };
 }
 
@@ -300,13 +307,32 @@ function printUsageAndExit() {
   process.exit(1);
 }
 
+function parseShowArgs(args) {
+  const messageParts = [];
+  let noMessage = false;
+
+  for (const arg of args) {
+    if (arg === "--no-message") {
+      noMessage = true;
+    } else {
+      messageParts.push(arg);
+    }
+  }
+
+  return {
+    message: messageParts.join(" ").trim(),
+    noMessage,
+  };
+}
+
 function usageText() {
   return [
     "Usage: bun scripts/mira-overlay.mjs <command>",
     "",
     "Commands:",
     "  install                 Install Mira into ~/.codex/pets/mira",
-    "  show [message]          Show Mira through Lattices overlay.actor.publish",
+    "  show [--no-message] [message]",
+    "                          Show Mira through Lattices overlay.actor.publish",
     "  move <x> <y> [ms]       Move the persistent Mira actor",
     "  hide                    Clear the persistent Mira actor",
     "  status                  Print Lattices daemon status",

@@ -7,11 +7,49 @@ const targetURL = args.url || process.env.ACTION_MIDJOURNEY_URL || "https://www.
 const prompt = args.prompt || process.env.ACTION_MIDJOURNEY_PROMPT || "";
 const timeoutMs = Number(args.timeoutMs || process.env.ACTION_MIDJOURNEY_TIMEOUT_MS || 240000);
 const minImageCount = Number(args.minImageCount || process.env.ACTION_MIDJOURNEY_MIN_IMAGE_COUNT || 0);
+const typeDelayMs = Number(args.delayMs || process.env.ACTION_MIDJOURNEY_TYPE_DELAY_MS || 8);
+const promptWaitMs = Number(args.waitMs || process.env.ACTION_MIDJOURNEY_PROMPT_WAIT_MS || 9000);
 
 switch (command) {
   case "status":
     await withPage(async (page) => {
       console.log(JSON.stringify(await page.status(), null, 2));
+    });
+    break;
+  case "prepare-prompt":
+    await withPage(async (page) => {
+      console.log(JSON.stringify(await page.preparePrompt({ waitMs: promptWaitMs }), null, 2));
+    });
+    break;
+  case "type-prompt":
+    if (!prompt) {
+      throw new Error("Missing --prompt");
+    }
+    await withPage(async (page) => {
+      const prepared = await page.preparePrompt({ waitMs: promptWaitMs });
+      if (!prepared.ok) {
+        console.log(JSON.stringify(prepared, null, 2));
+        throw new Error("Midjourney prompt box is not ready. Sign in to Midjourney in the mira profile first.");
+      }
+      const before = await page.status();
+      await page.focusPrompt();
+      await page.clearPrompt();
+      await page.typeText(prompt, typeDelayMs);
+      const after = await page.status();
+      console.log(JSON.stringify({ prepared, before, after, prompt }, null, 2));
+    });
+    break;
+  case "press-enter":
+    await withPage(async (page) => {
+      const prepared = await page.preparePrompt({ waitMs: promptWaitMs });
+      if (!prepared.ok) {
+        console.log(JSON.stringify(prepared, null, 2));
+        throw new Error("Midjourney prompt box is not ready. Sign in to Midjourney in the mira profile first.");
+      }
+      await page.focusPrompt();
+      await page.pressEnter();
+      const after = await page.status();
+      console.log(JSON.stringify({ prepared, after }, null, 2));
     });
     break;
   case "submit":
@@ -26,7 +64,7 @@ switch (command) {
       }
       await page.focusPrompt();
       await page.clearPrompt();
-      await page.typeText(prompt);
+      await page.typeText(prompt, typeDelayMs);
       await page.pressEnter();
       const after = await page.status();
       console.log(JSON.stringify({ before, after, prompt }, null, 2));
@@ -50,7 +88,7 @@ switch (command) {
     break;
   default:
     console.error(`Unknown command: ${command}`);
-    console.error("Usage: mira-midjourney-cdp.mjs status|submit|wait-result [--debug-port PORT] [--prompt TEXT]");
+    console.error("Usage: mira-midjourney-cdp.mjs status|prepare-prompt|type-prompt|press-enter|submit|wait-result [--debug-port PORT] [--prompt TEXT]");
     process.exit(1);
 }
 
@@ -110,6 +148,63 @@ class MidjourneyPage {
     return await this.evaluate(pageStatusExpression());
   }
 
+  async preparePrompt(options = {}) {
+    const waitMs = Number(options.waitMs || 0);
+    const startedAt = Date.now();
+    let last;
+    while (true) {
+      last = await this.evaluate(`
+        (() => {
+          ${findPromptBoxSource({ assign: true })}
+          window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+          const activeDialog = [...document.querySelectorAll("[role='dialog'], [aria-modal='true']")]
+            .find((element) => {
+              const rect = element.getBoundingClientRect();
+              return rect.width > 80 && rect.height > 80;
+            });
+          const closeButton = activeDialog
+            ? [...activeDialog.querySelectorAll("button,[role='button']")]
+                .find((element) => /close|dismiss|esc/i.test(
+                  [
+                    element.innerText,
+                    element.getAttribute("aria-label"),
+                    element.getAttribute("title"),
+                  ].filter(Boolean).join(" "),
+                ))
+            : null;
+          closeButton?.click();
+          const element = window.__actionFindPromptBox();
+          if (!element) return { ok: false, reason: "prompt box missing", url: location.href, title: document.title };
+          element.scrollIntoView({ block: "nearest", inline: "nearest" });
+          element.focus();
+          element.click();
+          const rect = element.getBoundingClientRect();
+          return {
+            ok: true,
+            url: location.href,
+            title: document.title,
+            rect: {
+              x: Math.round(rect.x),
+              y: Math.round(rect.y),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+              centerX: Math.round(rect.x + rect.width / 2),
+              centerY: Math.round(rect.y + rect.height / 2),
+            },
+            viewport: {
+              width: window.innerWidth,
+              height: window.innerHeight,
+            },
+          };
+        })()
+      `);
+      if (last?.ok || waitMs <= 0 || Date.now() - startedAt >= waitMs) {
+        return last;
+      }
+      await sleep(500);
+    }
+  }
+
   async focusPrompt() {
     const result = await this.evaluate(`
       (() => {
@@ -164,14 +259,14 @@ class MidjourneyPage {
     });
   }
 
-  async typeText(text) {
+  async typeText(text, delayMs = 8) {
     for (const character of text) {
       await this.client.send("Input.dispatchKeyEvent", {
         type: "char",
         text: character,
         unmodifiedText: character,
       });
-      await sleep(8);
+      await sleep(delayMs);
     }
   }
 
@@ -337,6 +432,10 @@ function parseArgs(values) {
       parsed.timeoutMs = values[++index];
     } else if (value === "--min-image-count") {
       parsed.minImageCount = values[++index];
+    } else if (value === "--delay-ms") {
+      parsed.delayMs = values[++index];
+    } else if (value === "--wait-ms") {
+      parsed.waitMs = values[++index];
     }
   }
   return parsed;

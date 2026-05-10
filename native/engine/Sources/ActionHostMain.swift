@@ -53,8 +53,10 @@ enum ActionHostCommand: String {
     case activateApp = "activate-app"
     case typeText = "type-text"
     case typeAppText = "type-app-text"
+    case typePidText = "type-pid-text"
     case pressKey = "press-key"
     case pressAppKey = "press-app-key"
+    case pressPidKey = "press-pid-key"
     case clickPoint = "click-point"
     case drag
     case pressAccessibilityElement = "press-accessibility-element"
@@ -391,6 +393,13 @@ func postKeyPress(_ key: String, modifiers: [String] = []) throws {
 
 func postKeyPressToApp(bundleId: String, key: String, modifiers: [String] = []) throws {
     let app = try runningApplication(bundleId: bundleId)
+    try postKeyPressToPid(processIdentifier: app.processIdentifier, key: key, modifiers: modifiers)
+}
+
+func postKeyPressToPid(processIdentifier: pid_t, key: String, modifiers: [String] = []) throws {
+    guard processIdentifier > 0 else {
+        throw ActionHostError.accessibilityActionFailed("Invalid process identifier")
+    }
     guard let source = CGEventSource(stateID: .hidSystemState) else {
         throw ActionHostError.accessibilityActionFailed("Unable to create event source")
     }
@@ -408,9 +417,9 @@ func postKeyPressToApp(bundleId: String, key: String, modifiers: [String] = []) 
 
     keyDown.flags = flags
     keyUp.flags = flags
-    keyDown.postToPid(app.processIdentifier)
+    keyDown.postToPid(processIdentifier)
     usleep(50000)
-    keyUp.postToPid(app.processIdentifier)
+    keyUp.postToPid(processIdentifier)
 }
 
 func clickPoint(_ point: CGPoint) throws {
@@ -454,6 +463,13 @@ func postText(_ text: String, delayMs: Int?) throws {
 
 func postTextToApp(bundleId: String, text: String, delayMs: Int?) throws {
     let app = try runningApplication(bundleId: bundleId)
+    try postTextToPid(processIdentifier: app.processIdentifier, text: text, delayMs: delayMs)
+}
+
+func postTextToPid(processIdentifier: pid_t, text: String, delayMs: Int?) throws {
+    guard processIdentifier > 0 else {
+        throw ActionHostError.accessibilityActionFailed("Invalid process identifier")
+    }
     guard let source = CGEventSource(stateID: .hidSystemState) else {
         throw ActionHostError.accessibilityActionFailed("Unable to create event source")
     }
@@ -467,11 +483,11 @@ func postTextToApp(bundleId: String, text: String, delayMs: Int?) throws {
 
         keyDown.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unicode)
         keyUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unicode)
-        keyDown.postToPid(app.processIdentifier)
+        keyDown.postToPid(processIdentifier)
         if let delayMs, delayMs > 0 {
             usleep(useconds_t(delayMs * 500))
         }
-        keyUp.postToPid(app.processIdentifier)
+        keyUp.postToPid(processIdentifier)
         if let delayMs, delayMs > 0 {
             usleep(useconds_t(delayMs * 500))
         }
@@ -2404,18 +2420,18 @@ final class DemoCursorOverlayView: NSView {
         shadow.set()
 
         let path = NSBezierPath(roundedRect: pillRect, xRadius: 16, yRadius: 16)
-        NSColor(calibratedWhite: 0.06, alpha: 0.62).setFill()
+        mattePanelFill(alpha: 0.88).setFill()
         path.fill()
-        accent.withAlphaComponent(0.34).setStroke()
+        accent.withAlphaComponent(0.44).setStroke()
         path.lineWidth = 1.1
         path.stroke()
 
-        accent.withAlphaComponent(0.58).setFill()
+        accent.withAlphaComponent(0.68).setFill()
         NSBezierPath(ovalIn: CGRect(x: pillRect.minX + 11, y: pillRect.midY - 4, width: 8, height: 8)).fill()
 
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.96),
+            .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.98),
         ]
         (label as NSString).draw(
             in: CGRect(
@@ -2471,7 +2487,7 @@ final class DemoCursorOverlayView: NSView {
             text: "Typing",
             in: CGRect(x: rect.minX + 18, y: rect.maxY - 30, width: rect.width - 36, height: 18),
             font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            color: NSColor(calibratedRed: 0.88, green: 0.84, blue: 0.74, alpha: 0.50 * alpha)
+            color: NSColor(calibratedRed: 0.90, green: 0.86, blue: 0.74, alpha: 0.70 * alpha)
         )
 
         let displayText = summarizeOverlayText(typingText)
@@ -2479,7 +2495,7 @@ final class DemoCursorOverlayView: NSView {
             text: "\(displayText)|",
             in: CGRect(x: rect.minX + 18, y: rect.minY + 20, width: rect.width - 36, height: 32),
             font: NSFont.monospacedSystemFont(ofSize: 20, weight: .semibold),
-            color: NSColor(calibratedRed: 0.95, green: 0.92, blue: 0.84, alpha: 0.88 * alpha)
+            color: NSColor(calibratedRed: 0.98, green: 0.95, blue: 0.86, alpha: 0.98 * alpha)
         )
     }
 
@@ -2499,32 +2515,32 @@ final class DemoCursorOverlayView: NSView {
         let accent = accentColor(for: label)
 
         let shadow = NSShadow()
-        shadow.shadowBlurRadius = 10
-        shadow.shadowOffset = CGSize(width: 0, height: -4)
-        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.12 * alpha)
+        shadow.shadowBlurRadius = 16
+        shadow.shadowOffset = CGSize(width: 0, height: -6)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.24 * alpha)
         shadow.set()
 
-        let panel = NSBezierPath(roundedRect: rect, xRadius: 13, yRadius: 13)
-        NSColor(calibratedWhite: 0.045, alpha: 0.42 * alpha).setFill()
+        let panel = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
+        mattePanelFill(alpha: 0.90 * alpha).setFill()
         panel.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.055 * alpha).setStroke()
+        NSColor(calibratedWhite: 1, alpha: 0.105 * alpha).setStroke()
         panel.lineWidth = 1
         panel.stroke()
 
-        accent.withAlphaComponent(0.50 * alpha).setFill()
+        accent.withAlphaComponent(0.74 * alpha).setFill()
         NSBezierPath(ovalIn: CGRect(x: rect.minX + 13, y: rect.midY - 4, width: 8, height: 8)).fill()
 
         drawText(
-            text: "Action",
+            text: "Mira",
             in: CGRect(x: rect.minX + 29, y: rect.maxY - 22, width: 62, height: 15),
             font: NSFont.systemFont(ofSize: 10, weight: .medium),
-            color: NSColor(calibratedWhite: 1, alpha: 0.36 * alpha)
+            color: NSColor(calibratedWhite: 1, alpha: 0.62 * alpha)
         )
         drawText(
             text: label,
             in: CGRect(x: rect.minX + 29, y: rect.maxY - 40, width: rect.width - 42, height: 18),
             font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-            color: NSColor(calibratedWhite: 1, alpha: 0.78 * alpha)
+            color: NSColor(calibratedWhite: 1, alpha: 0.94 * alpha)
         )
 
         if let statusDetail, !statusDetail.isEmpty {
@@ -2532,14 +2548,14 @@ final class DemoCursorOverlayView: NSView {
                 text: statusDetail,
                 in: CGRect(x: rect.minX + 29, y: rect.minY + 8, width: rect.width - 42, height: 15),
                 font: NSFont.systemFont(ofSize: 10.5, weight: .regular),
-                color: NSColor(calibratedWhite: 1, alpha: 0.46 * alpha)
+                color: NSColor(calibratedWhite: 1, alpha: 0.70 * alpha)
             )
         }
 
         let trackRect = CGRect(x: rect.maxX - 76, y: rect.maxY - 16, width: 48, height: 2)
-        NSColor(calibratedWhite: 1, alpha: 0.08 * alpha).setFill()
+        NSColor(calibratedWhite: 1, alpha: 0.14 * alpha).setFill()
         NSBezierPath(roundedRect: trackRect, xRadius: 1, yRadius: 1).fill()
-        accent.withAlphaComponent(0.38 * alpha).setFill()
+        accent.withAlphaComponent(0.62 * alpha).setFill()
         NSBezierPath(
             roundedRect: CGRect(
                 x: trackRect.minX,
@@ -2568,15 +2584,15 @@ final class DemoCursorOverlayView: NSView {
             height: 222
         )
         let shadow = NSShadow()
-        shadow.shadowBlurRadius = 12
-        shadow.shadowOffset = CGSize(width: 0, height: -5)
-        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.16 * alpha)
+        shadow.shadowBlurRadius = 16
+        shadow.shadowOffset = CGSize(width: 0, height: -6)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.24 * alpha)
         shadow.set()
 
-        let panel = NSBezierPath(roundedRect: rect, xRadius: 13, yRadius: 13)
-        NSColor(calibratedWhite: 0.045, alpha: 0.42 * alpha).setFill()
+        let panel = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
+        mattePanelFill(alpha: 0.90 * alpha).setFill()
         panel.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.055 * alpha).setStroke()
+        NSColor(calibratedWhite: 1, alpha: 0.105 * alpha).setStroke()
         panel.lineWidth = 1
         panel.stroke()
 
@@ -2584,7 +2600,7 @@ final class DemoCursorOverlayView: NSView {
             text: "Preview",
             in: CGRect(x: rect.minX + 14, y: rect.maxY - 25, width: rect.width - 28, height: 15),
             font: NSFont.systemFont(ofSize: 10.5, weight: .semibold),
-            color: NSColor(calibratedWhite: 1, alpha: 0.48 * alpha)
+            color: NSColor(calibratedWhite: 1, alpha: 0.68 * alpha)
         )
 
         let imageBounds = CGRect(x: rect.minX + 12, y: rect.minY + 12, width: rect.width - 24, height: rect.height - 46)
@@ -2603,7 +2619,7 @@ final class DemoCursorOverlayView: NSView {
 
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(roundedRect: imageBounds, xRadius: 9, yRadius: 9).addClip()
-        NSColor(calibratedWhite: 0, alpha: 0.20 * alpha).setFill()
+        NSColor(calibratedWhite: 0, alpha: 0.48 * alpha).setFill()
         NSBezierPath(rect: imageBounds).fill()
         previewImage.draw(in: imageRect, from: .zero, operation: .sourceOver, fraction: 0.92 * alpha)
         NSGraphicsContext.restoreGraphicsState()
@@ -2649,15 +2665,15 @@ final class DemoCursorOverlayView: NSView {
         )
 
         let shadow = NSShadow()
-        shadow.shadowBlurRadius = 10
-        shadow.shadowOffset = CGSize(width: 0, height: -4)
-        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.12 * alpha)
+        shadow.shadowBlurRadius = 16
+        shadow.shadowOffset = CGSize(width: 0, height: -6)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.24 * alpha)
         shadow.set()
 
-        let panel = NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12)
-        NSColor(calibratedWhite: 0.045, alpha: 0.36 * alpha).setFill()
+        let panel = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
+        mattePanelFill(alpha: 0.88 * alpha).setFill()
         panel.fill()
-        NSColor(calibratedWhite: 1, alpha: 0.045 * alpha).setStroke()
+        NSColor(calibratedWhite: 1, alpha: 0.10 * alpha).setStroke()
         panel.lineWidth = 1
         panel.stroke()
 
@@ -2665,21 +2681,21 @@ final class DemoCursorOverlayView: NSView {
             text: traceTitle,
             in: CGRect(x: rect.minX + 14, y: rect.maxY - 27, width: rect.width - 28, height: 15),
             font: NSFont.systemFont(ofSize: 10.5, weight: .semibold),
-            color: NSColor(calibratedWhite: 1, alpha: 0.46 * alpha)
+            color: NSColor(calibratedWhite: 1, alpha: 0.68 * alpha)
         )
 
         for (index, line) in visibleLines.enumerated() {
             let parsed = parseTraceLine(line)
             let y = rect.maxY - 49 - CGFloat(index) * rowHeight
             let dotRect = CGRect(x: rect.minX + 15, y: y + 4, width: 7, height: 7)
-            accentColor(for: parsed.kind).withAlphaComponent(0.54 * alpha).setFill()
+            accentColor(for: parsed.kind).withAlphaComponent(0.76 * alpha).setFill()
             NSBezierPath(ovalIn: dotRect).fill()
 
             drawText(
                 text: parsed.text,
                 in: CGRect(x: rect.minX + 30, y: y - 1, width: rect.width - 46, height: 16),
                 font: NSFont.systemFont(ofSize: 11, weight: index == visibleLines.count - 1 ? .semibold : .regular),
-                color: NSColor(calibratedWhite: 1, alpha: (index == visibleLines.count - 1 ? 0.72 : 0.48) * alpha)
+                color: NSColor(calibratedWhite: 1, alpha: (index == visibleLines.count - 1 ? 0.94 : 0.68) * alpha)
             )
         }
     }
@@ -2751,17 +2767,21 @@ final class DemoCursorOverlayView: NSView {
 
     private func drawOverlayPanel(rect: CGRect, alpha: CGFloat, accent: NSColor) {
         let shadow = NSShadow()
-        shadow.shadowBlurRadius = 10
+        shadow.shadowBlurRadius = 16
         shadow.shadowOffset = CGSize(width: 0, height: -7)
-        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.14 * alpha)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.24 * alpha)
         shadow.set()
 
-        let path = NSBezierPath(roundedRect: rect, xRadius: 14, yRadius: 14)
-        NSColor(calibratedWhite: 0.05, alpha: 0.64 * alpha).setFill()
+        let path = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
+        mattePanelFill(alpha: 0.92 * alpha).setFill()
         path.fill()
-        accent.withAlphaComponent(0.30 * alpha).setStroke()
+        accent.withAlphaComponent(0.46 * alpha).setStroke()
         path.lineWidth = 1.1
         path.stroke()
+    }
+
+    private func mattePanelFill(alpha: CGFloat) -> NSColor {
+        NSColor(calibratedRed: 0.035, green: 0.038, blue: 0.043, alpha: min(1, max(0, alpha)))
     }
 
     private func summarizeOverlayText(_ text: String) -> String {
@@ -3403,6 +3423,16 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         let delayMs = Int(options.double("delay-ms", default: 0))
         try postTextToApp(bundleId: bundleId, text: text, delayMs: delayMs > 0 ? delayMs : nil)
         try writer.write(ActionHostResponse(status: "typed-app-text", outputPath: nil, detail: "\(bundleId) \(text)"))
+    case .typePidText:
+        let pidValue = options.double("pid", default: .nan)
+        let text = try options.required("text")
+        let delayMs = Int(options.double("delay-ms", default: 0))
+        guard pidValue.isFinite, pidValue > 0 else {
+            throw ActionHostError.missingOption("--pid")
+        }
+        let pid = pid_t(pidValue)
+        try postTextToPid(processIdentifier: pid, text: text, delayMs: delayMs > 0 ? delayMs : nil)
+        try writer.write(ActionHostResponse(status: "typed-pid-text", outputPath: nil, detail: "\(pid) \(text)"))
     case .pressKey:
         let key = try options.required("key")
         let modifiers = options.options["modifiers"]?
@@ -3422,6 +3452,20 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         try postKeyPressToApp(bundleId: bundleId, key: key, modifiers: modifiers)
         let detail = modifiers.isEmpty ? "\(bundleId) \(key)" : "\(bundleId) \(modifiers.joined(separator: "+"))+\(key)"
         try writer.write(ActionHostResponse(status: "pressed-app-key", outputPath: nil, detail: detail))
+    case .pressPidKey:
+        let pidValue = options.double("pid", default: .nan)
+        let key = try options.required("key")
+        let modifiers = options.options["modifiers"]?
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty } ?? []
+        guard pidValue.isFinite, pidValue > 0 else {
+            throw ActionHostError.missingOption("--pid")
+        }
+        let pid = pid_t(pidValue)
+        try postKeyPressToPid(processIdentifier: pid, key: key, modifiers: modifiers)
+        let detail = modifiers.isEmpty ? "\(pid) \(key)" : "\(pid) \(modifiers.joined(separator: "+"))+\(key)"
+        try writer.write(ActionHostResponse(status: "pressed-pid-key", outputPath: nil, detail: detail))
     case .clickPoint:
         let x = options.double("x", default: .nan)
         let y = options.double("y", default: .nan)

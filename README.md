@@ -1,12 +1,12 @@
-# action
+# mira
 
-**[arach.github.io/action](https://arach.github.io/action/)** · Native-first macOS capture and demo workstation.
+**[arach.github.io/action](https://arach.github.io/action/)** · Agentic macOS demo workstation.
 
-`action` is an AppKit-based macOS app for staging flows, recording them, reviewing the output, and handing the result to an agent or post-production toolchain.
+Mira is a native-first macOS agent for staging flows, driving real apps and browser surfaces, recording what happened, and handing the result to an agent or post-production toolchain.
 
-Today the project is centered on a signed `Action.app`, a local agent runtime, an embedded web console, and a guided review loop for captured sessions.
+The current binary is still `Action.app`: the working-name runtime that owns AppKit lifecycle, permissions UX, WebKit, native capture, and the recording probe. Mira is the product face layered on top of that runtime.
 
-Demo capture: [Mira uses Action to make Action a logo](https://arach.github.io/action/#demo) · [MP4](https://arach.github.io/action/assets/action-mira-midjourney-logo.mp4)
+Demo capture: [Mira shows her control lanes](https://arach.github.io/action/#demo) · [MP4](https://arach.github.io/action/assets/mira-control-lanes-demo.mp4)
 
 ## What Exists Today
 
@@ -17,14 +17,15 @@ Demo capture: [Mira uses Action to make Action a logo](https://arach.github.io/a
 - Embedded local console inside the app shell
 - Native developer CLI for build / launch / relaunch / host commands
 
-## Why This Project Exists
+## Why Mira Exists
 
 The goal is not just “screen recording.”
 
-The goal is a native runtime where a human or an agent can:
+The goal is a native agent workspace where Mira can:
 
-- stage a scene
-- run deterministic actions
+- observe a scene through vision, browser context, and accessibility state
+- resolve targets through AX, DOM, CDP, or calibrated native context
+- run deterministic native actions
 - capture raw media plus structured trace data
 - review the result immediately
 - feed that output into editing, composition, or another agent
@@ -148,8 +149,8 @@ Useful commands:
 
 ## Mira Companion
 
-Mira is Action's lattice-native companion. The native launcher renders her from
-the bundled pet pack, and the desktop actor path reuses Lattices'
+Mira also has a lattice-native desktop presence. The native launcher renders her
+from the bundled pet pack, and the desktop actor path reuses Lattices'
 `overlay.actor.*` daemon API.
 
 ```bash
