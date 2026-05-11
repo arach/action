@@ -1,0 +1,44 @@
+{
+  "id": "talkie-workflow-view",
+  "title": "Talkie Workflow Viewer",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "jdi.talkie.core.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 700,
+    "actionCadenceMs": 1000
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Open the read-only workflow viewer for a selected Talkie workflow",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Select Hey Talkie workflow",
+        "target": {
+          "text": "Hey Talkie, 3 steps"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open workflow viewer",
+        "target": {
+          "text": "VIEW"
+        }
+      }
+    ]
+  }
+}

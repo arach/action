@@ -1,0 +1,51 @@
+{
+  "id": "talkie-workflows-switchback",
+  "title": "Talkie Workflows Switchback",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "jdi.talkie.core.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 700,
+    "actionCadenceMs": 900
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Show Talkie switching between workflow definitions in the Workflows surface",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Select Hey Talkie workflow",
+        "target": {
+          "text": "Hey Talkie, 3 steps"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Select Transcribe workflow",
+        "target": {
+          "text": "Transcribe, 1 step"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Return to Hey Talkie workflow",
+        "target": {
+          "text": "Hey Talkie, 3 steps"
+        }
+      }
+    ]
+  }
+}

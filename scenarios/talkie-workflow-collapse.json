@@ -1,0 +1,58 @@
+{
+  "id": "talkie-workflow-collapse",
+  "title": "Talkie Workflow Step Collapse",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "jdi.talkie.core.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 700,
+    "actionCadenceMs": 850
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Show the workflow detail pane becoming more compact by collapsing visible steps",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open Hey Talkie workflow",
+        "target": {
+          "text": "Hey Talkie, 3 steps"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Collapse first workflow step",
+        "target": {
+          "text": "Go Up"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Collapse next workflow step",
+        "target": {
+          "text": "Go Up"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Collapse final workflow step",
+        "target": {
+          "text": "Go Up"
+        }
+      }
+    ]
+  }
+}
