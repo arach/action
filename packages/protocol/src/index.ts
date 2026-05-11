@@ -215,6 +215,66 @@ export interface TargetCandidate {
   fallbackChannels: AdapterActionChannel[];
 }
 
+export type MarkupObservationSource = TargetEvidence["source"] | "surface" | "window" | "screenshot";
+
+export interface MarkupObservationLine {
+  id: string;
+  source: MarkupObservationSource;
+  text: string;
+  ref?: string;
+  role?: string;
+  bounds?: Bounds;
+  depth?: number;
+  confidence?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MarkupTargetRef {
+  mode: TargetResolutionMode;
+  value: string;
+  surfaceId?: string;
+  bounds?: Bounds;
+  point?: Point;
+  stable: boolean;
+  coordinateFallback: boolean;
+}
+
+export interface MarkupTargetCandidate {
+  id: string;
+  ref: MarkupTargetRef;
+  label: string;
+  role?: string;
+  bounds?: Bounds;
+  confidence: number;
+  preferredActionChannel: AdapterActionChannel;
+  fallbackChannels: AdapterActionChannel[];
+  evidence: TargetEvidence[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface MarkupObservation {
+  kind: "markup-observation";
+  version: 1;
+  at: string;
+  surface: SurfaceRef;
+  native?: NativeWindowState;
+  freshness: SurfaceObservation["freshness"];
+  screenshot?: {
+    imagePath?: string;
+    capturedAt?: string;
+  };
+  vision?: {
+    provider: string;
+    summary: string;
+    confidence?: number;
+    findings?: InspectionFinding[];
+    metadata?: Record<string, unknown>;
+  };
+  lines: MarkupObservationLine[];
+  candidates: MarkupTargetCandidate[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface ExtractionQuery {
   id?: string;
   kind?: string;
