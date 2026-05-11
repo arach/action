@@ -7,6 +7,7 @@ import {
   runScenarioSource,
   settleCurrentSurfaceViewport,
   verifyMediaAsset,
+  type SourceRunDriver,
 } from "@action/runtime";
 
 import { runScenarioGuidedCaptureDemo } from "./index.js";
@@ -89,6 +90,18 @@ function optionalEngineMode(input: string | undefined): DemoEngineMode | undefin
   throw new Error("driver must be mock or macos");
 }
 
+function optionalSourceRunDriver(input: string | undefined): SourceRunDriver | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (input === "mock" || input === "macos" || input === "browser") {
+    return input;
+  }
+
+  throw new Error("driver must be mock, macos, or browser");
+}
+
 async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   const { positionals, flags } = parseFlags(rest);
@@ -97,17 +110,19 @@ async function main(argv: string[]): Promise<void> {
   if (command === "source") {
     const [subcommand, scenarioId, driverArg] = positionals;
     if (subcommand !== "run" || !scenarioId) {
-      throw new Error("Usage: action source run <scenario-id> [mock|macos] [--export] [--to <dir>] [--profile draft|final]");
+      throw new Error("Usage: action source run <scenario-id> [mock|macos|browser] [--export] [--to <dir>] [--profile draft|final] [--url <browser-url>]");
     }
 
-    const driver = optionalEngineMode(flags.driver ?? driverArg) ?? "mock";
-    const profile = optionalCaptureProfile(flags) ?? (driver === "macos" ? "final" : "draft");
+    const driver = optionalSourceRunDriver(flags.driver ?? driverArg) ?? "mock";
+    const profile = optionalCaptureProfile(flags) ?? (driver === "mock" ? "draft" : "final");
     const result = await runScenarioSource({
       scenario: await loadScenario(scenarioId),
       driver,
       captureProfile: profile,
       exportAssets: flags.export === "true",
       outputDir: flags.to,
+      browserUrl: flags.url ?? flags["browser-url"],
+      browserSession: flags["browser-session"],
     });
     printJson(result);
     return;
@@ -185,7 +200,7 @@ async function main(argv: string[]): Promise<void> {
 
   printJson({
     commands: [
-      "bun packages/cli/src/main.ts source run <scenario-id> [mock|macos] [--export] [--to <output-dir>] [--profile final|draft]",
+      "bun packages/cli/src/main.ts source run <scenario-id> [mock|macos|browser] [--export] [--to <output-dir>] [--profile final|draft] [--url <browser-url>]",
       "bun packages/cli/src/main.ts inspect current-surface",
       "bun packages/cli/src/main.ts settle current-surface --x <x> --y <y> --width <w> --height <h> [--provider mock|pie-minimax]",
       "bun packages/cli/src/main.ts export <session-id-or-path> [--to <output-dir>]",

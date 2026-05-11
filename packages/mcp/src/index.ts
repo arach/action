@@ -182,7 +182,7 @@ function parseSessionMode(value: unknown): SessionMode {
 }
 
 function parseSourceRunDriver(value: unknown): SourceRunDriver {
-  if (value === "macos" || value === "mock") {
+  if (value === "macos" || value === "mock" || value === "browser") {
     return value;
   }
 
@@ -194,7 +194,7 @@ function parseCaptureProfile(value: unknown, driver: SourceRunDriver): CapturePr
     return value;
   }
 
-  return driver === "macos" ? "final" : "draft";
+  return driver === "mock" ? "draft" : "final";
 }
 
 function parseBounds(value: unknown, label = "bounds"): Bounds {
@@ -590,14 +590,16 @@ const tools: Tool[] = [
   tool(
     "action.source.run",
     "Run Source Scenario",
-    "Run a scenario through the shared Action source-run pipeline. Use mock for dry runs and macos for real native captures. Exports require macos because media verification rejects placeholders.",
+    "Run a scenario through the shared Action source-run pipeline. Use mock for dry runs, macos for native AX/app captures, and browser for DOM-driven web captures with native recording.",
     objectSchema({
       scenarioIdOrPath: textProperty("Scenario id under scenarios/, absolute scenario path, or Action-root-relative JSON path."),
       scenario: objectProperty("Optional inline ScenarioDocument. Used when scenarioIdOrPath is omitted."),
-      driver: enumProperty(["mock", "macos"], "Execution driver. Defaults to mock."),
+      driver: enumProperty(["mock", "macos", "browser"], "Execution driver. Defaults to mock."),
       profile: enumProperty(["draft", "final"], "Capture profile. Defaults from driver."),
-      export: booleanProperty("When true, export a verified Mira/Preframe handoff. Requires driver=macos."),
+      export: booleanProperty("When true, export a verified Mira/Preframe handoff. Requires driver=macos or driver=browser."),
       outputDir: textProperty("Optional absolute or Action-root-relative handoff output directory."),
+      browserUrl: textProperty("Browser driver only: URL to open before running the scenario."),
+      browserSession: textProperty("Browser driver only: optional agent-browser session name."),
     }),
     { readOnlyHint: false, idempotentHint: false },
   ),
@@ -946,6 +948,8 @@ const handlers: Record<string, ToolHandler> = {
       exportAssets: optionalBoolean(args.export) ?? false,
       outputDir: optionalString(args.outputDir),
       root: actionRoot,
+      browserUrl: optionalString(args.browserUrl),
+      browserSession: optionalString(args.browserSession),
     });
 
     return {

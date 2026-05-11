@@ -2,12 +2,13 @@
   "id": "preframe-source-material-medium",
   "title": "Preframe Source Material Medium",
   "targetApp": {
-    "name": "Google Chrome",
-    "bundleId": "com.google.Chrome"
+    "name": "Google Chrome for Testing",
+    "bundleId": "com.google.chrome.for.testing"
   },
   "run": {
     "initialActionDelayMs": 800,
-    "actionCadenceMs": 1000
+    "actionCadenceMs": 1000,
+    "browserUrl": "http://localhost:3100"
   },
   "stage": {
     "backdrop": "studio",
@@ -27,9 +28,9 @@
     "sequence": [
       {
         "action": "click",
-        "description": "Open source catalog",
+        "description": "Open source videos",
         "target": {
-          "text": "Catalog",
+          "text": "Videos",
           "role": "button"
         },
         "cue": {
@@ -40,9 +41,13 @@
       },
       {
         "action": "click",
-        "description": "Select Talkie source asset",
+        "description": "Queue the first source asset",
         "target": {
-          "text": "Talkie Source Review"
+          "text": "Add to queue",
+          "role": "button"
+        },
+        "input": {
+          "match": "first"
         }
       },
       {
@@ -57,7 +62,7 @@
         "action": "click",
         "description": "Open player preview",
         "target": {
-          "text": "Preview",
+          "text": "Open Player",
           "role": "button"
         }
       }

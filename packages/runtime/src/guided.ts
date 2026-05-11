@@ -393,6 +393,47 @@ export class GuidedCaptureSession {
     return this.snapshot();
   }
 
+  async fail(reason: string): Promise<HudSnapshot> {
+    const state = this.session.snapshot().state;
+    this.inputOverlay = undefined;
+
+    if (["running", "paused", "completing"].includes(state)) {
+      try {
+        const capture = await this.engine.stopCapture();
+        this.latestCapture = capture;
+        this.session.registerArtifact(capture);
+        this.emit("recording.stopped", "Capture stopped after failure", {
+          artifact: capture,
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown capture stop failure";
+        this.addLog("error", "recording.stop_failed", detail);
+      }
+    }
+
+    if (!this.session.artifacts().some((artifact) => artifact.kind === "trace")) {
+      this.session.registerArtifact({
+        kind: "trace",
+        path: this.tracePath,
+        metadata: {
+          eventCount: this.session.trace().length,
+        },
+      });
+    }
+
+    const currentState = this.session.snapshot().state;
+    if (!["completed", "failed", "cancelled"].includes(currentState)) {
+      this.session.transition("failed", { reason });
+    }
+    this.setPhase("failed", "Run failed");
+    this.addLog("error", "run.failed", reason);
+    await this.persistSessionFiles();
+    await this.engine.clearStage().catch(() => undefined);
+    this.stagePresented = false;
+
+    return this.snapshot();
+  }
+
   async replayLastRun(): Promise<void> {
     if (!this.latestCapture) {
       throw new Error("No capture artifact is available to replay.");

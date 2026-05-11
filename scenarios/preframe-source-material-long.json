@@ -2,12 +2,13 @@
   "id": "preframe-source-material-long",
   "title": "Preframe Source Material Long",
   "targetApp": {
-    "name": "Google Chrome",
-    "bundleId": "com.google.Chrome"
+    "name": "Google Chrome for Testing",
+    "bundleId": "com.google.chrome.for.testing"
   },
   "run": {
     "initialActionDelayMs": 900,
-    "actionCadenceMs": 1150
+    "actionCadenceMs": 1150,
+    "browserUrl": "http://localhost:3100"
   },
   "stage": {
     "backdrop": "studio",
@@ -27,9 +28,9 @@
     "sequence": [
       {
         "action": "click",
-        "description": "Open source catalog",
+        "description": "Open source videos",
         "target": {
-          "text": "Catalog",
+          "text": "Videos",
           "role": "button"
         },
         "cue": {
@@ -40,9 +41,13 @@
       },
       {
         "action": "click",
-        "description": "Select Talkie workflow source asset",
+        "description": "Queue a source video",
         "target": {
-          "text": "Talkie Workflows Tour"
+          "text": "Add to queue",
+          "role": "button"
+        },
+        "input": {
+          "match": "first"
         }
       },
       {
@@ -55,16 +60,17 @@
       },
       {
         "action": "click",
-        "description": "Select hero frame",
+        "description": "Open the source queue",
         "target": {
-          "text": "Hero frame"
+          "text": "Queue",
+          "role": "button"
         }
       },
       {
         "action": "click",
         "description": "Open FX panel",
         "target": {
-          "text": "FX",
+          "text": "FX Browser",
           "role": "button"
         }
       },
@@ -72,26 +78,23 @@
         "action": "click",
         "description": "Open prompt panel",
         "target": {
-          "text": "Prompt",
+          "text": "Prompts",
           "role": "button"
         }
       },
       {
-        "action": "type",
-        "description": "Add source-material prompt note",
+        "action": "click",
+        "description": "Open command palette",
         "target": {
-          "text": "Prompt"
-        },
-        "input": {
-          "text": "Clean source pass: emphasize workflow structure, readable UI state, and one clear viewer transition.",
-          "style": "default"
+          "text": "Command Palette",
+          "role": "button"
         }
       },
       {
         "action": "click",
         "description": "Open player preview",
         "target": {
-          "text": "Preview",
+          "text": "Open Player",
           "role": "button"
         }
       }

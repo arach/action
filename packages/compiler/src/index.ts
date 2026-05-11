@@ -30,6 +30,8 @@ export interface ScenarioDocument {
   run?: {
     initialActionDelayMs?: number;
     actionCadenceMs?: number;
+    browserUrl?: string;
+    browserSession?: string;
   };
   stage: {
     backdrop: BackdropPreset;
