@@ -1242,6 +1242,7 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
     private let logger: DebugLogger
     private var finishedSignalPath: String?
     private var recordingError: Error?
+    private var stopRequested = false
 
     init(writer: ResponseWriter, logger: DebugLogger) {
         self.writer = writer
@@ -1262,6 +1263,8 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
     func recordRegion(rect: CGRect, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, fps: Double, scale: Double, bitRate: Int? = nil, codec: ActionMovieCodec = .h264) async throws {
         logger.log("record-region: begin rect=\(rect) outputPath=\(outputPath)")
         self.finishedSignalPath = finishedSignalPath
+        recordingError = nil
+        stopRequested = false
         let outputURL = URL(fileURLWithPath: outputPath)
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
@@ -1315,7 +1318,7 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
             _ = try FileHandle.standardInput.readToEnd()
         }
 
-        try await stream.stopCapture()
+        await stopCaptureForFinalization(stream, logPrefix: "record-region")
         let summary = try movieWriter.finish()
         logger.log("record-region: finalized frames=\(summary.frames) dropped=\(summary.droppedFrames) bitrate=\(summary.bitRate)")
         try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
@@ -1335,6 +1338,8 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
     func recordAppWindow(bundleId: String, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, scale: Double = 1, bitRate: Int? = nil, codec: ActionMovieCodec = .h264) async throws {
         logger.log("record: begin bundleId=\(bundleId) outputPath=\(outputPath)")
         self.finishedSignalPath = finishedSignalPath
+        recordingError = nil
+        stopRequested = false
         let outputURL = URL(fileURLWithPath: outputPath)
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
@@ -1396,8 +1401,7 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
         }
 
         logger.log("record: stopping capture")
-        try await stream.stopCapture()
-        logger.log("record: capture stopped")
+        await stopCaptureForFinalization(stream, logPrefix: "record")
         let summary = try movieWriter.finish()
         logger.log("record: finalized frames=\(summary.frames) dropped=\(summary.droppedFrames) bitrate=\(summary.bitRate)")
         try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
@@ -1425,6 +1429,17 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
         try Data(contents.utf8).write(to: url)
     }
 
+    private func stopCaptureForFinalization(_ stream: SCStream, logPrefix: String) async {
+        stopRequested = true
+
+        do {
+            try await stream.stopCapture()
+            logger.log("\(logPrefix): capture stopped")
+        } catch {
+            logger.log("\(logPrefix): stopCapture returned after stream stop: \(error.localizedDescription)")
+        }
+    }
+
     private func handleRecordingFailure(message: String, logPrefix: String, stderrPrefix: String) {
         let error = NSError(
             domain: "ActionHostRecording",
@@ -1440,6 +1455,11 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         let message = error.localizedDescription
         Task { @MainActor in
+            if self.stopRequested {
+                self.logger.log("record: stream stopped during requested finalization: \(message)")
+                return
+            }
+
             self.handleRecordingFailure(
                 message: message,
                 logPrefix: "record: stream stopped with error",
