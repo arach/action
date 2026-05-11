@@ -20,7 +20,12 @@ import type {
   SessionMode,
   TargetQuery,
 } from "@action/protocol";
-import { inspectCurrentSurface, MacOSCommandEngine } from "@action/runtime";
+import {
+  exportSessionAssets,
+  inspectCurrentSurface,
+  MacOSCommandEngine,
+  verifyMediaAsset,
+} from "@action/runtime";
 
 export const toolFamilies = [
   "session",
@@ -29,6 +34,7 @@ export const toolFamilies = [
   "act",
   "record",
   "artifacts",
+  "source",
   "compose",
   "export",
 ] as const;
@@ -548,6 +554,29 @@ const tools: Tool[] = [
     }),
     { readOnlyHint: true, idempotentHint: true },
   ),
+  tool(
+    "action.source.verify",
+    "Verify Source Media",
+    "Verify a source media asset and return JSON status, metadata, and quality issues. Accepts absolute paths or paths relative to the Action repo root.",
+    objectSchema({
+      path: textProperty("Absolute or Action-root-relative path to a media asset, usually a .mov capture."),
+      minDurationSeconds: numberProperty("Optional minimum duration in seconds. Defaults to 1."),
+      minFrameCount: numberProperty("Optional minimum video frame count. Defaults to 5."),
+      minWidth: numberProperty("Optional minimum video width in pixels."),
+      minHeight: numberProperty("Optional minimum video height in pixels."),
+    }, ["path"]),
+    { readOnlyHint: true, idempotentHint: true },
+  ),
+  tool(
+    "action.source.export",
+    "Export Source Handoff",
+    "Export a completed session into a Mira/Preframe source-material handoff directory with verification metadata. Accepts a session id, absolute session path, or Action-root-relative session path.",
+    objectSchema({
+      sessionIdOrPath: textProperty("Session id under artifacts/sessions, absolute session directory, or Action-root-relative session directory."),
+      outputDir: textProperty("Optional absolute or Action-root-relative handoff output directory. Defaults to artifacts/exports/<sessionId>."),
+    }, ["sessionIdOrPath"]),
+    { readOnlyHint: false, idempotentHint: false },
+  ),
 ];
 
 const handlers: Record<string, ToolHandler> = {
@@ -849,6 +878,44 @@ const handlers: Record<string, ToolHandler> = {
       files: await listFiles(outputDir),
     };
   },
+
+  async "action.source.verify"(args) {
+    const path = optionalString(args.path);
+    if (!path) {
+      throw new Error("path is required");
+    }
+
+    const verification = await verifyMediaAsset({
+      path: resolve(actionRoot, path),
+      minDurationSeconds: optionalNumber(args.minDurationSeconds),
+      minFrameCount: optionalNumber(args.minFrameCount),
+      minWidth: optionalNumber(args.minWidth),
+      minHeight: optionalNumber(args.minHeight),
+    });
+
+    return {
+      ok: verification.status !== "failed",
+      verification,
+    };
+  },
+
+  async "action.source.export"(args) {
+    const sessionIdOrPath = optionalString(args.sessionIdOrPath);
+    if (!sessionIdOrPath) {
+      throw new Error("sessionIdOrPath is required");
+    }
+
+    const result = await exportSessionAssets({
+      sessionIdOrPath,
+      outputDir: optionalString(args.outputDir),
+      root: actionRoot,
+    });
+
+    return {
+      ok: true,
+      export: result,
+    };
+  },
 };
 
 function createServer(): Server {
@@ -864,6 +931,7 @@ function createServer(): Server {
       instructions: [
         "Use Action tools to observe, resolve, act, record, and inspect native macOS surfaces.",
         "Treat action.record.start as asynchronous; completion is represented by action.record.status and the finished file.",
+        "Use action.source.verify and action.source.export to validate and hand off completed source-material sessions.",
         "Prefer action.observe.snapshot and action.resolve.target before action.act.execute.",
       ].join("\n"),
     },
