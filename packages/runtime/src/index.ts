@@ -8,3 +8,4 @@ export * from "./session.js";
 export * from "./session-storage.js";
 export * from "./viewport-settle.js";
 export * from "./asset-export.js";
+export * from "./media-verification.js";

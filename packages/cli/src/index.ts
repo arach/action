@@ -15,6 +15,7 @@ export function describeCli(): string[] {
     "action guided replay-last-run",
     "action compose",
     "action export <session-id-or-path>",
+    "action verify <video-path>",
   ];
 }
 

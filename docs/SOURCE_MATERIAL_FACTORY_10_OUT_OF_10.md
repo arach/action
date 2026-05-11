@@ -259,13 +259,14 @@ Definition of done:
 
 ## Immediate Queue
 
-1. Normalize path handling for native host commands.
-2. Add a source-run report and media verification helper.
-3. Wrap scenario run + export into one CLI command.
-4. Add the same source-run affordance to MCP.
-5. Generate the next 10 Talkie and Preframe takes.
-6. Add MiniMax VLM as an optional observation enrichment provider.
-7. Harden stale supervision overlay cleanup.
+1. Done: normalize path handling for native host commands.
+2. Done: add a media verification helper and CLI command.
+3. Add a source-run report.
+4. Wrap scenario run + export into one CLI command.
+5. Add the same source-run affordance to MCP.
+6. Generate the next 10 Talkie and Preframe takes.
+7. Add MiniMax VLM as an optional observation enrichment provider.
+8. Harden stale supervision overlay cleanup.
 
 ## Decision Log
 

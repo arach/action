@@ -1,7 +1,12 @@
 #!/usr/bin/env bun
 
 import { compileScenario } from "@action/compiler";
-import { exportSessionAssets, inspectCurrentSurface, settleCurrentSurfaceViewport } from "@action/runtime";
+import {
+  exportSessionAssets,
+  inspectCurrentSurface,
+  settleCurrentSurfaceViewport,
+  verifyMediaAsset,
+} from "@action/runtime";
 
 import { runScenarioGuidedCaptureDemo } from "./index.js";
 import { loadScenario } from "./scenarios.js";
@@ -133,11 +138,24 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  if (command === "verify" && arg) {
+    const result = await verifyMediaAsset({
+      path: arg,
+      minDurationSeconds: flags["min-duration"] ? requiredNumber(flags, "min-duration") : undefined,
+      minFrameCount: flags["min-frames"] ? requiredNumber(flags, "min-frames") : undefined,
+      minWidth: flags["min-width"] ? requiredNumber(flags, "min-width") : undefined,
+      minHeight: flags["min-height"] ? requiredNumber(flags, "min-height") : undefined,
+    });
+    printJson(result);
+    return;
+  }
+
   printJson({
     commands: [
       "bun packages/cli/src/main.ts inspect current-surface",
       "bun packages/cli/src/main.ts settle current-surface --x <x> --y <y> --width <w> --height <h> [--provider mock|pie-minimax]",
       "bun packages/cli/src/main.ts export <session-id-or-path> [--to <output-dir>]",
+      "bun packages/cli/src/main.ts verify <video-path> [--min-duration <seconds>] [--min-frames <count>]",
       "bun packages/cli/src/main.ts demo <scenario-id> macos [--profile final|draft]",
       "bun run demo:calculator",
       "bun run demo:notes",

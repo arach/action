@@ -7,6 +7,7 @@ import type {
   SessionArtifactEntry,
   SessionArtifactManifest,
 } from "@action/protocol";
+import { verifyMediaAsset } from "./media-verification.js";
 
 function now(): string {
   return new Date().toISOString();
@@ -143,6 +144,11 @@ export async function exportSessionAssets(
   if (!primaryVideo) {
     throw new Error(`Primary capture could not be exported: ${primaryCapturePath}`);
   }
+  const mediaVerification = await verifyMediaAsset({ path: primaryVideo.exportedPath });
+  if (mediaVerification.status === "failed") {
+    const detail = mediaVerification.issues.map((issue) => issue.message).join("; ");
+    throw new Error(`Primary capture failed media verification: ${detail}`);
+  }
 
   const handoffManifest = {
     schemaVersion: 1,
@@ -156,17 +162,28 @@ export async function exportSessionAssets(
       targetApp: session.targetApp,
     },
     verification: {
-      status: "verified",
+      status: mediaVerification.status,
       basis: [
         "session.state=completed",
         "raw-capture exists",
         "trace and manifest persisted",
+        mediaVerification.status === "verified"
+          ? "media probe passed"
+          : "media probe completed with warnings",
       ],
+      media: mediaVerification,
     },
     primaryVideo: {
       path: primaryVideo.exportedPath,
       sourcePath: primaryVideo.sourcePath,
       format: artifactExtension(primaryVideo.exportedPath, ".mov").slice(1),
+      width: mediaVerification.width,
+      height: mediaVerification.height,
+      durationSeconds: mediaVerification.durationSeconds,
+      codec: mediaVerification.codec,
+      frameCount: mediaVerification.frameCount,
+      averageFrameRate: mediaVerification.averageFrameRate,
+      bitRate: mediaVerification.bitRate ?? mediaVerification.containerBitRate,
     },
     artifacts: copiedArtifacts,
     preframe: {
