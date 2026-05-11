@@ -80,6 +80,10 @@ function numberValue(input: unknown): number | undefined {
   return typeof input === "number" && Number.isFinite(input) ? input : undefined;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function targetLabel(action: RuntimeAction, target: ResolvedTarget | undefined): string | undefined {
   return stringValue(action.input?.targetLabel)
     ?? stringValue(action.input?.label)
@@ -106,10 +110,36 @@ export async function executeInteractionAction(
   target: ResolvedTarget | undefined,
   context: InteractionExecutionContext,
 ): Promise<void> {
+  if (action.kind === "wait-for-condition") {
+    const durationMs = numberValue(action.input?.durationMs)
+      ?? numberValue(action.input?.timeoutMs)
+      ?? numberValue(action.input?.ms)
+      ?? 800;
+    await sleep(Math.max(0, durationMs));
+    return;
+  }
+
+  if (action.kind === "show-cue") {
+    return;
+  }
+
   if (action.kind === "type") {
     const text = String(action.input?.text ?? "");
     const bundleId = targetBundleId(action, target, context);
     const label = targetLabel(action, target);
+    const role = targetRole(action);
+    if (bundleId && role && !label) {
+      await context.runHost(
+        "set-accessibility-role-value",
+        "--bundle-id",
+        bundleId,
+        "--role",
+        role,
+        "--value",
+        text,
+      );
+      return;
+    }
     if (bundleId && label) {
       const args = [
         "set-accessibility-value",
@@ -117,7 +147,6 @@ export async function executeInteractionAction(
         "--label", label,
         "--value", text,
       ];
-      const role = targetRole(action);
       if (role) {
         args.push("--role", role);
       }
@@ -151,11 +180,16 @@ export async function executeInteractionAction(
     const bundleId = targetBundleId(action, target, context);
     const label = targetLabel(action, target);
     if (bundleId && label) {
+      const accessibilityAction = stringValue(action.input?.axAction)
+        ?? stringValue(action.input?.accessibilityAction);
       const args = [
-        "press-accessibility-element",
+        accessibilityAction ? "perform-accessibility-action" : "press-accessibility-element",
         "--bundle-id", bundleId,
         "--label", label,
       ];
+      if (accessibilityAction) {
+        args.push("--action", accessibilityAction);
+      }
       const role = targetRole(action);
       if (role) {
         args.push("--role", role);

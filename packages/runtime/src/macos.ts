@@ -694,6 +694,10 @@ export class MacOSCommandEngine implements CaptureEngine {
       "inspect-app-ui",
       "--bundle-id",
       currentSurface.bundleId,
+      "--max-depth",
+      "12",
+      "--max-nodes",
+      "1000",
     );
     const nodes = JSON.parse(stdout) as unknown[];
     await writeFile(path, JSON.stringify(nodes, null, 2));

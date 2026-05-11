@@ -1,0 +1,97 @@
+{
+  "id": "talkie-library-context-long",
+  "title": "Talkie Library Context Long",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "jdi.talkie.core.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 850,
+    "actionCadenceMs": 1050
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Capture Talkie screenshot-library filtering and a search-field context-menu affordance",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Return home",
+        "target": {
+          "text": "Home"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Review screenshots",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open screenshots",
+        "target": {
+          "text": "Screenshot"
+        }
+      },
+      {
+        "action": "type",
+        "description": "Filter screenshots",
+        "input": {
+          "text": "tray",
+          "role": "textfield"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Let screenshots filter",
+        "input": {
+          "durationMs": 700
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open search context menu",
+        "target": {
+          "text": "tray",
+          "role": "textfield"
+        },
+        "input": {
+          "axAction": "ShowMenu"
+        }
+      },
+      {
+        "action": "press-key",
+        "description": "Dismiss context menu",
+        "input": {
+          "key": "Escape"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open tray viewer",
+        "target": {
+          "text": "Tray Viewer",
+          "role": "button"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on library",
+        "input": {
+          "durationMs": 1000
+        }
+      }
+    ]
+  }
+}

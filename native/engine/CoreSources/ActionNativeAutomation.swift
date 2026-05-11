@@ -225,14 +225,42 @@ public enum ActionNativeAutomation {
             preferWritableText: false
         )
 
+        if shouldUsePhysicalClick(for: match.element), let fallbackPoint = clickPoint(for: match.element) {
+            try click(at: fallbackPoint)
+            return snapshot(of: match.element, depth: match.depth)
+        }
+
         let result = AXUIElementPerformAction(match.element, kAXPressAction as CFString)
-        guard result == .success else {
-            throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Accessibility press failed for \(bundleId) element \(label): \(result.rawValue)"
-            )
+        if result != .success {
+            guard let fallbackPoint = clickPoint(for: match.element) else {
+                throw ActionNativeAutomationError.accessibilityActionFailed(
+                    "Accessibility press failed for \(bundleId) element \(label): \(result.rawValue)"
+                )
+            }
+            try click(at: fallbackPoint)
         }
 
         return snapshot(of: match.element, depth: match.depth)
+    }
+
+    public static func click(at point: CGPoint) throws {
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")
+        }
+
+        CGWarpMouseCursorPosition(point)
+        usleep(10000)
+
+        guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+              let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Unable to create mouse events"
+            )
+        }
+
+        down.post(tap: .cghidEventTap)
+        usleep(30000)
+        up.post(tap: .cghidEventTap)
     }
 
     public static func performAccessibilityAction(
@@ -241,13 +269,14 @@ public enum ActionNativeAutomation {
         action: String,
         role: String? = nil
     ) throws -> ActionAccessibilityNodeSnapshot {
+        let actionName = normalizedAccessibilityActionName(action)
         let match = try findAccessibilityElement(
             bundleId: bundleId,
             label: label,
             role: role,
-            preferWritableText: false
+            preferWritableText: false,
+            requiredAction: actionName
         )
-        let actionName = normalizedAccessibilityActionName(action)
         let availableActions = axActions(of: match.element)
         guard availableActions.contains(actionName) else {
             throw ActionNativeAutomationError.accessibilityActionFailed(
@@ -562,6 +591,12 @@ private func bounds(of element: AXUIElement) -> ActionAccessibilityBounds? {
           let size = size(from: axValue(element, attribute: kAXSizeAttribute)) else {
         return nil
     }
+    guard position.x.isFinite,
+          position.y.isFinite,
+          size.width.isFinite,
+          size.height.isFinite else {
+        return nil
+    }
 
     return ActionAccessibilityBounds(
         x: position.x,
@@ -569,6 +604,28 @@ private func bounds(of element: AXUIElement) -> ActionAccessibilityBounds? {
         width: size.width,
         height: size.height
     )
+}
+
+private func clickPoint(for element: AXUIElement) -> CGPoint? {
+    guard let bounds = bounds(of: element),
+          bounds.x.isFinite,
+          bounds.y.isFinite,
+          bounds.width.isFinite,
+          bounds.height.isFinite,
+          bounds.width > 0,
+          bounds.height > 0 else {
+        return nil
+    }
+
+    return CGPoint(
+        x: bounds.x + (bounds.width / 2.0),
+        y: bounds.y + (bounds.height / 2.0)
+    )
+}
+
+private func shouldUsePhysicalClick(for element: AXUIElement) -> Bool {
+    let role = normalizedRole(axValue(element, attribute: kAXRoleAttribute) as? String) ?? ""
+    return !pressableRoles.contains(role)
 }
 
 private func firstWindowElement(for bundleId: String) throws -> AXUIElement {
@@ -619,6 +676,7 @@ private func findAccessibilityElement(
     label: String,
     role: String?,
     preferWritableText: Bool,
+    requiredAction: String? = nil,
     maxDepth: Int = 20,
     maxNodes: Int = 12_000
 ) throws -> ActionAccessibilityElementMatch {
@@ -642,7 +700,8 @@ private func findAccessibilityElement(
             actualRole: role,
             expectedLabel: expectedLabel,
             expectedRole: expectedRole,
-            preferWritableText: preferWritableText
+            preferWritableText: preferWritableText,
+            requiredAction: requiredAction
         ) {
             let match = ActionAccessibilityElementMatch(element: current, depth: depth, score: score)
             if best == nil || match.score > best!.score {
@@ -704,10 +763,16 @@ private func scoreAccessibilityElement(
     actualRole: String,
     expectedLabel: String,
     expectedRole: String?,
-    preferWritableText: Bool
+    preferWritableText: Bool,
+    requiredAction: String?
 ) -> Int? {
     guard expectedRole == nil || normalizedRole(actualRole) == expectedRole else {
         return nil
+    }
+    if let requiredAction {
+        guard axActions(of: element).contains(requiredAction) else {
+            return nil
+        }
     }
 
     var score = 0

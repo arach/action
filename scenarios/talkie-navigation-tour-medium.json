@@ -1,0 +1,84 @@
+{
+  "id": "talkie-navigation-tour-medium",
+  "title": "Talkie Navigation Tour Medium",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "jdi.talkie.core.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 750,
+    "actionCadenceMs": 950
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Capture Talkie sidebar navigation across notes, composition, animation, enhancement, and settings",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open Notes",
+        "target": {
+          "text": "Notes"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Sidebar tour",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Compose",
+        "target": {
+          "text": "Compose"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Animate",
+        "target": {
+          "text": "Animate"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Enhance",
+        "target": {
+          "text": "wand.and.stars"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Settings",
+        "target": {
+          "text": "Settings"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Return home",
+        "target": {
+          "text": "Home"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on home",
+        "input": {
+          "durationMs": 1000
+        }
+      }
+    ]
+  }
+}
