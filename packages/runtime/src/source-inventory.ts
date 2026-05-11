@@ -58,6 +58,7 @@ interface HandoffManifest {
 
 export interface SourceMaterialInventoryAsset {
   id: string;
+  usable: boolean;
   exportDir: string;
   handoffManifestPath: string;
   sessionId?: string;
@@ -112,8 +113,16 @@ export async function collectSourceMaterialInventory(
     }
 
     const handoff = await readJsonFile<HandoffManifest>(handoffManifestPath);
+    const hasVideoMetadata = Boolean(
+      handoff.primaryVideo?.path
+        && handoff.primaryVideo.width
+        && handoff.primaryVideo.height
+        && handoff.primaryVideo.durationSeconds
+        && handoff.primaryVideo.frameCount,
+    );
     assets.push({
       id: entry.name,
+      usable: handoff.verification?.status === "verified" && hasVideoMetadata,
       exportDir,
       handoffManifestPath,
       sessionId: handoff.source?.sessionId,
