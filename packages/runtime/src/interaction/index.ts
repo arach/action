@@ -83,9 +83,9 @@ function numberValue(input: unknown): number | undefined {
 function targetLabel(action: RuntimeAction, target: ResolvedTarget | undefined): string | undefined {
   return stringValue(action.input?.targetLabel)
     ?? stringValue(action.input?.label)
+    ?? target?.label
     ?? action.target?.text
-    ?? action.target?.semanticId
-    ?? target?.label;
+    ?? action.target?.semanticId;
 }
 
 function targetRole(action: RuntimeAction): string | undefined {

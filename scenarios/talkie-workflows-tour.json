@@ -1,0 +1,49 @@
+{
+  "id": "talkie-workflows-tour",
+  "title": "Talkie Workflows Tour",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "jdi.talkie.core.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 900,
+    "actionCadenceMs": 1200
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Show Talkie's workflow surface and switch between existing workflow definitions",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Select Transcribe workflow",
+        "target": {
+          "text": "Transcribe, 1 step"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Select a workflow",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Select Hey Talkie workflow",
+        "target": {
+          "text": "Hey Talkie, 3 steps"
+        }
+      }
+    ]
+  }
+}

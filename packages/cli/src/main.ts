@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 
 import { compileScenario } from "@action/compiler";
-import { inspectCurrentSurface, settleCurrentSurfaceViewport } from "@action/runtime";
+import { exportSessionAssets, inspectCurrentSurface, settleCurrentSurfaceViewport } from "@action/runtime";
 
 import { runScenarioGuidedCaptureDemo } from "./index.js";
 import { loadScenario } from "./scenarios.js";
+import type { CaptureProfile } from "@action/protocol";
 
 const runtime = globalThis as typeof globalThis & {
   process: {
@@ -56,6 +57,19 @@ function requiredNumber(flags: Record<string, string>, key: string): number {
   return value;
 }
 
+function optionalCaptureProfile(flags: Record<string, string>): CaptureProfile | undefined {
+  const profile = flags.profile;
+  if (profile === undefined) {
+    return undefined;
+  }
+
+  if (profile === "draft" || profile === "final") {
+    return profile;
+  }
+
+  throw new Error("--profile must be draft or final");
+}
+
 async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   const { positionals, flags } = parseFlags(rest);
@@ -66,6 +80,7 @@ async function main(argv: string[]): Promise<void> {
     const result = await runScenarioGuidedCaptureDemo(
       scenario,
       extra === "macos" ? "macos" : "mock",
+      { captureProfile: optionalCaptureProfile(flags) },
     );
     printJson(result);
     return;
@@ -76,6 +91,7 @@ async function main(argv: string[]): Promise<void> {
     const result = await runScenarioGuidedCaptureDemo(
       scenario,
       arg === "macos" ? "macos" : "mock",
+      { captureProfile: optionalCaptureProfile(flags) },
     );
     printJson(result);
     return;
@@ -108,10 +124,21 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  if (command === "export" && arg) {
+    const result = await exportSessionAssets({
+      sessionIdOrPath: arg,
+      outputDir: flags.to,
+    });
+    printJson(result);
+    return;
+  }
+
   printJson({
     commands: [
       "bun packages/cli/src/main.ts inspect current-surface",
       "bun packages/cli/src/main.ts settle current-surface --x <x> --y <y> --width <w> --height <h> [--provider mock|pie-minimax]",
+      "bun packages/cli/src/main.ts export <session-id-or-path> [--to <output-dir>]",
+      "bun packages/cli/src/main.ts demo <scenario-id> macos [--profile final|draft]",
       "bun run demo:calculator",
       "bun run demo:notes",
       "bun run demo:calculator:macos",

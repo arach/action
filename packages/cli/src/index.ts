@@ -1,5 +1,5 @@
 import { compileScenario, type ScenarioDocument } from "@action/compiler";
-import type { GuidedSessionEvent, HudSnapshot } from "@action/protocol";
+import type { CaptureProfile, GuidedSessionEvent, HudSnapshot } from "@action/protocol";
 import { GuidedCaptureSession, MacOSCommandEngine, MockCaptureEngine } from "@action/runtime";
 import { resolve } from "node:path";
 
@@ -14,7 +14,7 @@ export function describeCli(): string[] {
     "action guided stop",
     "action guided replay-last-run",
     "action compose",
-    "action export",
+    "action export <session-id-or-path>",
   ];
 }
 
@@ -26,9 +26,14 @@ export interface GuidedCaptureDemoResult {
 
 export type DemoEngineMode = "mock" | "macos";
 
+export interface GuidedCaptureDemoOptions {
+  captureProfile?: CaptureProfile;
+}
+
 function createSession(
   scenario: ScenarioDocument,
   engineMode: DemoEngineMode,
+  options: GuidedCaptureDemoOptions = {},
 ): GuidedCaptureSession {
   const engine = engineMode === "macos"
     ? new MacOSCommandEngine()
@@ -37,7 +42,7 @@ function createSession(
   return new GuidedCaptureSession(engine, {
     sessionId: `session_${scenario.id.replace(/[^a-z0-9]+/gi, "_")}`,
     outputDir: resolve(process.cwd(), "artifacts", "sessions", scenario.id),
-    captureProfile: "draft",
+    captureProfile: options.captureProfile ?? (engineMode === "macos" ? "final" : "draft"),
     stageHoldMsAfterComplete: 0,
     initialActionDelayMs: scenario.run?.initialActionDelayMs ?? 650,
     actionCadenceMs: scenario.run?.actionCadenceMs ?? 900,
@@ -47,8 +52,9 @@ function createSession(
 export async function runScenarioGuidedCaptureDemo(
   scenario: ScenarioDocument,
   engineMode: DemoEngineMode = "mock",
+  options: GuidedCaptureDemoOptions = {},
 ): Promise<GuidedCaptureDemoResult> {
-  const session = createSession(scenario, engineMode);
+  const session = createSession(scenario, engineMode, options);
 
   const events: GuidedSessionEvent[] = [];
   session.onEvent((event) => {
