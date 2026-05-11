@@ -409,6 +409,6 @@ final class ActionSupervisionOverlayController: NSObject {
         window?.orderOut(nil)
         ActionSupervisionRegistry.clearOverlayPID()
         try? FileManager.default.removeItem(at: ActionSupervisionRegistry.overlayStopSignalURL)
-        NSApplication.shared.stop(nil)
+        NSApplication.shared.terminate(nil)
     }
 }
