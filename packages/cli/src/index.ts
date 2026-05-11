@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 
 export function describeCli(): string[] {
   return [
+    "action source run <scenario-id> [mock|macos] [--export] [--to <dir>] [--profile draft|final]",
     "action inspect current-surface",
     "action settle current-surface",
     "action session create",
@@ -23,6 +24,7 @@ export interface GuidedCaptureDemoResult {
   snapshot: HudSnapshot;
   events: GuidedSessionEvent[];
   scenario: ScenarioDocument;
+  sessionOutputDir: string;
 }
 
 export type DemoEngineMode = "mock" | "macos";
@@ -42,12 +44,16 @@ function createSession(
 
   return new GuidedCaptureSession(engine, {
     sessionId: `session_${scenario.id.replace(/[^a-z0-9]+/gi, "_")}`,
-    outputDir: resolve(process.cwd(), "artifacts", "sessions", scenario.id),
+    outputDir: scenarioSessionOutputDir(scenario),
     captureProfile: options.captureProfile ?? (engineMode === "macos" ? "final" : "draft"),
     stageHoldMsAfterComplete: 0,
     initialActionDelayMs: scenario.run?.initialActionDelayMs ?? 650,
     actionCadenceMs: scenario.run?.actionCadenceMs ?? 900,
   });
+}
+
+function scenarioSessionOutputDir(scenario: ScenarioDocument): string {
+  return resolve(process.cwd(), "artifacts", "sessions", scenario.id);
 }
 
 export async function runScenarioGuidedCaptureDemo(
@@ -81,6 +87,7 @@ export async function runScenarioGuidedCaptureDemo(
     snapshot: session.snapshot(),
     events,
     scenario,
+    sessionOutputDir: scenarioSessionOutputDir(scenario),
   };
 }
 

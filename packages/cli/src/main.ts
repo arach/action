@@ -11,6 +11,8 @@ import {
 import { runScenarioGuidedCaptureDemo } from "./index.js";
 import { loadScenario } from "./scenarios.js";
 import type { CaptureProfile } from "@action/protocol";
+import type { DemoEngineMode, GuidedCaptureDemoResult } from "./index.js";
+import type { SessionAssetExportResult } from "@action/runtime";
 
 const runtime = globalThis as typeof globalThis & {
   process: {
@@ -75,10 +77,67 @@ function optionalCaptureProfile(flags: Record<string, string>): CaptureProfile |
   throw new Error("--profile must be draft or final");
 }
 
+function optionalEngineMode(input: string | undefined): DemoEngineMode | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (input === "mock" || input === "macos") {
+    return input;
+  }
+
+  throw new Error("driver must be mock or macos");
+}
+
+export interface SourceRunCliResult {
+  ok: true;
+  kind: "source-run";
+  driver: DemoEngineMode;
+  profile: CaptureProfile;
+  run: GuidedCaptureDemoResult;
+  export?: SessionAssetExportResult;
+}
+
 async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   const { positionals, flags } = parseFlags(rest);
   const [arg, extra] = positionals;
+
+  if (command === "source") {
+    const [subcommand, scenarioId, driverArg] = positionals;
+    if (subcommand !== "run" || !scenarioId) {
+      throw new Error("Usage: action source run <scenario-id> [mock|macos] [--export] [--to <dir>] [--profile draft|final]");
+    }
+
+    const driver = optionalEngineMode(flags.driver ?? driverArg) ?? "mock";
+    const profile = optionalCaptureProfile(flags) ?? (driver === "macos" ? "final" : "draft");
+    if (flags.export === "true" && driver !== "macos") {
+      throw new Error("source run --export requires the macos driver because exports verify real media captures");
+    }
+
+    const run = await runScenarioGuidedCaptureDemo(
+      await loadScenario(scenarioId),
+      driver,
+      { captureProfile: profile },
+    );
+    const exportResult = flags.export === "true"
+      ? await exportSessionAssets({
+          sessionIdOrPath: run.sessionOutputDir,
+          outputDir: flags.to,
+        })
+      : undefined;
+
+    const result: SourceRunCliResult = {
+      ok: true,
+      kind: "source-run",
+      driver,
+      profile,
+      run,
+      export: exportResult,
+    };
+    printJson(result);
+    return;
+  }
 
   if (command === "demo" && arg) {
     const scenario = await loadScenario(arg);
@@ -152,6 +211,7 @@ async function main(argv: string[]): Promise<void> {
 
   printJson({
     commands: [
+      "bun packages/cli/src/main.ts source run <scenario-id> [mock|macos] [--export] [--to <output-dir>] [--profile final|draft]",
       "bun packages/cli/src/main.ts inspect current-surface",
       "bun packages/cli/src/main.ts settle current-surface --x <x> --y <y> --width <w> --height <h> [--provider mock|pie-minimax]",
       "bun packages/cli/src/main.ts export <session-id-or-path> [--to <output-dir>]",
