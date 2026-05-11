@@ -13,8 +13,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { parseScenarioDocument } from "@action/compiler";
 import type {
   Bounds,
+  CaptureProfile,
   ResolvedTarget,
   RuntimeAction,
   SessionMode,
@@ -24,6 +26,8 @@ import {
   exportSessionAssets,
   inspectCurrentSurface,
   MacOSCommandEngine,
+  runScenarioSource,
+  type SourceRunDriver,
   verifyMediaAsset,
 } from "@action/runtime";
 
@@ -177,6 +181,22 @@ function parseSessionMode(value: unknown): SessionMode {
   return "inspection";
 }
 
+function parseSourceRunDriver(value: unknown): SourceRunDriver {
+  if (value === "macos" || value === "mock") {
+    return value;
+  }
+
+  return "mock";
+}
+
+function parseCaptureProfile(value: unknown, driver: SourceRunDriver): CaptureProfile {
+  if (value === "draft" || value === "final") {
+    return value;
+  }
+
+  return driver === "macos" ? "final" : "draft";
+}
+
 function parseBounds(value: unknown, label = "bounds"): Bounds {
   const object = asObject(value, label);
   const x = optionalNumber(object.x);
@@ -218,6 +238,19 @@ function parseRuntimeAction(value: unknown): RuntimeAction {
 
 function sessionOutputDir(sessionId: string): string {
   return resolve(actionRoot, "artifacts", "sessions", sessionId);
+}
+
+function scenarioPath(idOrPath: string): string {
+  if (idOrPath.endsWith(".json") || idOrPath.includes("/")) {
+    return resolve(actionRoot, idOrPath);
+  }
+
+  return resolve(actionRoot, "scenarios", `${idOrPath}.json`);
+}
+
+async function loadScenario(idOrPath: string): Promise<ReturnType<typeof parseScenarioDocument>> {
+  const raw = await readFile(scenarioPath(idOrPath), "utf8");
+  return parseScenarioDocument(JSON.parse(raw));
 }
 
 function defaultSessionId(mode: SessionMode): string {
@@ -555,6 +588,20 @@ const tools: Tool[] = [
     { readOnlyHint: true, idempotentHint: true },
   ),
   tool(
+    "action.source.run",
+    "Run Source Scenario",
+    "Run a scenario through the shared Action source-run pipeline. Use mock for dry runs and macos for real native captures. Exports require macos because media verification rejects placeholders.",
+    objectSchema({
+      scenarioIdOrPath: textProperty("Scenario id under scenarios/, absolute scenario path, or Action-root-relative JSON path."),
+      scenario: objectProperty("Optional inline ScenarioDocument. Used when scenarioIdOrPath is omitted."),
+      driver: enumProperty(["mock", "macos"], "Execution driver. Defaults to mock."),
+      profile: enumProperty(["draft", "final"], "Capture profile. Defaults from driver."),
+      export: booleanProperty("When true, export a verified Mira/Preframe handoff. Requires driver=macos."),
+      outputDir: textProperty("Optional absolute or Action-root-relative handoff output directory."),
+    }),
+    { readOnlyHint: false, idempotentHint: false },
+  ),
+  tool(
     "action.source.verify",
     "Verify Source Media",
     "Verify a source media asset and return JSON status, metadata, and quality issues. Accepts absolute paths or paths relative to the Action repo root.",
@@ -879,6 +926,34 @@ const handlers: Record<string, ToolHandler> = {
     };
   },
 
+  async "action.source.run"(args) {
+    const scenarioInput = optionalObject(args.scenario, "scenario");
+    const scenarioIdOrPath = optionalString(args.scenarioIdOrPath);
+    if (!scenarioInput && !scenarioIdOrPath) {
+      throw new Error("scenarioIdOrPath or scenario is required");
+    }
+
+    const scenario = scenarioInput
+      ? parseScenarioDocument(scenarioInput)
+      : await loadScenario(scenarioIdOrPath!);
+    const driver = parseSourceRunDriver(args.driver);
+    const profile = parseCaptureProfile(args.profile, driver);
+
+    const sourceRun = await runScenarioSource({
+      scenario,
+      driver,
+      captureProfile: profile,
+      exportAssets: optionalBoolean(args.export) ?? false,
+      outputDir: optionalString(args.outputDir),
+      root: actionRoot,
+    });
+
+    return {
+      ok: true,
+      sourceRun,
+    };
+  },
+
   async "action.source.verify"(args) {
     const path = optionalString(args.path);
     if (!path) {
@@ -931,7 +1006,7 @@ function createServer(): Server {
       instructions: [
         "Use Action tools to observe, resolve, act, record, and inspect native macOS surfaces.",
         "Treat action.record.start as asynchronous; completion is represented by action.record.status and the finished file.",
-        "Use action.source.verify and action.source.export to validate and hand off completed source-material sessions.",
+        "Use action.source.run for scenario-driven source runs, then action.source.verify and action.source.export to validate and hand off completed source-material sessions.",
         "Prefer action.observe.snapshot and action.resolve.target before action.act.execute.",
       ].join("\n"),
     },

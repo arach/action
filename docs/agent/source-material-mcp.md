@@ -5,6 +5,15 @@ create a separate source-material pipeline for agents.
 
 ## Current Tools
 
+- `action.source.run`
+  - Input: `scenarioIdOrPath` or inline `scenario`, plus optional `driver`,
+    `profile`, `export`, and `outputDir`.
+  - `driver` defaults to `mock`; use `macos` for real native capture.
+  - `export: true` requires `driver: "macos"` because handoff export verifies
+    real media and rejects placeholder captures.
+  - Output includes `ok` and a `sourceRun` object with the run snapshot, trace
+    events, scenario, session output directory, and optional export result.
+
 - `action.source.verify`
   - Input: `path`, plus optional `minDurationSeconds`, `minFrameCount`,
     `minWidth`, and `minHeight`.
@@ -19,11 +28,9 @@ create a separate source-material pipeline for agents.
   - Output includes `ok` and an `export` object with the handoff manifest,
     copied artifacts, primary video path, and source session path.
 
-## Source Run Next Step
+## Source Run Shape
 
-`action.source.run` should be added only after the scenario execution path is
-available from runtime packages without importing CLI internals. Its job should
-be orchestration over the same primitives:
+`action.source.run` is orchestration over the same runtime primitives:
 
 1. create or select a session
 2. stage/observe the target surface
@@ -33,5 +40,6 @@ be orchestration over the same primitives:
 6. verify media
 7. optionally export the handoff
 
-Until then, agents should compose the loop from the existing observe, resolve,
-act, record, verify, and export tools.
+Agents can still compose the loop manually from observe, resolve, act, record,
+verify, and export tools when they need more control than a scenario run gives
+them.

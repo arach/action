@@ -4,6 +4,7 @@ import { compileScenario } from "@action/compiler";
 import {
   exportSessionAssets,
   inspectCurrentSurface,
+  runScenarioSource,
   settleCurrentSurfaceViewport,
   verifyMediaAsset,
 } from "@action/runtime";
@@ -11,8 +12,7 @@ import {
 import { runScenarioGuidedCaptureDemo } from "./index.js";
 import { loadScenario } from "./scenarios.js";
 import type { CaptureProfile } from "@action/protocol";
-import type { DemoEngineMode, GuidedCaptureDemoResult } from "./index.js";
-import type { SessionAssetExportResult } from "@action/runtime";
+import type { DemoEngineMode } from "./index.js";
 
 const runtime = globalThis as typeof globalThis & {
   process: {
@@ -89,15 +89,6 @@ function optionalEngineMode(input: string | undefined): DemoEngineMode | undefin
   throw new Error("driver must be mock or macos");
 }
 
-export interface SourceRunCliResult {
-  ok: true;
-  kind: "source-run";
-  driver: DemoEngineMode;
-  profile: CaptureProfile;
-  run: GuidedCaptureDemoResult;
-  export?: SessionAssetExportResult;
-}
-
 async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   const { positionals, flags } = parseFlags(rest);
@@ -111,30 +102,13 @@ async function main(argv: string[]): Promise<void> {
 
     const driver = optionalEngineMode(flags.driver ?? driverArg) ?? "mock";
     const profile = optionalCaptureProfile(flags) ?? (driver === "macos" ? "final" : "draft");
-    if (flags.export === "true" && driver !== "macos") {
-      throw new Error("source run --export requires the macos driver because exports verify real media captures");
-    }
-
-    const run = await runScenarioGuidedCaptureDemo(
-      await loadScenario(scenarioId),
+    const result = await runScenarioSource({
+      scenario: await loadScenario(scenarioId),
       driver,
-      { captureProfile: profile },
-    );
-    const exportResult = flags.export === "true"
-      ? await exportSessionAssets({
-          sessionIdOrPath: run.sessionOutputDir,
-          outputDir: flags.to,
-        })
-      : undefined;
-
-    const result: SourceRunCliResult = {
-      ok: true,
-      kind: "source-run",
-      driver,
-      profile,
-      run,
-      export: exportResult,
-    };
+      captureProfile: profile,
+      exportAssets: flags.export === "true",
+      outputDir: flags.to,
+    });
     printJson(result);
     return;
   }
