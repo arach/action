@@ -9,6 +9,46 @@ APP_DIR="$ROOT_DIR/native/dist/Action.app"
 APP_EXECUTABLE="$ROOT_DIR/native/dist/Action.app/Contents/MacOS/Action"
 PLIST_TEMPLATE="$PACKAGE_DIR/App/Info.plist"
 COMMAND="${1:-status}"
+NORMALIZED_HOST_ARGS=()
+
+is_path_value_flag() {
+  case "$1" in
+    --control-file|--debug-log|--file-path|--finished-file|--output|--reply-file|--state-file|--stop-file|--trace-file)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+absolute_host_path() {
+  local value="$1"
+  if [[ "$value" == /* ]]; then
+    print -r -- "$value"
+    return
+  fi
+
+  print -r -- "$ROOT_DIR/$value"
+}
+
+normalize_host_args() {
+  local expect_path=0
+  local arg
+  NORMALIZED_HOST_ARGS=()
+
+  for arg in "$@"; do
+    if [[ "$expect_path" -eq 1 ]]; then
+      NORMALIZED_HOST_ARGS+=("$(absolute_host_path "$arg")")
+      expect_path=0
+      continue
+    fi
+
+    NORMALIZED_HOST_ARGS+=("$arg")
+    if is_path_value_flag "$arg"; then
+      expect_path=1
+    fi
+  done
+}
 
 run_direct() {
   exec "$APP_EXECUTABLE" "$@"
@@ -57,4 +97,5 @@ if [[ $needs_build -eq 1 ]]; then
   "$SCRIPT_DIR/build-app.sh" >/dev/stderr
 fi
 
-run_via_open "$@"
+normalize_host_args "$@"
+run_via_open "${NORMALIZED_HOST_ARGS[@]}"
