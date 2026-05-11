@@ -97,6 +97,10 @@ export class BrowserSourceEngine implements CaptureEngine {
     return this.native.clearStage();
   }
 
+  async close(): Promise<void> {
+    await this.agentBrowser(["close"]).catch(() => undefined);
+  }
+
   setBackdrop(backdrop: BackdropPreset): Promise<void> {
     return this.native.setBackdrop(backdrop);
   }

@@ -79,6 +79,12 @@ function now(): string {
   return new Date().toISOString();
 }
 
+async function closeBrowserSourceEngine(engine: unknown): Promise<void> {
+  if (engine instanceof BrowserSourceEngine) {
+    await engine.close();
+  }
+}
+
 export function scenarioSourceSessionOutputDir(
   scenario: ScenarioDocument,
   root = process.cwd(),
@@ -147,12 +153,14 @@ export async function runScenarioSource(
         await session.clearStage().catch(() => undefined);
       });
     }
+    await closeBrowserSourceEngine(engine).catch(() => undefined);
     throw error;
   }
   try {
     await session.captureScreenshot("screenshot-viewport-final.png", "viewport");
     await session.captureScreenshot("screenshot-full-final.png", "full");
   } catch {}
+  await closeBrowserSourceEngine(engine).catch(() => undefined);
 
   const run = {
     snapshot: session.snapshot(),
