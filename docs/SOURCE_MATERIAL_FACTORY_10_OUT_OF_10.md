@@ -261,12 +261,15 @@ Definition of done:
 
 1. Done: normalize path handling for native host commands.
 2. Done: add a media verification helper and CLI command.
-3. Add a source-run report.
-4. Wrap scenario run + export into one CLI command.
-5. Add the same source-run affordance to MCP.
-6. Generate the next 10 Talkie and Preframe takes.
-7. Add MiniMax VLM as an optional observation enrichment provider.
-8. Harden stale supervision overlay cleanup.
+3. Done: add a first `action source run` CLI path for scenario runs.
+4. Done: add MCP source verify/export affordances.
+5. Done: add the first compact markup observation contract.
+6. Done: add the first six Talkie/Preframe scenario at-bats.
+7. Done: harden supervision overlay termination after recordings.
+8. Add a richer source-run report.
+9. Add `action.source.run` to MCP once scenario execution is runtime-native.
+10. Generate the next 10 verified Talkie and Preframe captures.
+11. Add MiniMax VLM as an optional observation enrichment provider.
 
 ## Decision Log
 

@@ -1,0 +1,50 @@
+{
+  "id": "preframe-source-material-short",
+  "title": "Preframe Source Material Short",
+  "targetApp": {
+    "name": "Google Chrome",
+    "bundleId": "com.google.Chrome"
+  },
+  "run": {
+    "initialActionDelayMs": 700,
+    "actionCadenceMs": 850
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 260,
+        "y": 88,
+        "width": 1440,
+        "height": 980
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Capture a short Preframe catalog at-bat that opens a source asset for review",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open source catalog",
+        "target": {
+          "text": "Catalog",
+          "role": "button"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Open the source catalog",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Select Talkie workflow tour asset",
+        "target": {
+          "text": "Talkie Workflows Tour"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "id": "talkie-source-review-short",
+  "title": "Talkie Source Review Short",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "jdi.talkie.core.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 650,
+    "actionCadenceMs": 800
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Capture a tight Talkie source-material take that lands on a reviewable workflow detail",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Select Hey Talkie workflow",
+        "target": {
+          "text": "Hey Talkie, 3 steps"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Review a workflow",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open workflow viewer",
+        "target": {
+          "text": "VIEW"
+        }
+      }
+    ]
+  }
+}

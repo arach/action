@@ -1,0 +1,100 @@
+{
+  "id": "preframe-source-material-long",
+  "title": "Preframe Source Material Long",
+  "targetApp": {
+    "name": "Google Chrome",
+    "bundleId": "com.google.Chrome"
+  },
+  "run": {
+    "initialActionDelayMs": 900,
+    "actionCadenceMs": 1150
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 260,
+        "y": 88,
+        "width": 1440,
+        "height": 980
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Capture a longer Preframe source-material pass across catalog, frames, FX, prompt, and player surfaces",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open source catalog",
+        "target": {
+          "text": "Catalog",
+          "role": "button"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Shape a source take",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Select Talkie workflow source asset",
+        "target": {
+          "text": "Talkie Workflows Tour"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open frames view",
+        "target": {
+          "text": "Frames",
+          "role": "button"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Select hero frame",
+        "target": {
+          "text": "Hero frame"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open FX panel",
+        "target": {
+          "text": "FX",
+          "role": "button"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open prompt panel",
+        "target": {
+          "text": "Prompt",
+          "role": "button"
+        }
+      },
+      {
+        "action": "type",
+        "description": "Add source-material prompt note",
+        "target": {
+          "text": "Prompt"
+        },
+        "input": {
+          "text": "Clean source pass: emphasize workflow structure, readable UI state, and one clear viewer transition.",
+          "style": "default"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open player preview",
+        "target": {
+          "text": "Preview",
+          "role": "button"
+        }
+      }
+    ]
+  }
+}

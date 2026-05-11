@@ -1,0 +1,66 @@
+{
+  "id": "preframe-source-material-medium",
+  "title": "Preframe Source Material Medium",
+  "targetApp": {
+    "name": "Google Chrome",
+    "bundleId": "com.google.Chrome"
+  },
+  "run": {
+    "initialActionDelayMs": 800,
+    "actionCadenceMs": 1000
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 260,
+        "y": 88,
+        "width": 1440,
+        "height": 980
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Capture Preframe moving from source catalog into queue review and playback",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open source catalog",
+        "target": {
+          "text": "Catalog",
+          "role": "button"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Queue source material",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Select Talkie source asset",
+        "target": {
+          "text": "Talkie Source Review"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open queue",
+        "target": {
+          "text": "Queue",
+          "role": "button"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open player preview",
+        "target": {
+          "text": "Preview",
+          "role": "button"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "id": "talkie-source-review-long",
+  "title": "Talkie Source Review Long",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "jdi.talkie.core.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 900,
+    "actionCadenceMs": 1150
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Capture a longer Talkie review pass with workflow switching, detail compression, and viewer entry",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Select Hey Talkie workflow",
+        "target": {
+          "text": "Hey Talkie, 3 steps"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Source review pass",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Collapse first workflow step",
+        "target": {
+          "text": "Go Up"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Collapse next workflow step",
+        "target": {
+          "text": "Go Up"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Select Transcribe workflow",
+        "target": {
+          "text": "Transcribe, 1 step"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Return to Hey Talkie workflow",
+        "target": {
+          "text": "Hey Talkie, 3 steps"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open workflow viewer",
+        "target": {
+          "text": "VIEW"
+        }
+      }
+    ]
+  }
+}
