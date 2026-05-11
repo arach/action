@@ -380,6 +380,7 @@ export type ArtifactKind =
   | "inspection-response"
   | "findings"
   | "focus-metadata"
+  | "source-run-report"
   | "subtitle"
   | "render-manifest"
   | "final-video";

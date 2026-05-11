@@ -4,7 +4,8 @@ import type {
   GuidedSessionEvent,
   HudSnapshot,
 } from "@action/protocol";
-import { resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 import { exportSessionAssets, type SessionAssetExportResult } from "./asset-export.js";
 import { GuidedCaptureSession, MockCaptureEngine } from "./guided.js";
@@ -26,6 +27,7 @@ export interface ScenarioSourceRunResult {
   kind: "source-run";
   driver: SourceRunDriver;
   profile: CaptureProfile;
+  reportPath: string;
   run: {
     snapshot: HudSnapshot;
     events: GuidedSessionEvent[];
@@ -33,6 +35,45 @@ export interface ScenarioSourceRunResult {
     sessionOutputDir: string;
   };
   export?: SessionAssetExportResult;
+}
+
+interface SourceRunReport {
+  schemaVersion: 1;
+  kind: "source-run-report";
+  generatedAt: string;
+  scenario: {
+    id: string;
+    title: string;
+    goal: string;
+  };
+  driver: SourceRunDriver;
+  profile: CaptureProfile;
+  session: {
+    id: string;
+    state: HudSnapshot["state"];
+    phase: HudSnapshot["phase"];
+    outputDir: string;
+    elapsedMs: number;
+    targetApp?: string;
+  };
+  counts: {
+    actions: number;
+    events: number;
+    artifacts: number;
+  };
+  artifacts: Array<{
+    kind: string;
+    path: string;
+  }>;
+  export?: {
+    exportDir: string;
+    handoffManifestPath: string;
+    primaryVideoPath: string;
+  };
+}
+
+function now(): string {
+  return new Date().toISOString();
 }
 
 export function scenarioSourceSessionOutputDir(
@@ -92,6 +133,14 @@ export async function runScenarioSource(
     scenario: options.scenario,
     sessionOutputDir,
   };
+  const reportPath = resolve(sessionOutputDir, "source-run-report.json");
+  await writeSourceRunReport(reportPath, buildSourceRunReport({
+    scenario: options.scenario,
+    driver,
+    profile,
+    run,
+  }));
+
   const exportResult = options.exportAssets
     ? await exportSessionAssets({
         sessionIdOrPath: sessionOutputDir,
@@ -99,13 +148,75 @@ export async function runScenarioSource(
         root,
       })
     : undefined;
+  if (exportResult) {
+    const report = buildSourceRunReport({
+      scenario: options.scenario,
+      driver,
+      profile,
+      run,
+      exportResult,
+    });
+    await writeSourceRunReport(reportPath, report);
+    await writeSourceRunReport(resolve(exportResult.exportDir, "source-run-report.json"), report);
+  }
 
   return {
     ok: true,
     kind: "source-run",
     driver,
     profile,
+    reportPath,
     run,
     export: exportResult,
   };
+}
+
+function buildSourceRunReport(input: {
+  scenario: ScenarioDocument;
+  driver: SourceRunDriver;
+  profile: CaptureProfile;
+  run: ScenarioSourceRunResult["run"];
+  exportResult?: SessionAssetExportResult;
+}): SourceRunReport {
+  return {
+    schemaVersion: 1,
+    kind: "source-run-report",
+    generatedAt: now(),
+    scenario: {
+      id: input.scenario.id,
+      title: input.scenario.title,
+      goal: input.scenario.scene.goal,
+    },
+    driver: input.driver,
+    profile: input.profile,
+    session: {
+      id: input.run.snapshot.sessionId,
+      state: input.run.snapshot.state,
+      phase: input.run.snapshot.phase,
+      outputDir: input.run.sessionOutputDir,
+      elapsedMs: input.run.snapshot.elapsedMs,
+      targetApp: input.run.snapshot.targetApp,
+    },
+    counts: {
+      actions: input.scenario.scene.sequence.length,
+      events: input.run.events.length,
+      artifacts: input.run.snapshot.artifacts.length,
+    },
+    artifacts: input.run.snapshot.artifacts.map((artifact) => ({
+      kind: artifact.kind,
+      path: artifact.path,
+    })),
+    export: input.exportResult
+      ? {
+          exportDir: input.exportResult.exportDir,
+          handoffManifestPath: input.exportResult.handoffManifestPath,
+          primaryVideoPath: input.exportResult.primaryVideoPath,
+        }
+      : undefined,
+  };
+}
+
+async function writeSourceRunReport(path: string, report: SourceRunReport): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(report, null, 2)}\n`);
 }

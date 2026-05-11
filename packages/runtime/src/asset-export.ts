@@ -55,6 +55,10 @@ function exportedName(entry: SessionArtifactEntry, index: number): string {
     return "trace.json";
   }
 
+  if (entry.kind === "source-run-report") {
+    return "source-run-report.json";
+  }
+
   if (entry.kind === "screenshot") {
     const source = typeof entry.metadata?.source === "string" ? entry.metadata.source : undefined;
     const scope = typeof entry.metadata?.scope === "string" ? entry.metadata.scope : undefined;
@@ -133,6 +137,17 @@ export async function exportSessionAssets(
     copiedArtifacts.push({
       kind: entry.kind,
       sourcePath,
+      exportedPath,
+    });
+  }
+
+  const sourceRunReportPath = resolve(sourceSessionPath, "source-run-report.json");
+  if (await pathExists(sourceRunReportPath)) {
+    const exportedPath = resolve(exportDir, "source-run-report.json");
+    await copyFile(sourceRunReportPath, exportedPath);
+    copiedArtifacts.push({
+      kind: "source-run-report",
+      sourcePath: sourceRunReportPath,
       exportedPath,
     });
   }
