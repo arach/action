@@ -156,6 +156,13 @@ struct CommandOptions {
         return value
     }
 
+    func requiredAllowingEmpty(_ key: String) throws -> String {
+        guard let value = options[key] else {
+            throw ActionHostError.missingOption("--\(key)")
+        }
+        return value
+    }
+
     func double(_ key: String, default defaultValue: Double) -> Double {
         guard let value = options[key], let number = Double(value) else {
             return defaultValue
@@ -3842,7 +3849,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
     case .setAccessibilityValue:
         let bundleId = try options.required("bundle-id")
         let label = try options.required("label")
-        let value = try options.required("value")
+        let value = try options.requiredAllowingEmpty("value")
         let role = options.options["role"]
         let match = try ActionNativeAutomation.setAccessibilityValue(
             bundleId: bundleId,
@@ -3859,7 +3866,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         )
     case .setFocusedAccessibilityValue:
         let bundleId = try options.required("bundle-id")
-        let value = try options.required("value")
+        let value = try options.requiredAllowingEmpty("value")
         let role = options.options["role"]
         let match = try ActionNativeAutomation.setFocusedAccessibilityValue(
             bundleId: bundleId,
@@ -3876,7 +3883,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
     case .setAccessibilityRoleValue:
         let bundleId = try options.required("bundle-id")
         let role = try options.required("role")
-        let value = try options.required("value")
+        let value = try options.requiredAllowingEmpty("value")
         let match = try ActionNativeAutomation.setAccessibilityRoleValue(
             bundleId: bundleId,
             role: role,

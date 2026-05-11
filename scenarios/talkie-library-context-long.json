@@ -23,7 +23,7 @@
     }
   },
   "scene": {
-    "goal": "Capture Talkie screenshot-library filtering and a search-field context-menu affordance",
+    "goal": "Capture Talkie screenshot-library browsing and a thumbnail context-menu affordance",
     "sequence": [
       {
         "action": "click",
@@ -46,25 +46,25 @@
       },
       {
         "action": "type",
-        "description": "Filter screenshots",
+        "description": "Clear screenshot search",
         "input": {
-          "text": "tray",
+          "text": "",
           "role": "textfield"
         }
       },
       {
         "action": "wait-for-condition",
-        "description": "Let screenshots filter",
+        "description": "Let screenshots repopulate",
         "input": {
           "durationMs": 700
         }
       },
       {
         "action": "click",
-        "description": "Open search context menu",
+        "description": "Open thumbnail context menu",
         "target": {
-          "text": "tray",
-          "role": "textfield"
+          "text": "Tray capture",
+          "role": "image"
         },
         "input": {
           "axAction": "ShowMenu"
@@ -75,14 +75,6 @@
         "description": "Dismiss context menu",
         "input": {
           "key": "Escape"
-        }
-      },
-      {
-        "action": "click",
-        "description": "Open tray viewer",
-        "target": {
-          "text": "Tray Viewer",
-          "role": "button"
         }
       },
       {

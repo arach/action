@@ -263,6 +263,26 @@ public enum ActionNativeAutomation {
         up.post(tap: .cghidEventTap)
     }
 
+    public static func rightClick(at point: CGPoint) throws {
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")
+        }
+
+        CGWarpMouseCursorPosition(point)
+        usleep(10000)
+
+        guard let down = CGEvent(mouseEventSource: source, mouseType: .rightMouseDown, mouseCursorPosition: point, mouseButton: .right),
+              let up = CGEvent(mouseEventSource: source, mouseType: .rightMouseUp, mouseCursorPosition: point, mouseButton: .right) else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Unable to create right-click mouse events"
+            )
+        }
+
+        down.post(tap: .cghidEventTap)
+        usleep(30000)
+        up.post(tap: .cghidEventTap)
+    }
+
     public static func performAccessibilityAction(
         bundleId: String,
         label: String,
@@ -285,7 +305,12 @@ public enum ActionNativeAutomation {
         }
 
         let result = AXUIElementPerformAction(match.element, actionName as CFString)
-        guard result == .success else {
+        if result != .success {
+            if actionName == kAXShowMenuAction as String,
+               let fallbackPoint = clickPoint(for: match.element) {
+                try rightClick(at: fallbackPoint)
+                return snapshot(of: match.element, depth: match.depth)
+            }
             throw ActionNativeAutomationError.accessibilityActionFailed(
                 "Accessibility action \(actionName) failed for \(bundleId) element \(label): \(result.rawValue)"
             )
