@@ -310,15 +310,16 @@ export class BrowserSourceEngine implements CaptureEngine {
   const expected = ${JSON.stringify(text)}.toLowerCase();
   const allowContains = ${options.allowContains ? "true" : "false"};
   const elements = Array.from(document.querySelectorAll(${JSON.stringify(roleSelector)}));
-  const nameFor = (element) => [
+  const namesFor = (element) => [
     element.textContent,
     element.getAttribute("aria-label"),
     element.getAttribute("title"),
     element.getAttribute("value")
-  ].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
+  ].filter(Boolean).map((value) => String(value).replace(/\\s+/g, " ").trim()).filter(Boolean);
   const target = elements.find((element) => {
-    const name = nameFor(element).toLowerCase();
-    return name === expected || (allowContains && name.includes(expected));
+    const names = namesFor(element).map((name) => name.toLowerCase());
+    return names.some((name) => name === expected)
+      || (allowContains && names.some((name) => name.includes(expected)));
   });
   if (!target) {
     throw new Error("No matching ${role} named ${text}");
@@ -328,6 +329,17 @@ export class BrowserSourceEngine implements CaptureEngine {
   return true;
 })()
 `;
-    await this.agentBrowser(["eval", script]);
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        await this.agentBrowser(["eval", script]);
+        return;
+      } catch (error) {
+        lastError = error;
+        await sleep(150);
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(`No matching ${role} named ${text}`);
   }
 }

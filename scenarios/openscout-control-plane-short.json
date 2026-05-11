@@ -1,0 +1,60 @@
+{
+  "id": "openscout-control-plane-short",
+  "title": "OpenScout Control Plane Short",
+  "targetApp": {
+    "name": "Google Chrome for Testing",
+    "bundleId": "com.google.chrome.for.testing"
+  },
+  "run": {
+    "initialActionDelayMs": 700,
+    "actionCadenceMs": 850,
+    "browserUrl": "http://localhost:3200"
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 260,
+        "y": 88,
+        "width": 1440,
+        "height": 980
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Capture a short OpenScout control-plane pass from ops entry into the agent fleet",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open the ops center",
+        "target": {
+          "text": "Open ops center",
+          "role": "button"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Open the control plane",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open agents",
+        "target": {
+          "text": "Agents",
+          "role": "button"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Ranger",
+        "target": {
+          "text": "Ranger",
+          "role": "button"
+        }
+      }
+    ]
+  }
+}

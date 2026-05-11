@@ -1,0 +1,84 @@
+{
+  "id": "openscout-control-plane-medium",
+  "title": "OpenScout Control Plane Medium",
+  "targetApp": {
+    "name": "Google Chrome for Testing",
+    "bundleId": "com.google.chrome.for.testing"
+  },
+  "run": {
+    "initialActionDelayMs": 800,
+    "actionCadenceMs": 1000,
+    "browserUrl": "http://localhost:3200"
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 260,
+        "y": 88,
+        "width": 1440,
+        "height": 980
+      },
+      "dimming": "surround"
+    }
+  },
+  "scene": {
+    "goal": "Capture OpenScout moving across fleet, agents, conversations, sessions, and Ranger state",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open the fleet view",
+        "target": {
+          "text": "Fleet",
+          "role": "button"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Inspect the agent fleet",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open agents",
+        "target": {
+          "text": "Agents",
+          "role": "button"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open conversations",
+        "target": {
+          "text": "Conversations",
+          "role": "button"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open sessions",
+        "target": {
+          "text": "Sessions",
+          "role": "button"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Ranger",
+        "target": {
+          "text": "Ranger",
+          "role": "button"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Ranger state",
+        "target": {
+          "text": "State",
+          "role": "button"
+        }
+      }
+    ]
+  }
+}
