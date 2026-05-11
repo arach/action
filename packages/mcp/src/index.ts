@@ -23,6 +23,7 @@ import type {
   TargetQuery,
 } from "@action/protocol";
 import {
+  collectSourceMaterialInventory,
   exportSessionAssets,
   inspectCurrentSurface,
   MacOSCommandEngine,
@@ -626,6 +627,16 @@ const tools: Tool[] = [
     }, ["sessionIdOrPath"]),
     { readOnlyHint: false, idempotentHint: false },
   ),
+  tool(
+    "action.source.inventory",
+    "Inventory Source Handoffs",
+    "Scan Mira/Preframe handoff exports and return a compact source-material index. Optionally writes the index JSON for website or Preframe intake.",
+    objectSchema({
+      exportsDir: textProperty("Optional absolute or Action-root-relative exports directory. Defaults to artifacts/exports."),
+      outputPath: textProperty("Optional absolute or Action-root-relative JSON file to write, for example artifacts/exports/source-material-index.json."),
+    }),
+    { readOnlyHint: false, idempotentHint: true },
+  ),
 ];
 
 const handlers: Record<string, ToolHandler> = {
@@ -995,6 +1006,19 @@ const handlers: Record<string, ToolHandler> = {
       export: result,
     };
   },
+
+  async "action.source.inventory"(args) {
+    const inventory = await collectSourceMaterialInventory({
+      exportsDir: optionalString(args.exportsDir),
+      outputPath: optionalString(args.outputPath),
+      root: actionRoot,
+    });
+
+    return {
+      ok: true,
+      inventory,
+    };
+  },
 };
 
 function createServer(): Server {
@@ -1010,7 +1034,7 @@ function createServer(): Server {
       instructions: [
         "Use Action tools to observe, resolve, act, record, and inspect native macOS surfaces.",
         "Treat action.record.start as asynchronous; completion is represented by action.record.status and the finished file.",
-        "Use action.source.run for scenario-driven source runs, then action.source.verify and action.source.export to validate and hand off completed source-material sessions.",
+        "Use action.source.run for scenario-driven source runs, action.source.verify/export for handoff, and action.source.inventory to list source-material assets.",
         "Prefer action.observe.snapshot and action.resolve.target before action.act.execute.",
       ].join("\n"),
     },

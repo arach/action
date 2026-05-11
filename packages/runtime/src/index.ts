@@ -12,3 +12,4 @@ export * from "./media-verification.js";
 export * from "./markup-observation.js";
 export * from "./source-run.js";
 export * from "./browser-source-engine.js";
+export * from "./source-inventory.js";

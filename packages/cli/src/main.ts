@@ -2,6 +2,7 @@
 
 import { compileScenario } from "@action/compiler";
 import {
+  collectSourceMaterialInventory,
   exportSessionAssets,
   inspectCurrentSurface,
   runScenarioSource,
@@ -109,8 +110,17 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "source") {
     const [subcommand, scenarioId, driverArg] = positionals;
+    if (subcommand === "inventory") {
+      const result = await collectSourceMaterialInventory({
+        exportsDir: flags["exports-dir"],
+        outputPath: flags.write,
+      });
+      printJson(result);
+      return;
+    }
+
     if (subcommand !== "run" || !scenarioId) {
-      throw new Error("Usage: action source run <scenario-id> [mock|macos|browser] [--export] [--to <dir>] [--profile draft|final] [--url <browser-url>]");
+      throw new Error("Usage: action source run <scenario-id> [mock|macos|browser] [--export] [--to <dir>] [--profile draft|final] [--url <browser-url>] OR action source inventory [--write <path>]");
     }
 
     const driver = optionalSourceRunDriver(flags.driver ?? driverArg) ?? "mock";
@@ -201,6 +211,7 @@ async function main(argv: string[]): Promise<void> {
   printJson({
     commands: [
       "bun packages/cli/src/main.ts source run <scenario-id> [mock|macos|browser] [--export] [--to <output-dir>] [--profile final|draft] [--url <browser-url>]",
+      "bun packages/cli/src/main.ts source inventory [--exports-dir <dir>] [--write <path>]",
       "bun packages/cli/src/main.ts inspect current-surface",
       "bun packages/cli/src/main.ts settle current-surface --x <x> --y <y> --width <w> --height <h> [--provider mock|pie-minimax]",
       "bun packages/cli/src/main.ts export <session-id-or-path> [--to <output-dir>]",
