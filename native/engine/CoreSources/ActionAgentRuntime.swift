@@ -305,7 +305,10 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 outputPath: outputPath,
                 stopSignalPath: request.params["stopFile"],
                 finishedSignalPath: request.params["finishedFile"],
-                debugLogPath: request.params["debugLog"]
+                debugLogPath: request.params["debugLog"],
+                scale: request.params["scale"].flatMap(Double.init) ?? 1,
+                bitRate: request.params["bitrate"].flatMap(Int.init),
+                codec: request.params["codec"]
             )
         case .recordRegion:
             guard #available(macOS 15.0, *) else {
@@ -330,7 +333,9 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 finishedSignalPath: request.params["finishedFile"],
                 debugLogPath: request.params["debugLog"],
                 fps: request.params["fps"].flatMap(Double.init) ?? 15,
-                scale: request.params["scale"].flatMap(Double.init) ?? 1
+                scale: request.params["scale"].flatMap(Double.init) ?? 1,
+                bitRate: request.params["bitrate"].flatMap(Int.init),
+                codec: request.params["codec"]
             )
         case .screenshotAppWindow:
             guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {

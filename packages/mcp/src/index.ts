@@ -711,6 +711,8 @@ const handlers: Record<string, ToolHandler> = {
     let nativeResponse: JsonObject;
     let bundleId = optionalString(args.bundleId);
     let bounds: Bounds | undefined;
+    const profile = optionalString(args.profile) === "final" ? "final" : "draft";
+    const appWindowScale = "1";
 
     if (scope === "current-surface") {
       const currentSurface = await newEngine().currentSurface();
@@ -727,6 +729,8 @@ const handlers: Record<string, ToolHandler> = {
         finishedFile,
         "--debug-log",
         debugLog,
+        "--scale",
+        appWindowScale,
       );
     } else if (scope === "app-window") {
       if (!bundleId) {
@@ -744,10 +748,11 @@ const handlers: Record<string, ToolHandler> = {
         finishedFile,
         "--debug-log",
         debugLog,
+        "--scale",
+        appWindowScale,
       );
     } else {
       bounds = parseBounds(args.bounds);
-      const profile = optionalString(args.profile) === "final" ? "final" : "draft";
       nativeResponse = await runHost(
         "record-region",
         "--x",

@@ -35,6 +35,17 @@ public struct ActionRegionSelection {
     public let sourceRect: CGRect
 }
 
+public func actionDisplayPixelScale(_ display: SCDisplay) -> CGFloat {
+    guard display.frame.width > 0, display.frame.height > 0 else {
+        return 1
+    }
+
+    let xScale = CGFloat(display.width) / display.frame.width
+    let yScale = CGFloat(display.height) / display.frame.height
+    let scale = min(xScale, yScale)
+    return scale.isFinite && scale > 0 ? scale : 1
+}
+
 public func actionShareableContent() async throws -> SCShareableContent {
     guard CGPreflightScreenCaptureAccess() else {
         throw ActionCaptureError.screenRecordingPermissionMissing
@@ -192,8 +203,9 @@ public final class ActionCaptureRecorder: NSObject, SCRecordingOutputDelegate, S
         logger("record-region: display frame=\(selection.display.frame) sourceRect=\(selection.sourceRect)")
         let filter = SCContentFilter(display: selection.display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
-        configuration.width = max(Int(selection.sourceRect.width * scale), 1)
-        configuration.height = max(Int(selection.sourceRect.height * scale), 1)
+        let outputScale = actionDisplayPixelScale(selection.display) * max(CGFloat(scale), 0.1)
+        configuration.width = max(Int((selection.sourceRect.width * outputScale).rounded()), 1)
+        configuration.height = max(Int((selection.sourceRect.height * outputScale).rounded()), 1)
         configuration.minimumFrameInterval = CMTime(seconds: 1 / max(fps, 1), preferredTimescale: 600)
         configuration.sourceRect = selection.sourceRect
 
@@ -228,7 +240,8 @@ public final class ActionCaptureRecorder: NSObject, SCRecordingOutputDelegate, S
         bundleId: String,
         outputPath: String,
         stopSignalPath: String?,
-        finishedSignalPath: String?
+        finishedSignalPath: String?,
+        scale: Double = 1
     ) async throws {
         logger("record: begin bundleId=\(bundleId) outputPath=\(outputPath)")
         self.finishedSignalPath = finishedSignalPath
@@ -242,10 +255,16 @@ public final class ActionCaptureRecorder: NSObject, SCRecordingOutputDelegate, S
         let window = selection.window
         let filter = SCContentFilter(display: selection.display, including: [window])
         let configuration = SCStreamConfiguration()
-        configuration.width = max(Int(window.frame.width), 1)
-        configuration.height = max(Int(window.frame.height), 1)
+        let outputScale = actionDisplayPixelScale(selection.display) * max(CGFloat(scale), 0.1)
+        configuration.width = max(Int((window.frame.width * outputScale).rounded()), 1)
+        configuration.height = max(Int((window.frame.height * outputScale).rounded()), 1)
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         configuration.sourceRect = window.frame
+        configuration.scalesToFit = scale > 1
+        if #available(macOS 14.0, *) {
+            configuration.preservesAspectRatio = true
+            configuration.captureResolution = .best
+        }
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleBufferQueue)

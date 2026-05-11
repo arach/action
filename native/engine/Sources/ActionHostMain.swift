@@ -820,6 +820,32 @@ struct RegionSelection {
     let sourceRect: CGRect
 }
 
+func displayPixelScale(_ display: SCDisplay) -> CGFloat {
+    guard display.frame.width > 0, display.frame.height > 0 else {
+        return 1
+    }
+
+    let xScale = CGFloat(display.width) / display.frame.width
+    let yScale = CGFloat(display.height) / display.frame.height
+    let scale = min(xScale, yScale)
+    return scale.isFinite && scale > 0 ? scale : 1
+}
+
+func evenPixelDimension(_ value: Int) -> Int {
+    max(value - (value % 2), 2)
+}
+
+func sourceCaptureBitRate(width: Int, height: Int, fps: Double) -> Int {
+    let pixelsPerSecond = Double(max(width, 1) * max(height, 1)) * max(fps, 1)
+    let estimated = pixelsPerSecond * 0.22
+    return Int(min(max(estimated, 24_000_000), 180_000_000))
+}
+
+func movieCodec(from raw: String?) -> ActionMovieCodec {
+    _ = raw
+    return .h264
+}
+
 func displayContaining(window: SCWindow, displays: [SCDisplay]) -> SCDisplay? {
     let center = CGPoint(
         x: window.frame.midX,
@@ -989,17 +1015,232 @@ func composeRoundedScreenshot(
 }
 
 @available(macOS 15.0, *)
+private struct ActionMovieWriterSummary {
+    let frames: Int
+    let droppedFrames: Int
+    let bitRate: Int
+}
+
+enum ActionMovieCodec: String {
+    case h264
+
+    var avCodecType: AVVideoCodecType {
+        .h264
+    }
+}
+
+@available(macOS 15.0, *)
+private final class ActionMovieWriter: NSObject, SCStreamOutput {
+    let queue = DispatchQueue(label: "dev.action.capture.movie-writer")
+
+    private let outputURL: URL
+    private let width: Int
+    private let height: Int
+    private let fps: Double
+    private let bitRate: Int
+    private let codec: ActionMovieCodec
+    private let keyFrameInterval: Int
+    private let logger: DebugLogger
+    private var assetWriter: AVAssetWriter?
+    private var videoInput: AVAssetWriterInput?
+    private var frameCount = 0
+    private var droppedFrameCount = 0
+    private var finished = false
+    private var failure: Error?
+
+    init(outputURL: URL, width: Int, height: Int, fps: Double, bitRate: Int?, codec: ActionMovieCodec, logger: DebugLogger) {
+        self.outputURL = outputURL
+        self.width = evenPixelDimension(width)
+        self.height = evenPixelDimension(height)
+        self.fps = max(fps, 1)
+        self.bitRate = bitRate ?? sourceCaptureBitRate(width: self.width, height: self.height, fps: self.fps)
+        self.codec = codec
+        self.keyFrameInterval = Int(max(self.fps.rounded(), 1))
+        self.logger = logger
+    }
+
+    func finish() throws -> ActionMovieWriterSummary {
+        try queue.sync {
+            finished = true
+
+            if let failure {
+                throw failure
+            }
+
+            guard let assetWriter, let videoInput else {
+                throw movieWriterError("No video frames were captured.")
+            }
+
+            guard frameCount > 0 else {
+                throw movieWriterError("The capture stream ended before any video frames were written.")
+            }
+
+            if assetWriter.status == .failed {
+                throw assetWriter.error ?? movieWriterError("Movie writer failed before finalization.")
+            }
+
+            videoInput.markAsFinished()
+
+            let semaphore = DispatchSemaphore(value: 0)
+            assetWriter.finishWriting {
+                semaphore.signal()
+            }
+
+            if semaphore.wait(timeout: .now() + 60) == .timedOut {
+                throw movieWriterError("Timed out while finalizing movie output.")
+            }
+
+            if assetWriter.status == .failed {
+                throw assetWriter.error ?? movieWriterError("Movie writer failed while finalizing output.")
+            }
+
+            if assetWriter.status != .completed {
+                throw movieWriterError("Movie writer ended in unexpected status \(assetWriter.status.rawValue).")
+            }
+
+            return ActionMovieWriterSummary(
+                frames: frameCount,
+                droppedFrames: droppedFrameCount,
+                bitRate: bitRate
+            )
+        }
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+        guard outputType == .screen else {
+            return
+        }
+
+        guard CMSampleBufferDataIsReady(sampleBuffer), CMSampleBufferGetNumSamples(sampleBuffer) > 0 else {
+            return
+        }
+
+        guard isCompleteFrame(sampleBuffer) else {
+            droppedFrameCount += 1
+            return
+        }
+
+        do {
+            try append(sampleBuffer)
+        } catch {
+            if failure == nil {
+                failure = error
+                logger.log("record: movie writer failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func append(_ sampleBuffer: CMSampleBuffer) throws {
+        guard !finished else {
+            return
+        }
+
+        let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard presentationTime.isValid else {
+            droppedFrameCount += 1
+            return
+        }
+
+        if assetWriter == nil {
+            try startWriter(at: presentationTime, sourceFormatHint: CMSampleBufferGetFormatDescription(sampleBuffer))
+        }
+
+        guard let assetWriter, let videoInput else {
+            throw movieWriterError("Movie writer was not initialized.")
+        }
+
+        if assetWriter.status == .failed {
+            throw assetWriter.error ?? movieWriterError("Movie writer failed.")
+        }
+
+        guard assetWriter.status == .writing else {
+            droppedFrameCount += 1
+            return
+        }
+
+        guard videoInput.isReadyForMoreMediaData else {
+            droppedFrameCount += 1
+            return
+        }
+
+        guard videoInput.append(sampleBuffer) else {
+            throw assetWriter.error ?? movieWriterError("Movie writer rejected a video frame.")
+        }
+
+        frameCount += 1
+    }
+
+    private func isCompleteFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(
+            sampleBuffer,
+            createIfNecessary: false
+        ) as? [[SCStreamFrameInfo: Any]],
+              let rawStatus = attachments.first?[.status] as? Int,
+              let status = SCFrameStatus(rawValue: rawStatus) else {
+            return true
+        }
+
+        return status == .complete
+    }
+
+    private func startWriter(at presentationTime: CMTime, sourceFormatHint: CMFormatDescription?) throws {
+        let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        assetWriter.shouldOptimizeForNetworkUse = false
+
+        let frameRate = Int(max(fps.rounded(), 1))
+        let compression: [String: Any] = [
+            AVVideoAverageBitRateKey: bitRate,
+            AVVideoExpectedSourceFrameRateKey: frameRate,
+            AVVideoMaxKeyFrameIntervalKey: keyFrameInterval,
+            AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+            AVVideoAllowFrameReorderingKey: false,
+        ]
+        let settings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+            AVVideoCompressionPropertiesKey: compression,
+        ]
+
+        let videoInput = AVAssetWriterInput(
+            mediaType: .video,
+            outputSettings: settings,
+            sourceFormatHint: sourceFormatHint
+        )
+        videoInput.expectsMediaDataInRealTime = true
+
+        guard assetWriter.canAdd(videoInput) else {
+            throw movieWriterError("Movie writer could not add the video input.")
+        }
+
+        assetWriter.add(videoInput)
+
+        guard assetWriter.startWriting() else {
+            throw assetWriter.error ?? movieWriterError("Movie writer could not start writing.")
+        }
+
+        assetWriter.startSession(atSourceTime: presentationTime)
+        self.assetWriter = assetWriter
+        self.videoInput = videoInput
+        logger.log("record: movie writer started width=\(width) height=\(height) fps=\(fps) codec=\(codec.rawValue) bitrate=\(bitRate) keyframeInterval=\(keyFrameInterval)")
+    }
+
+    private func movieWriterError(_ message: String) -> NSError {
+        NSError(
+            domain: "ActionMovieWriter",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+}
+
+@available(macOS 15.0, *)
 @MainActor
-final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegate {
+final class WindowRecorder: NSObject, SCStreamDelegate {
     private var stream: SCStream?
-    private var recordingOutput: SCRecordingOutput?
     private let writer: ResponseWriter
     private let logger: DebugLogger
     private var finishedSignalPath: String?
-    private var startContinuation: CheckedContinuation<Void, Error>?
-    private var finishContinuation: CheckedContinuation<Void, Error>?
-    private var recordingStarted = false
-    private var recordingFinished = false
     private var recordingError: Error?
 
     init(writer: ResponseWriter, logger: DebugLogger) {
@@ -1018,7 +1259,7 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         )
     }
 
-    func recordRegion(rect: CGRect, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, fps: Double, scale: Double) async throws {
+    func recordRegion(rect: CGRect, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, fps: Double, scale: Double, bitRate: Int? = nil, codec: ActionMovieCodec = .h264) async throws {
         logger.log("record-region: begin rect=\(rect) outputPath=\(outputPath)")
         self.finishedSignalPath = finishedSignalPath
         let outputURL = URL(fileURLWithPath: outputPath)
@@ -1026,6 +1267,9 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try FileManager.default.removeItem(at: outputURL)
+        }
 
         let content = try await shareableContent()
         guard let selection = regionSelection(for: rect, displays: content.displays) else {
@@ -1035,26 +1279,34 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         logger.log("record-region: display frame=\(selection.display.frame) sourceRect=\(selection.sourceRect)")
         let filter = SCContentFilter(display: selection.display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
-        configuration.width = max(Int(selection.sourceRect.width * scale), 1)
-        configuration.height = max(Int(selection.sourceRect.height * scale), 1)
+        let outputScale = displayPixelScale(selection.display) * max(CGFloat(scale), 0.1)
+        configuration.width = evenPixelDimension(Int((selection.sourceRect.width * outputScale).rounded()))
+        configuration.height = evenPixelDimension(Int((selection.sourceRect.height * outputScale).rounded()))
         configuration.minimumFrameInterval = CMTime(seconds: 1 / max(fps, 1), preferredTimescale: 600)
         configuration.sourceRect = selection.sourceRect
-        logger.log("record-region: fps=\(fps) scale=\(scale) output=\(configuration.width)x\(configuration.height)")
+        configuration.showsCursor = true
+        configuration.scalesToFit = scale > 1
+        if #available(macOS 14.0, *) {
+            configuration.preservesAspectRatio = true
+            configuration.captureResolution = .best
+        }
+        logger.log("record-region: fps=\(fps) scale=\(scale) pixelScale=\(displayPixelScale(selection.display)) output=\(configuration.width)x\(configuration.height)")
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
-        let recordingConfiguration = SCRecordingOutputConfiguration()
-        recordingConfiguration.outputURL = outputURL
-        recordingConfiguration.outputFileType = .mov
-        recordingConfiguration.videoCodecType = .h264
-
-        let recordingOutput = SCRecordingOutput(configuration: recordingConfiguration, delegate: self)
-        try stream.addRecordingOutput(recordingOutput)
+        let movieWriter = ActionMovieWriter(
+            outputURL: outputURL,
+            width: configuration.width,
+            height: configuration.height,
+            fps: fps,
+            bitRate: bitRate,
+            codec: codec,
+            logger: logger
+        )
+        try stream.addStreamOutput(movieWriter, type: .screen, sampleHandlerQueue: movieWriter.queue)
 
         self.stream = stream
-        self.recordingOutput = recordingOutput
 
         try await stream.startCapture()
-        try await waitForRecordingStart()
         try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
 
         if let stopSignalPath {
@@ -1064,7 +1316,8 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         }
 
         try await stream.stopCapture()
-        try await waitForRecordingFinish()
+        let summary = try movieWriter.finish()
+        logger.log("record-region: finalized frames=\(summary.frames) dropped=\(summary.droppedFrames) bitrate=\(summary.bitRate)")
         try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
         try writeSignalFile(path: finishedSignalPath, contents: "finished\n")
     }
@@ -1074,11 +1327,12 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
             bundleId: bundleId,
             outputPath: outputPath,
             stopSignalPath: nil,
-            finishedSignalPath: nil
+            finishedSignalPath: nil,
+            scale: 1
         )
     }
 
-    func recordAppWindow(bundleId: String, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?) async throws {
+    func recordAppWindow(bundleId: String, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, scale: Double = 1, bitRate: Int? = nil, codec: ActionMovieCodec = .h264) async throws {
         logger.log("record: begin bundleId=\(bundleId) outputPath=\(outputPath)")
         self.finishedSignalPath = finishedSignalPath
         let outputURL = URL(fileURLWithPath: outputPath)
@@ -1086,6 +1340,9 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try FileManager.default.removeItem(at: outputURL)
+        }
 
         logger.log("record: finding window")
         let selection = try await bestWindowSelection(for: bundleId)
@@ -1095,31 +1352,38 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         let filter = SCContentFilter(display: selection.display, including: [window])
         logger.log("record: creating stream configuration")
         let configuration = SCStreamConfiguration()
-        configuration.width = max(Int(window.frame.width), 1)
-        configuration.height = max(Int(window.frame.height), 1)
+        let outputScale = displayPixelScale(selection.display) * max(CGFloat(scale), 0.1)
+        configuration.width = evenPixelDimension(Int((window.frame.width * outputScale).rounded()))
+        configuration.height = evenPixelDimension(Int((window.frame.height * outputScale).rounded()))
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         configuration.sourceRect = window.frame
-        logger.log("record: configuration width=\(configuration.width) height=\(configuration.height)")
+        configuration.showsCursor = true
+        configuration.scalesToFit = scale > 1
+        if #available(macOS 14.0, *) {
+            configuration.preservesAspectRatio = true
+            configuration.captureResolution = .best
+        }
+        logger.log("record: configuration width=\(configuration.width) height=\(configuration.height) scale=\(scale) outputScale=\(outputScale)")
 
         logger.log("record: creating stream")
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
-        let recordingConfiguration = SCRecordingOutputConfiguration()
-        recordingConfiguration.outputURL = outputURL
-        recordingConfiguration.outputFileType = .mov
-        recordingConfiguration.videoCodecType = .h264
-
-        logger.log("record: creating recording output")
-        let recordingOutput = SCRecordingOutput(configuration: recordingConfiguration, delegate: self)
-        logger.log("record: adding recording output")
-        try stream.addRecordingOutput(recordingOutput)
+        let movieWriter = ActionMovieWriter(
+            outputURL: outputURL,
+            width: configuration.width,
+            height: configuration.height,
+            fps: 60,
+            bitRate: bitRate,
+            codec: codec,
+            logger: logger
+        )
+        logger.log("record: adding movie writer")
+        try stream.addStreamOutput(movieWriter, type: .screen, sampleHandlerQueue: movieWriter.queue)
 
         self.stream = stream
-        self.recordingOutput = recordingOutput
 
         logger.log("record: starting capture")
         try await stream.startCapture()
         logger.log("record: capture started")
-        try await waitForRecordingStart()
         try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
         logger.log("record: wrote recording reply")
 
@@ -1134,7 +1398,8 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         logger.log("record: stopping capture")
         try await stream.stopCapture()
         logger.log("record: capture stopped")
-        try await waitForRecordingFinish()
+        let summary = try movieWriter.finish()
+        logger.log("record: finalized frames=\(summary.frames) dropped=\(summary.droppedFrames) bitrate=\(summary.bitRate)")
         try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
         try writeSignalFile(path: finishedSignalPath, contents: "finished\n")
         logger.log("record: wrote finished reply")
@@ -1144,34 +1409,6 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         let stopURL = URL(fileURLWithPath: path)
         while !FileManager.default.fileExists(atPath: stopURL.path) {
             Thread.sleep(forTimeInterval: 0.1)
-        }
-    }
-
-    private func waitForRecordingStart() async throws {
-        if let recordingError {
-            throw recordingError
-        }
-
-        if recordingStarted {
-            return
-        }
-
-        try await withCheckedThrowingContinuation { continuation in
-            startContinuation = continuation
-        }
-    }
-
-    private func waitForRecordingFinish() async throws {
-        if let recordingError {
-            throw recordingError
-        }
-
-        if recordingFinished {
-            return
-        }
-
-        try await withCheckedThrowingContinuation { continuation in
-            finishContinuation = continuation
         }
     }
 
@@ -1197,40 +1434,7 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         recordingError = error
         logger.log("\(logPrefix) \(message)")
         try? writeSignalFile(path: finishedSignalPath, contents: "error:\(message)\n")
-        startContinuation?.resume(throwing: error)
-        startContinuation = nil
-        finishContinuation?.resume(throwing: error)
-        finishContinuation = nil
         FileHandle.standardError.write(Data("\(stderrPrefix): \(message)\n".utf8))
-    }
-
-    nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: any Error) {
-        let message = error.localizedDescription
-        Task { @MainActor in
-            self.handleRecordingFailure(
-                message: message,
-                logPrefix: "record: recordingOutput failed",
-                stderrPrefix: "ActionHost recording failed"
-            )
-        }
-    }
-
-    nonisolated func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
-        Task { @MainActor in
-            logger.log("record: recording output started")
-            recordingStarted = true
-            startContinuation?.resume()
-            startContinuation = nil
-        }
-    }
-
-    nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
-        Task { @MainActor in
-            logger.log("record: recording output finished")
-            recordingFinished = true
-            finishContinuation?.resume()
-            finishContinuation = nil
-        }
     }
 
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
@@ -1399,11 +1603,19 @@ final class StageOverlayView: NSView {
             return nil
         }
 
-        return CGRect(
-            x: bounds.x - screenFrame.minX,
-            y: bounds.y - screenFrame.minY,
+        let captureRect = CGRect(
+            x: bounds.x,
+            y: bounds.y,
             width: bounds.width,
             height: bounds.height
+        )
+        let appKitRect = appKitRectFromCaptureCoordinates(captureRect, screenFrame: screenFrame)
+
+        return CGRect(
+            x: appKitRect.minX - screenFrame.minX,
+            y: appKitRect.minY - screenFrame.minY,
+            width: appKitRect.width,
+            height: appKitRect.height
         )
     }
 
@@ -1871,7 +2083,7 @@ final class DemoCursorOverlayController: NSObject {
             defer: false,
             screen: screen
         )
-        overlayWindow.level = .screenSaver
+        overlayWindow.level = actionStageMaskWindowLevel()
         overlayWindow.isOpaque = false
         overlayWindow.backgroundColor = .clear
         overlayWindow.hasShadow = false
@@ -2819,6 +3031,45 @@ final class DemoCursorOverlayView: NSView {
     }
 }
 
+func appKitRectFromCaptureCoordinates(_ rect: CGRect, screenFrame: CGRect) -> CGRect {
+    CGRect(
+        x: rect.minX,
+        y: screenFrame.maxY - rect.maxY,
+        width: rect.width,
+        height: rect.height
+    )
+}
+
+func bestScreenForCaptureCoordinates(_ rect: CGRect) -> (screen: NSScreen, appKitRect: CGRect)? {
+    let candidates = NSScreen.screens.map { screen in
+        (
+            screen: screen,
+            appKitRect: appKitRectFromCaptureCoordinates(rect, screenFrame: screen.frame)
+        )
+    }
+
+    if let containing = candidates.first(where: { candidate in
+        candidate.screen.frame.contains(CGPoint(x: candidate.appKitRect.midX, y: candidate.appKitRect.midY))
+    }) {
+        return containing
+    }
+
+    if let overlapping = candidates.max(by: { lhs, rhs in
+        overlapArea(lhs.appKitRect, lhs.screen.frame) < overlapArea(rhs.appKitRect, rhs.screen.frame)
+    }),
+       overlapArea(overlapping.appKitRect, overlapping.screen.frame) > 0 {
+        return overlapping
+    }
+
+    guard let screen = NSScreen.main ?? NSScreen.screens.first else {
+        return nil
+    }
+    return (
+        screen: screen,
+        appKitRect: appKitRectFromCaptureCoordinates(rect, screenFrame: screen.frame)
+    )
+}
+
 @MainActor
 final class StageOverlayController: NSObject {
     private let stateFile: String
@@ -2876,17 +3127,17 @@ final class StageOverlayController: NSObject {
             return
         }
 
-        let viewportRect = CGRect(
+        let captureRect = CGRect(
             x: viewport.bounds.x,
             y: viewport.bounds.y,
             width: viewport.bounds.width,
             height: viewport.bounds.height
         )
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: viewportRect.midX, y: viewportRect.midY)) })
-            ?? NSScreen.main
-        guard let screen else {
+        guard let layout = bestScreenForCaptureCoordinates(captureRect) else {
             return
         }
+        let screen = layout.screen
+        let viewportRect = layout.appKitRect
 
         if overlayWindow == nil || overlayWindow?.screen != screen {
             logger.log("stage-overlay: create window on screen \(screen.frame)")
@@ -2909,7 +3160,7 @@ final class StageOverlayController: NSObject {
         overlayWindow?.orderFrontRegardless()
         controlWindow?.orderFrontRegardless()
         updateSupervisionRegistration(for: state)
-        logger.log("stage-overlay: window ordered front viewport=\(viewportRect)")
+        logger.log("stage-overlay: window ordered front captureViewport=\(captureRect) appKitViewport=\(viewportRect)")
     }
 
     private func createWindow(screen: NSScreen) {
@@ -2920,7 +3171,7 @@ final class StageOverlayController: NSObject {
             defer: false,
             screen: screen
         )
-        overlayWindow.level = .screenSaver
+        overlayWindow.level = actionStageMaskWindowLevel()
         overlayWindow.isOpaque = false
         overlayWindow.backgroundColor = .clear
         overlayWindow.hasShadow = false
@@ -2986,6 +3237,14 @@ final class StageOverlayController: NSObject {
         }
 
         enforceTopOrder()
+
+        let pendingCommands = peekControlCommands()
+        if pendingCommands.contains("clear") || pendingCommands.contains("quit") {
+            logger.log("stage-overlay: local clear command received")
+            try? Data("stop\n".utf8).write(to: URL(fileURLWithPath: stopFile))
+            shutdown()
+            return
+        }
 
         if shouldHandleControlCommandsLocally() {
             let commands = consumeControlCommands()
@@ -3080,6 +3339,19 @@ final class StageOverlayController: NSObject {
 
         try? "".write(toFile: controlFile, atomically: true, encoding: .utf8)
         return commands
+    }
+
+    private func peekControlCommands() -> [String] {
+        guard let controlFile,
+              FileManager.default.fileExists(atPath: controlFile),
+              let raw = try? String(contentsOfFile: controlFile, encoding: .utf8) else {
+            return []
+        }
+
+        return raw
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
     }
 
     private func enforceTopOrder() {
@@ -3230,7 +3502,14 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             "bundleId": bundleId,
             "output": outputPath,
             "finishedFile": finishedSignalPath,
+            "scale": String(describing: options.double("scale", default: 1)),
         ]
+        if let bitRate = options.options["bitrate"] {
+            params["bitrate"] = bitRate
+        }
+        if let codec = options.options["codec"] {
+            params["codec"] = codec
+        }
         if let debugLog = options.options["debug-log"] {
             params["debugLog"] = debugLog
         }
@@ -3261,7 +3540,10 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             bundleId: bundleId,
             outputPath: outputPath,
             stopSignalPath: options.options["stop-file"],
-            finishedSignalPath: options.options["finished-file"]
+            finishedSignalPath: options.options["finished-file"],
+            scale: options.double("scale", default: 1),
+            bitRate: options.options["bitrate"].flatMap(Int.init),
+            codec: movieCodec(from: options.options["codec"])
         )
     case .recordRegion:
         guard #available(macOS 15.0, *) else {
@@ -3281,6 +3563,12 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             "fps": String(describing: options.double("fps", default: 15)),
             "scale": String(describing: options.double("scale", default: 1)),
         ]
+        if let bitRate = options.options["bitrate"] {
+            params["bitrate"] = bitRate
+        }
+        if let codec = options.options["codec"] {
+            params["codec"] = codec
+        }
         if let debugLog = options.options["debug-log"] {
             params["debugLog"] = debugLog
         }
@@ -3313,7 +3601,9 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             stopSignalPath: options.options["stop-file"],
             finishedSignalPath: options.options["finished-file"],
             fps: options.double("fps", default: 15),
-            scale: options.double("scale", default: 1)
+            scale: options.double("scale", default: 1),
+            bitRate: options.options["bitrate"].flatMap(Int.init),
+            codec: movieCodec(from: options.options["codec"])
         )
     case .recordingProbe:
         throw ActionHostError.unsupportedOS("recording-probe must be started through the UI command path")
@@ -3842,7 +4132,9 @@ struct ActionHostMain {
                 stopSignalPath: options.options["stop-file"],
                 finishedSignalPath: options.options["finished-file"],
                 fps: options.double("fps", default: 15),
-                scale: options.double("scale", default: 1)
+                scale: options.double("scale", default: 1),
+                bitRate: options.options["bitrate"].flatMap(Int.init),
+                codec: movieCodec(from: options.options["codec"])
             )
             MainActor.assumeIsolated {
                 let runner = RecordingProbeAppRunner(configuration: config, writer: writer, debugLogger: logger)

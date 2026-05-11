@@ -251,7 +251,7 @@ final class GuidedCaptureSessionRunner {
                 case ("countdown", "stop"), ("countdown", "quit"), ("countdown", "clear"):
                     appendLog("operator cancelled before capture")
                     return .cancelBeforeCapture
-                case ("recording", "stop"), ("recording", "quit"):
+                case ("recording", "stop"), ("recording", "quit"), ("recording", "clear"):
                     appendLog("operator interrupted capture")
                     return .interruptCapture
                 default:

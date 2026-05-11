@@ -399,6 +399,7 @@ export class MacOSCommandEngine implements CaptureEngine {
 
     await mkdir(dirname(request.outputPath), { recursive: true });
     await rm(request.outputPath, { force: true });
+    await rm(`${request.outputPath}.log`, { force: true });
     this.activeCapturePath = request.outputPath;
     this.activeCaptureStopPath = `${request.outputPath}.stop`;
     this.activeCaptureFinishedPath = `${request.outputPath}.finished`;
@@ -415,6 +416,7 @@ export class MacOSCommandEngine implements CaptureEngine {
         request.outputPath,
         this.activeCaptureStopPath,
         this.activeCaptureFinishedPath,
+        request.profile ?? "final",
       );
       return;
     }
@@ -454,9 +456,6 @@ export class MacOSCommandEngine implements CaptureEngine {
     await writeFile(stopPath, "stop\n");
     await this.waitForCaptureCompletion(path, finishedPath);
     await rm(stopPath, { force: true });
-    if (finishedPath) {
-      await rm(finishedPath, { force: true });
-    }
     this.activeCaptureStopPath = undefined;
     this.activeCaptureFinishedPath = undefined;
     const capturePixelSize = await this.readVideoPixelSize(path);
@@ -582,11 +581,16 @@ export class MacOSCommandEngine implements CaptureEngine {
 
   async resolveTarget(query: TargetQuery): Promise<ResolvedTarget> {
     const surfaceId = query.surfaceId ?? this.focusedSurfaceId;
+    const bundleId = surfaceId ? this.surfaces.get(surfaceId)?.bundleId : undefined;
+    const label = bundleId === "com.apple.calculator"
+      ? calculatorButtonName(query)
+      : query.text ?? query.semanticId ?? "Resolved Target";
+
     return {
       id: query.semanticId ?? query.text ?? "target",
       mode: query.point ? "coordinate" : "semantic",
       confidence: 0.92,
-      label: query.semanticId ?? query.text ?? "Resolved Target",
+      label,
       surfaceId,
     };
   }
@@ -783,6 +787,8 @@ export class MacOSCommandEngine implements CaptureEngine {
       stopPath,
       "--finished-file",
       finishedPath,
+      "--debug-log",
+      `${outputPath}.log`,
     );
   }
 
@@ -791,7 +797,10 @@ export class MacOSCommandEngine implements CaptureEngine {
     outputPath: string,
     stopPath: string,
     finishedPath: string,
+    profile: CaptureProfile,
   ): Promise<void> {
+    const scale = "1";
+
     await this.runHost(
       "record-app-window",
       "--bundle-id",
@@ -802,6 +811,10 @@ export class MacOSCommandEngine implements CaptureEngine {
       stopPath,
       "--finished-file",
       finishedPath,
+      "--debug-log",
+      `${outputPath}.log`,
+      "--scale",
+      scale,
     );
   }
 

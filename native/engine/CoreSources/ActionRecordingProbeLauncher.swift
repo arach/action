@@ -15,7 +15,9 @@ public enum ActionRecordingProbeLauncher {
         finishedSignalPath: String?,
         debugLogPath: String?,
         fps: Double,
-        scale: Double
+        scale: Double,
+        bitRate: Int?,
+        codec: String?
     ) async throws -> [String: String] {
         var arguments = [
             "recording-probe",
@@ -27,6 +29,12 @@ public enum ActionRecordingProbeLauncher {
             "--fps", String(describing: fps),
             "--scale", String(describing: scale),
         ]
+        if let bitRate {
+            arguments.append(contentsOf: ["--bitrate", String(describing: bitRate)])
+        }
+        if let codec, !codec.isEmpty {
+            arguments.append(contentsOf: ["--codec", codec])
+        }
 
         if let stopSignalPath, !stopSignalPath.isEmpty {
             arguments.append(contentsOf: ["--stop-file", stopSignalPath])
@@ -48,13 +56,23 @@ public enum ActionRecordingProbeLauncher {
         outputPath: String,
         stopSignalPath: String?,
         finishedSignalPath: String?,
-        debugLogPath: String?
+        debugLogPath: String?,
+        scale: Double = 1,
+        bitRate: Int?,
+        codec: String?
     ) async throws -> [String: String] {
         var arguments = [
             "recording-probe",
             "--bundle-id", bundleId,
             "--output", outputPath,
+            "--scale", String(describing: scale),
         ]
+        if let bitRate {
+            arguments.append(contentsOf: ["--bitrate", String(describing: bitRate)])
+        }
+        if let codec, !codec.isEmpty {
+            arguments.append(contentsOf: ["--codec", codec])
+        }
 
         if let stopSignalPath, !stopSignalPath.isEmpty {
             arguments.append(contentsOf: ["--stop-file", stopSignalPath])

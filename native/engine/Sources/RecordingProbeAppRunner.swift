@@ -18,6 +18,8 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
         let finishedSignalPath: String?
         let fps: Double
         let scale: Double
+        let bitRate: Int?
+        let codec: ActionMovieCodec
     }
 
     private let logger = Logger(subsystem: "dev.action.Action", category: "RecordingProbe")
@@ -107,14 +109,19 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
                         stopSignalPath: configuration.stopSignalPath,
                         finishedSignalPath: configuration.finishedSignalPath,
                         fps: configuration.fps,
-                        scale: configuration.scale
+                        scale: configuration.scale,
+                        bitRate: configuration.bitRate,
+                        codec: configuration.codec
                     )
                 case .appWindow(let bundleId):
                     try await recorder.recordAppWindow(
                         bundleId: bundleId,
                         outputPath: configuration.outputPath,
                         stopSignalPath: configuration.stopSignalPath,
-                        finishedSignalPath: configuration.finishedSignalPath
+                        finishedSignalPath: configuration.finishedSignalPath,
+                        scale: configuration.scale,
+                        bitRate: configuration.bitRate,
+                        codec: configuration.codec
                     )
                 }
 
