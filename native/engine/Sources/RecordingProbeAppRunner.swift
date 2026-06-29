@@ -119,6 +119,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
                         outputPath: configuration.outputPath,
                         stopSignalPath: configuration.stopSignalPath,
                         finishedSignalPath: configuration.finishedSignalPath,
+                        fps: configuration.fps,
                         scale: configuration.scale,
                         bitRate: configuration.bitRate,
                         codec: configuration.codec

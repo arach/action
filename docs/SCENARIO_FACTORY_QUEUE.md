@@ -9,6 +9,12 @@ intent lives here because the current scenario schema is intentionally compact.
 - `talkie-source-review-medium`: comparison pass that shows switching and one compacting gesture.
 - `talkie-source-review-long`: fuller review pass with switching, detail compression, and viewer entry.
 
+## Talkie Demo Source Material
+
+- `talkie-thought-lands`: active destination app, brief Talkie capture, text lands back where the cursor started.
+- `talkie-voice-to-agent`: spoken developer instruction becomes an agent-ready prompt or task handoff.
+- `talkie-work-reconstruction`: local Talkie records and CLI output reconstruct a work session timeline.
+
 ## Preframe Source Material
 
 - `preframe-source-material-short`: catalog open plus one source asset selection.

@@ -3,7 +3,7 @@
   "title": "Talkie Library Context Long",
   "targetApp": {
     "name": "Talkie",
-    "bundleId": "jdi.talkie.core.dev"
+    "bundleId": "to.talkie.app.mac.dev"
   },
   "run": {
     "initialActionDelayMs": 850,
@@ -23,7 +23,7 @@
     }
   },
   "scene": {
-    "goal": "Capture Talkie screenshot-library browsing and a thumbnail context-menu affordance",
+    "goal": "Capture Talkie screenshot-library browsing into a selected screenshot preview with detail controls",
     "sequence": [
       {
         "action": "click",
@@ -61,27 +61,47 @@
       },
       {
         "action": "click",
-        "description": "Open thumbnail context menu",
+        "description": "Select a previewable screenshot thumbnail",
         "target": {
-          "text": "Tray capture",
+          "text": "Library screenshot",
           "role": "image"
-        },
-        "input": {
-          "axAction": "ShowMenu"
-        }
-      },
-      {
-        "action": "press-key",
-        "description": "Dismiss context menu",
-        "input": {
-          "key": "Escape"
         }
       },
       {
         "action": "wait-for-condition",
-        "description": "Hold on library",
+        "description": "Let screenshot preview details settle",
         "input": {
-          "durationMs": 1000
+          "durationMs": 900
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open structured JSON preview",
+        "target": {
+          "text": "JSON",
+          "role": "button"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on structured preview",
+        "input": {
+          "durationMs": 700
+        }
+      },
+      {
+        "action": "click",
+        "description": "Return to text preview",
+        "target": {
+          "text": "Text",
+          "role": "button"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on selected screenshot detail panel",
+        "input": {
+          "durationMs": 1200
         }
       }
     ]

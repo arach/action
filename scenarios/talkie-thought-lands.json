@@ -1,0 +1,134 @@
+{
+  "id": "talkie-thought-lands",
+  "title": "Talkie Thought Lands Source Pass",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "to.talkie.app.mac.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 900,
+    "actionCadenceMs": 1050
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "preframe": {
+    "projectName": "Talkie",
+    "scenarioFamily": "thought-lands",
+    "captureMode": "continuous-screen-take",
+    "editorialIntent": "Show that a quick spoken thought lands back in active work and is still saved with local context.",
+    "sourceContinuity": "Pair this Talkie UI pass with a manual destination-app hotkey take from the same display scale and theme.",
+    "expectedTakesPerBeat": 2,
+    "anchorTimecodes": [
+      "t_origin_idle",
+      "t_press",
+      "t_release",
+      "t_return",
+      "t_context_proof"
+    ],
+    "intendedHoldPoints": [
+      "talkie-home-clean",
+      "saved-capture-row-readable",
+      "saved-context-visible"
+    ],
+    "companions": [
+      {
+        "id": "destination-hotkey-take",
+        "status": "pending",
+        "description": "Manual destination-app capture showing hotkey press, speech, release, and text landing back in the origin field",
+        "intendedHoldPoints": ["text-landed-in-field"]
+      }
+    ]
+  },
+  "scene": {
+    "goal": "Capture Talkie surfaces that prove a returned dictation is saved and reviewable with context.",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Start from Talkie home in a clean state",
+        "target": {
+          "text": "Home"
+        },
+        "input": {
+          "beatId": "talkie-home-clean",
+          "timecodeAnchor": "t_context_proof_start",
+          "beatPhase": "pre-roll",
+          "preRoll": true
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "The thought lands",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold the clean home plate",
+        "input": {
+          "durationMs": 900,
+          "beatId": "talkie-home-hold",
+          "hold": "talkie-home-clean",
+          "holdDurationHint": "medium",
+          "beatPhase": "pre-roll",
+          "preRoll": true
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open the local library where the saved capture can be found",
+        "target": {
+          "text": "Library"
+        },
+        "input": {
+          "beatId": "local-records-open",
+          "timecodeAnchor": "t_context_proof",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Let the library list settle",
+        "input": {
+          "durationMs": 1200,
+          "beatId": "local-records-settle",
+          "hold": "saved-capture-row-readable",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Notes as the readable text-history surface",
+        "target": {
+          "text": "Notes"
+        },
+        "input": {
+          "beatId": "saved-text-surface",
+          "timecodeAnchor": "t_saved_text",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on the saved text/context proof",
+        "input": {
+          "durationMs": 1800,
+          "beatId": "context-proof-hold",
+          "hold": "saved-context-visible",
+          "holdDurationHint": "long",
+          "beatPhase": "post-roll",
+          "postRoll": true
+        }
+      }
+    ]
+  }
+}

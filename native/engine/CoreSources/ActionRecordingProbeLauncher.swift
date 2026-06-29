@@ -57,6 +57,7 @@ public enum ActionRecordingProbeLauncher {
         stopSignalPath: String?,
         finishedSignalPath: String?,
         debugLogPath: String?,
+        fps: Double = 30,
         scale: Double = 1,
         bitRate: Int?,
         codec: String?
@@ -65,6 +66,7 @@ public enum ActionRecordingProbeLauncher {
             "recording-probe",
             "--bundle-id", bundleId,
             "--output", outputPath,
+            "--fps", String(describing: fps),
             "--scale", String(describing: scale),
         ]
         if let bitRate {

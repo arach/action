@@ -263,7 +263,8 @@ export class MacOSCommandEngine implements CaptureEngine {
   }
 
   async launchApp(app: TargetApp): Promise<SurfaceRef> {
-    await execFileAsync("open", ["-a", app.name]);
+    await this.runHost("launch-app", "--bundle-id", app.bundleId);
+    await this.waitForAppActivation(app.bundleId);
     if (app.bundleId === "com.apple.Notes") {
       await new Promise((resolve) => setTimeout(resolve, 450));
       await this.runHost("prepare-notes-note");
@@ -287,7 +288,7 @@ export class MacOSCommandEngine implements CaptureEngine {
       throw new Error(`Unknown surface: ${surfaceId}`);
     }
 
-    await this.runHost("activate-app", "--bundle-id", app.bundleId);
+    await this.waitForAppActivation(app.bundleId);
     this.focusedSurfaceId = surfaceId;
   }
 
@@ -803,12 +804,15 @@ export class MacOSCommandEngine implements CaptureEngine {
     finishedPath: string,
     profile: CaptureProfile,
   ): Promise<void> {
+    const fps = profile === "draft" ? "15" : "30";
     const scale = "1";
 
     await this.runHost(
       "record-app-window",
       "--bundle-id",
       bundleId,
+      "--fps",
+      fps,
       "--output",
       outputPath,
       "--stop-file",
@@ -832,6 +836,24 @@ export class MacOSCommandEngine implements CaptureEngine {
     }
 
     await this.waitForFile(path, 1);
+  }
+
+  private async waitForAppActivation(bundleId: string): Promise<void> {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      try {
+        await this.runHost("activate-app", "--bundle-id", bundleId);
+        return;
+      } catch (error) {
+        lastError = error;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`Timed out activating ${bundleId}`);
   }
 
   private async waitForFile(path: string, minBytes: number): Promise<void> {

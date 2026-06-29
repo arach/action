@@ -1,0 +1,218 @@
+{
+  "id": "talkie-teach-words-primitive",
+  "title": "Talkie Teach Words Primitive",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "to.talkie.app.mac.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 900,
+    "actionCadenceMs": 950
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "preframe": {
+    "projectName": "Talkie",
+    "scenarioFamily": "primitive-dictionary",
+    "captureMode": "continuous-screen-take",
+    "editorialIntent": "Show Talkie learning the user's vocabulary: project names, product names, and technical phrases become first-class transcription output.",
+    "expectedTakesPerBeat": 2,
+    "anchorTimecodes": [
+      "t_context_open",
+      "t_dictionary_open",
+      "t_entry_added",
+      "t_playground_run",
+      "t_corrected_output"
+    ],
+    "intendedHoldPoints": [
+      "context-tabs-visible",
+      "your-words-visible",
+      "add-entry-sheet-visible",
+      "playground-input-output-visible",
+      "corrected-terms-readable"
+    ],
+    "seedWords": [
+      {
+        "source": "pre frame",
+        "replacement": "Preframe"
+      },
+      {
+        "source": "latices",
+        "replacement": "Lattices"
+      },
+      {
+        "source": "mira",
+        "replacement": "Mira"
+      },
+      {
+        "source": "clawed code",
+        "replacement": "Claude Code"
+      }
+    ],
+    "tags": [
+      "talkie",
+      "primitive",
+      "dictionary",
+      "vocabulary",
+      "context",
+      "mac"
+    ]
+  },
+  "scene": {
+    "goal": "Capture dictionary setup and playground testing as a primitive personalization story.",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open Settings",
+        "target": {
+          "text": "Settings"
+        },
+        "input": {
+          "beatId": "settings-open",
+          "timecodeAnchor": "t_context_open",
+          "beatPhase": "pre-roll",
+          "preRoll": true
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Teach your words",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Context settings",
+        "target": {
+          "text": "Context"
+        },
+        "input": {
+          "beatId": "context-settings-open",
+          "timecodeAnchor": "t_context_open",
+          "hold": "context-tabs-visible",
+          "holdDurationHint": "medium",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on Context tabs",
+        "input": {
+          "durationMs": 800,
+          "beatId": "context-tabs-hold",
+          "hold": "context-tabs-visible",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Dictionary tab",
+        "target": {
+          "text": "Dictionary"
+        },
+        "input": {
+          "beatId": "dictionary-tab-open",
+          "timecodeAnchor": "t_dictionary_open",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on Your Words dictionary area",
+        "input": {
+          "durationMs": 1200,
+          "beatId": "your-words-hold",
+          "hold": "your-words-visible",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Add Entry sheet",
+        "target": {
+          "text": "Add Entry",
+          "role": "button"
+        },
+        "input": {
+          "beatId": "add-entry-open",
+          "timecodeAnchor": "t_entry_added",
+          "hold": "add-entry-sheet-visible",
+          "holdDurationHint": "medium",
+          "manual": true
+        },
+        "onAmbiguous": "pause"
+      },
+      {
+        "action": "show-cue",
+        "description": "Manual companion beat: enter one source/replacement pair",
+        "input": {
+          "beatId": "manual-entry-fill",
+          "manual": true,
+          "source": "pre frame",
+          "replacement": "Preframe",
+          "hold": "add-entry-sheet-visible",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Leave room to save the dictionary entry",
+        "input": {
+          "durationMs": 1500,
+          "beatId": "entry-save-window",
+          "hold": "your-words-visible",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Test Playground",
+        "target": {
+          "text": "Test",
+          "role": "button"
+        },
+        "input": {
+          "beatId": "playground-open",
+          "timecodeAnchor": "t_playground_run",
+          "beatPhase": "transition"
+        },
+        "onAmbiguous": "pause"
+      },
+      {
+        "action": "show-cue",
+        "description": "Manual companion beat: test the dictionary correction",
+        "input": {
+          "beatId": "manual-playground-test",
+          "manual": true,
+          "inputText": "send the pre frame treatment to mira and keep lattices as the action layer",
+          "expectedOutput": "send the Preframe treatment to Mira and keep Lattices as the action layer",
+          "hold": "playground-input-output-visible",
+          "holdDurationHint": "long"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on corrected output",
+        "input": {
+          "durationMs": 2600,
+          "beatId": "corrected-output-hold",
+          "timecodeAnchor": "t_corrected_output",
+          "hold": "corrected-terms-readable",
+          "holdDurationHint": "long",
+          "beatPhase": "post-roll",
+          "postRoll": true
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "id": "talkie-work-reconstruction",
+  "title": "Talkie Work Reconstruction Source Pass",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "to.talkie.app.mac.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 900,
+    "actionCadenceMs": 1050
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "preframe": {
+    "projectName": "Talkie",
+    "scenarioFamily": "work-reconstruction",
+    "captureMode": "continuous-screen-take",
+    "editorialIntent": "Show local voice records becoming a useful work-memory trail.",
+    "sourceContinuity": "Pair this Talkie app pass with a terminal plate for the CLI query and final standup summary.",
+    "expectedTakesPerBeat": 2,
+    "anchorTimecodes": [
+      "t_local_records",
+      "t_summary_build",
+      "t_resume_point"
+    ],
+    "intendedHoldPoints": [
+      "local-records-visible",
+      "local-activity-context-visible",
+      "resume-line-highlighted"
+    ],
+    "companions": [
+      {
+        "id": "terminal-cli-plate",
+        "status": "pending",
+        "description": "Terminal or CLI capture showing local dictation query and generated work-session summary",
+        "anchorTimecodes": ["t_query", "t_summary_build"],
+        "intendedHoldPoints": ["cli-query-output-visible", "work-summary-visible"]
+      }
+    ]
+  },
+  "scene": {
+    "goal": "Capture Talkie local records, search, and summary-adjacent surfaces for a work reconstruction story.",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open local library records",
+        "target": {
+          "text": "Library"
+        },
+        "input": {
+          "beatId": "local-records",
+          "timecodeAnchor": "t_local_records",
+          "beatPhase": "transition"
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Recover the trail",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on the records list",
+        "input": {
+          "durationMs": 900,
+          "beatId": "records-list-hold",
+          "hold": "local-records-visible",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on the local records before moving to activity context",
+        "input": {
+          "durationMs": 1200,
+          "beatId": "local-records-proof-hold",
+          "hold": "local-records-visible",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Stats for the local activity context",
+        "target": {
+          "text": "Stats"
+        },
+        "input": {
+          "beatId": "context-stack",
+          "timecodeAnchor": "t_summary_build",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on activity context",
+        "input": {
+          "durationMs": 1200,
+          "beatId": "context-stack-hold",
+          "hold": "local-activity-context-visible",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Return home as the resume point",
+        "target": {
+          "text": "Home"
+        },
+        "input": {
+          "beatId": "you-are-here",
+          "timecodeAnchor": "t_resume_point",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on the final resume point",
+        "input": {
+          "durationMs": 2200,
+          "beatId": "resume-point-hold",
+          "hold": "resume-line-highlighted",
+          "holdDurationHint": "long",
+          "beatPhase": "post-roll",
+          "postRoll": true
+        }
+      }
+    ]
+  }
+}

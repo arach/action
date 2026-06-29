@@ -801,6 +801,7 @@ const handlers: Record<string, ToolHandler> = {
     let bundleId = optionalString(args.bundleId);
     let bounds: Bounds | undefined;
     const profile = optionalString(args.profile) === "final" ? "final" : "draft";
+    const fps = profile === "final" ? "30" : "15";
     const appWindowScale = "1";
 
     if (scope === "current-surface") {
@@ -810,6 +811,8 @@ const handlers: Record<string, ToolHandler> = {
         "record-app-window",
         "--bundle-id",
         currentSurface.bundleId,
+        "--fps",
+        fps,
         "--output",
         outputPath,
         "--stop-file",
@@ -829,6 +832,8 @@ const handlers: Record<string, ToolHandler> = {
         "record-app-window",
         "--bundle-id",
         bundleId,
+        "--fps",
+        fps,
         "--output",
         outputPath,
         "--stop-file",
@@ -853,7 +858,7 @@ const handlers: Record<string, ToolHandler> = {
         "--height",
         String(bounds.height),
         "--fps",
-        profile === "final" ? "30" : "15",
+        fps,
         "--scale",
         profile === "final" ? "1" : "0.75",
         "--output",

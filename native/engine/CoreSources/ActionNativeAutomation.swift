@@ -335,7 +335,7 @@ public enum ActionNativeAutomation {
         let result = AXUIElementSetAttributeValue(
             match.element,
             kAXValueAttribute as CFString,
-            value as CFTypeRef
+            accessibilityValuePayload(for: match.element, value: value)
         )
         guard result == .success else {
             throw ActionNativeAutomationError.accessibilityActionFailed(
@@ -376,7 +376,7 @@ public enum ActionNativeAutomation {
         let result = AXUIElementSetAttributeValue(
             element,
             kAXValueAttribute as CFString,
-            value as CFTypeRef
+            accessibilityValuePayload(for: element, value: value)
         )
         guard result == .success else {
             throw ActionNativeAutomationError.accessibilityActionFailed(
@@ -406,7 +406,7 @@ public enum ActionNativeAutomation {
         let result = AXUIElementSetAttributeValue(
             match.element,
             kAXValueAttribute as CFString,
-            value as CFTypeRef
+            accessibilityValuePayload(for: match.element, value: value)
         )
         guard result == .success else {
             throw ActionNativeAutomationError.accessibilityActionFailed(
@@ -541,6 +541,17 @@ public enum ActionNativeAutomation {
 
         return result
     }
+}
+
+private func accessibilityValuePayload(for element: AXUIElement, value: String) -> CFTypeRef {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let current = axValue(element, attribute: kAXValueAttribute),
+       CFGetTypeID(current as CFTypeRef) == CFNumberGetTypeID(),
+       let numericValue = Double(trimmed) {
+        return NSNumber(value: numericValue) as CFTypeRef
+    }
+
+    return value as CFTypeRef
 }
 
 private struct ActionAccessibilityElementMatch {

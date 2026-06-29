@@ -1025,6 +1025,7 @@ func composeRoundedScreenshot(
 private struct ActionMovieWriterSummary {
     let frames: Int
     let droppedFrames: Int
+    let duplicatedFrames: Int
     let bitRate: Int
 }
 
@@ -1047,13 +1048,20 @@ private final class ActionMovieWriter: NSObject, SCStreamOutput {
     private let bitRate: Int
     private let codec: ActionMovieCodec
     private let keyFrameInterval: Int
+    private let frameDuration: CMTime
     private let logger: DebugLogger
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
+    private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var frameCount = 0
     private var droppedFrameCount = 0
+    private var duplicatedFrameCount = 0
     private var finished = false
     private var failure: Error?
+    private var firstSourcePresentationTime: CMTime?
+    private var firstFrameWallClock: Date?
+    private var nextFrameIndex: Int64 = 0
+    private var lastPixelBuffer: CVPixelBuffer?
 
     init(outputURL: URL, width: Int, height: Int, fps: Double, bitRate: Int?, codec: ActionMovieCodec, logger: DebugLogger) {
         self.outputURL = outputURL
@@ -1063,6 +1071,7 @@ private final class ActionMovieWriter: NSObject, SCStreamOutput {
         self.bitRate = bitRate ?? sourceCaptureBitRate(width: self.width, height: self.height, fps: self.fps)
         self.codec = codec
         self.keyFrameInterval = Int(max(self.fps.rounded(), 1))
+        self.frameDuration = CMTime(seconds: 1 / self.fps, preferredTimescale: 600)
         self.logger = logger
     }
 
@@ -1086,6 +1095,7 @@ private final class ActionMovieWriter: NSObject, SCStreamOutput {
                 throw assetWriter.error ?? movieWriterError("Movie writer failed before finalization.")
             }
 
+            try fillToCurrentWallClock()
             videoInput.markAsFinished()
 
             let semaphore = DispatchSemaphore(value: 0)
@@ -1108,6 +1118,7 @@ private final class ActionMovieWriter: NSObject, SCStreamOutput {
             return ActionMovieWriterSummary(
                 frames: frameCount,
                 droppedFrames: droppedFrameCount,
+                duplicatedFrames: duplicatedFrameCount,
                 bitRate: bitRate
             )
         }
@@ -1142,17 +1153,24 @@ private final class ActionMovieWriter: NSObject, SCStreamOutput {
             return
         }
 
-        let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        guard presentationTime.isValid else {
+        let sourcePresentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard sourcePresentationTime.isValid else {
+            droppedFrameCount += 1
+            return
+        }
+
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             droppedFrameCount += 1
             return
         }
 
         if assetWriter == nil {
-            try startWriter(at: presentationTime, sourceFormatHint: CMSampleBufferGetFormatDescription(sampleBuffer))
+            try startWriter(sourceFormatHint: CMSampleBufferGetFormatDescription(sampleBuffer))
+            firstSourcePresentationTime = sourcePresentationTime
+            firstFrameWallClock = Date()
         }
 
-        guard let assetWriter, let videoInput else {
+        guard let assetWriter, let videoInput, let pixelBufferAdaptor else {
             throw movieWriterError("Movie writer was not initialized.")
         }
 
@@ -1170,11 +1188,23 @@ private final class ActionMovieWriter: NSObject, SCStreamOutput {
             return
         }
 
-        guard videoInput.append(sampleBuffer) else {
+        let elapsed = sourceElapsedSeconds(for: sourcePresentationTime)
+        let targetFrameIndex = Int64((elapsed * fps).rounded(.down))
+        guard targetFrameIndex >= nextFrameIndex else {
+            lastPixelBuffer = pixelBuffer
+            return
+        }
+
+        try fillDuplicateFrames(until: targetFrameIndex)
+
+        let outputTime = presentationTime(forFrame: nextFrameIndex)
+        guard pixelBufferAdaptor.append(pixelBuffer, withPresentationTime: outputTime) else {
             throw assetWriter.error ?? movieWriterError("Movie writer rejected a video frame.")
         }
 
+        lastPixelBuffer = pixelBuffer
         frameCount += 1
+        nextFrameIndex += 1
     }
 
     private func isCompleteFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
@@ -1190,7 +1220,7 @@ private final class ActionMovieWriter: NSObject, SCStreamOutput {
         return status == .complete
     }
 
-    private func startWriter(at presentationTime: CMTime, sourceFormatHint: CMFormatDescription?) throws {
+    private func startWriter(sourceFormatHint: CMFormatDescription?) throws {
         let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
         assetWriter.shouldOptimizeForNetworkUse = false
 
@@ -1221,15 +1251,69 @@ private final class ActionMovieWriter: NSObject, SCStreamOutput {
         }
 
         assetWriter.add(videoInput)
+        let pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: videoInput,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            ]
+        )
 
         guard assetWriter.startWriting() else {
             throw assetWriter.error ?? movieWriterError("Movie writer could not start writing.")
         }
 
-        assetWriter.startSession(atSourceTime: presentationTime)
+        assetWriter.startSession(atSourceTime: .zero)
         self.assetWriter = assetWriter
         self.videoInput = videoInput
-        logger.log("record: movie writer started width=\(width) height=\(height) fps=\(fps) codec=\(codec.rawValue) bitrate=\(bitRate) keyframeInterval=\(keyFrameInterval)")
+        self.pixelBufferAdaptor = pixelBufferAdaptor
+        logger.log("record: movie writer started width=\(width) height=\(height) fps=\(fps) codec=\(codec.rawValue) bitrate=\(bitRate) keyframeInterval=\(keyFrameInterval) timing=cfr")
+    }
+
+    private func sourceElapsedSeconds(for sourcePresentationTime: CMTime) -> Double {
+        guard let firstSourcePresentationTime else {
+            return 0
+        }
+
+        return max(CMTimeGetSeconds(CMTimeSubtract(sourcePresentationTime, firstSourcePresentationTime)), 0)
+    }
+
+    private func presentationTime(forFrame frameIndex: Int64) -> CMTime {
+        CMTime(value: frameIndex * Int64(frameDuration.value), timescale: frameDuration.timescale)
+    }
+
+    private func fillDuplicateFrames(until targetFrameIndex: Int64) throws {
+        guard targetFrameIndex > nextFrameIndex, let lastPixelBuffer else {
+            return
+        }
+
+        while nextFrameIndex < targetFrameIndex {
+            guard videoInput?.isReadyForMoreMediaData == true else {
+                droppedFrameCount += 1
+                return
+            }
+
+            let outputTime = presentationTime(forFrame: nextFrameIndex)
+            guard pixelBufferAdaptor?.append(lastPixelBuffer, withPresentationTime: outputTime) == true else {
+                throw assetWriter?.error ?? movieWriterError("Movie writer rejected a duplicate video frame.")
+            }
+
+            frameCount += 1
+            duplicatedFrameCount += 1
+            nextFrameIndex += 1
+        }
+    }
+
+    private func fillToCurrentWallClock() throws {
+        guard let firstFrameWallClock else {
+            return
+        }
+
+        let elapsed = max(Date().timeIntervalSince(firstFrameWallClock), 0)
+        let targetFrameIndex = Int64((elapsed * fps).rounded(.down))
+        try fillDuplicateFrames(until: targetFrameIndex)
     }
 
     private func movieWriterError(_ message: String) -> NSError {
@@ -1315,6 +1399,17 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
         try stream.addStreamOutput(movieWriter, type: .screen, sampleHandlerQueue: movieWriter.queue)
 
         self.stream = stream
+        var captureStreamReleased = false
+        func releaseCurrentCaptureStream() {
+            guard !captureStreamReleased else {
+                return
+            }
+            captureStreamReleased = true
+            releaseCaptureStream(stream, output: movieWriter, logPrefix: "record-region")
+        }
+        defer {
+            releaseCurrentCaptureStream()
+        }
 
         try await stream.startCapture()
         try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: nil))
@@ -1326,8 +1421,10 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
         }
 
         await stopCaptureForFinalization(stream, logPrefix: "record-region")
+        releaseCurrentCaptureStream()
         let summary = try movieWriter.finish()
-        logger.log("record-region: finalized frames=\(summary.frames) dropped=\(summary.droppedFrames) bitrate=\(summary.bitRate)")
+        logger.log("record-region: finalized frames=\(summary.frames) dropped=\(summary.droppedFrames) duplicated=\(summary.duplicatedFrames) bitrate=\(summary.bitRate)")
+        await waitForCaptureTeardown(logPrefix: "record-region")
         try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
         try writeSignalFile(path: finishedSignalPath, contents: "finished\n")
     }
@@ -1338,11 +1435,12 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
             outputPath: outputPath,
             stopSignalPath: nil,
             finishedSignalPath: nil,
+            fps: 30,
             scale: 1
         )
     }
 
-    func recordAppWindow(bundleId: String, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, scale: Double = 1, bitRate: Int? = nil, codec: ActionMovieCodec = .h264) async throws {
+    func recordAppWindow(bundleId: String, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, fps: Double = 30, scale: Double = 1, bitRate: Int? = nil, codec: ActionMovieCodec = .h264) async throws {
         logger.log("record: begin bundleId=\(bundleId) outputPath=\(outputPath)")
         self.finishedSignalPath = finishedSignalPath
         recordingError = nil
@@ -1367,7 +1465,7 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
         let outputScale = displayPixelScale(selection.display) * max(CGFloat(scale), 0.1)
         configuration.width = evenPixelDimension(Int((window.frame.width * outputScale).rounded()))
         configuration.height = evenPixelDimension(Int((window.frame.height * outputScale).rounded()))
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        configuration.minimumFrameInterval = CMTime(seconds: 1 / max(fps, 1), preferredTimescale: 600)
         configuration.sourceRect = window.frame
         configuration.showsCursor = true
         configuration.scalesToFit = scale > 1
@@ -1383,7 +1481,7 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
             outputURL: outputURL,
             width: configuration.width,
             height: configuration.height,
-            fps: 60,
+            fps: fps,
             bitRate: bitRate,
             codec: codec,
             logger: logger
@@ -1392,6 +1490,17 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
         try stream.addStreamOutput(movieWriter, type: .screen, sampleHandlerQueue: movieWriter.queue)
 
         self.stream = stream
+        var captureStreamReleased = false
+        func releaseCurrentCaptureStream() {
+            guard !captureStreamReleased else {
+                return
+            }
+            captureStreamReleased = true
+            releaseCaptureStream(stream, output: movieWriter, logPrefix: "record")
+        }
+        defer {
+            releaseCurrentCaptureStream()
+        }
 
         logger.log("record: starting capture")
         try await stream.startCapture()
@@ -1409,8 +1518,10 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
 
         logger.log("record: stopping capture")
         await stopCaptureForFinalization(stream, logPrefix: "record")
+        releaseCurrentCaptureStream()
         let summary = try movieWriter.finish()
-        logger.log("record: finalized frames=\(summary.frames) dropped=\(summary.droppedFrames) bitrate=\(summary.bitRate)")
+        logger.log("record: finalized frames=\(summary.frames) dropped=\(summary.droppedFrames) duplicated=\(summary.duplicatedFrames) bitrate=\(summary.bitRate)")
+        await waitForCaptureTeardown(logPrefix: "record")
         try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
         try writeSignalFile(path: finishedSignalPath, contents: "finished\n")
         logger.log("record: wrote finished reply")
@@ -1444,6 +1555,29 @@ final class WindowRecorder: NSObject, SCStreamDelegate {
             logger.log("\(logPrefix): capture stopped")
         } catch {
             logger.log("\(logPrefix): stopCapture returned after stream stop: \(error.localizedDescription)")
+        }
+    }
+
+    private func releaseCaptureStream(_ stream: SCStream, output: any SCStreamOutput, logPrefix: String) {
+        do {
+            try stream.removeStreamOutput(output, type: .screen)
+            logger.log("\(logPrefix): stream output detached")
+        } catch {
+            logger.log("\(logPrefix): stream output detach skipped: \(error.localizedDescription)")
+        }
+
+        if self.stream === stream {
+            self.stream = nil
+            logger.log("\(logPrefix): stream reference released")
+        }
+    }
+
+    private func waitForCaptureTeardown(logPrefix: String) async {
+        do {
+            try await Task.sleep(for: .milliseconds(200))
+            logger.log("\(logPrefix): capture teardown settled")
+        } catch {
+            logger.log("\(logPrefix): capture teardown wait interrupted: \(error.localizedDescription)")
         }
     }
 
@@ -3529,6 +3663,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             "bundleId": bundleId,
             "output": outputPath,
             "finishedFile": finishedSignalPath,
+            "fps": String(describing: options.double("fps", default: 30)),
             "scale": String(describing: options.double("scale", default: 1)),
         ]
         if let bitRate = options.options["bitrate"] {
@@ -3568,6 +3703,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             outputPath: outputPath,
             stopSignalPath: options.options["stop-file"],
             finishedSignalPath: options.options["finished-file"],
+            fps: options.double("fps", default: 30),
             scale: options.double("scale", default: 1),
             bitRate: options.options["bitrate"].flatMap(Int.init),
             codec: movieCodec(from: options.options["codec"])

@@ -1,0 +1,176 @@
+{
+  "id": "talkie-record-memo-primitive",
+  "title": "Talkie Record Memo Primitive",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "to.talkie.app.mac.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 900,
+    "actionCadenceMs": 1050
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "preframe": {
+    "projectName": "Talkie",
+    "scenarioFamily": "primitive-record-memo",
+    "captureMode": "continuous-screen-take",
+    "editorialIntent": "Show the simplest Talkie promise: press record, speak a thought, watch it become a saved memo.",
+    "expectedTakesPerBeat": 2,
+    "anchorTimecodes": [
+      "t_library_idle",
+      "t_record_open",
+      "t_record_start",
+      "t_record_stop",
+      "t_transcript_saved",
+      "t_memo_opened"
+    ],
+    "intendedHoldPoints": [
+      "library-ready",
+      "record-surface-ready",
+      "recording-state-visible",
+      "processing-pipeline-visible",
+      "saved-memo-readable"
+    ],
+    "companions": [
+      {
+        "id": "spoken-memo-audio",
+        "status": "pending",
+        "description": "Real mic audio while pressing the record control. Suggested line: I want to remember three things for the Talkie launch page: record fast, clean up names, and keep every thought searchable.",
+        "intendedHoldPoints": [
+          "recording-state-visible",
+          "saved-memo-readable"
+        ]
+      }
+    ],
+    "tags": [
+      "talkie",
+      "primitive",
+      "memo",
+      "recording",
+      "transcription",
+      "mac"
+    ]
+  },
+  "scene": {
+    "goal": "Capture a primitive memo recording flow from Library to Record to saved memo detail.",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open Library as the starting surface",
+        "target": {
+          "text": "Library"
+        },
+        "input": {
+          "beatId": "library-start",
+          "timecodeAnchor": "t_library_idle",
+          "hold": "library-ready",
+          "holdDurationHint": "medium",
+          "beatPhase": "pre-roll",
+          "preRoll": true
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Record a memo",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on the library before recording",
+        "input": {
+          "durationMs": 900,
+          "beatId": "library-ready-hold",
+          "hold": "library-ready",
+          "holdDurationHint": "medium",
+          "beatPhase": "pre-roll",
+          "preRoll": true
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open the Record overlay from Library",
+        "target": {
+          "semanticId": "library-record-button",
+          "text": "Record"
+        },
+        "input": {
+          "beatId": "record-surface-open",
+          "timecodeAnchor": "t_record_open",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on the ready-to-record surface",
+        "input": {
+          "durationMs": 1200,
+          "beatId": "record-surface-ready",
+          "hold": "record-surface-ready",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "show-cue",
+        "description": "Manual companion beat: start recording, speak, stop",
+        "input": {
+          "beatId": "manual-recording-pass",
+          "timecodeAnchor": "t_record_start",
+          "manual": true,
+          "hold": "recording-state-visible",
+          "holdDurationHint": "long",
+          "spokenLine": "I want to remember three things for the Talkie launch page: record fast, clean up names, and keep every thought searchable."
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Leave room for the real recording and processing pipeline",
+        "input": {
+          "durationMs": 4500,
+          "beatId": "recording-processing-window",
+          "timecodeAnchor": "t_record_stop",
+          "hold": "processing-pipeline-visible",
+          "holdDurationHint": "long"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open the completed recording if the button is visible",
+        "target": {
+          "text": "View Recording",
+          "role": "button"
+        },
+        "input": {
+          "beatId": "view-recording",
+          "timecodeAnchor": "t_transcript_saved",
+          "beatPhase": "transition"
+        },
+        "onAmbiguous": "pause"
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on the saved memo detail",
+        "input": {
+          "durationMs": 2200,
+          "beatId": "saved-memo-hold",
+          "timecodeAnchor": "t_memo_opened",
+          "hold": "saved-memo-readable",
+          "holdDurationHint": "long",
+          "beatPhase": "post-roll",
+          "postRoll": true
+        }
+      }
+    ]
+  }
+}

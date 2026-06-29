@@ -163,6 +163,46 @@ export async function executeInteractionAction(
     return;
   }
 
+  if (action.kind === "set-value") {
+    const rawValue = action.input?.value ?? action.input?.text;
+    const value = rawValue === undefined ? "" : String(rawValue);
+    const bundleId = targetBundleId(action, target, context);
+    const label = targetLabel(action, target);
+    const role = targetRole(action);
+    if (!bundleId) {
+      throw new Error("Set-value action requires a target app surface");
+    }
+
+    if (label) {
+      const args = [
+        "set-accessibility-value",
+        "--bundle-id", bundleId,
+        "--label", label,
+        "--value", value,
+      ];
+      if (role) {
+        args.push("--role", role);
+      }
+      await context.runHost(args[0], ...args.slice(1));
+      return;
+    }
+
+    if (!role) {
+      throw new Error("Set-value action requires a label or role");
+    }
+
+    await context.runHost(
+      "set-accessibility-role-value",
+      "--bundle-id",
+      bundleId,
+      "--role",
+      role,
+      "--value",
+      value,
+    );
+    return;
+  }
+
   if (action.kind === "press-key") {
     const keys = stringArray(action.input?.keys);
     const modifiers = stringArray(action.input?.modifiers);
@@ -177,6 +217,18 @@ export async function executeInteractionAction(
   }
 
   if (action.kind === "click") {
+    const point = action.target?.point;
+    if (point) {
+      await context.runHost(
+        "click-point",
+        "--x",
+        String(point.x),
+        "--y",
+        String(point.y),
+      );
+      return;
+    }
+
     const bundleId = targetBundleId(action, target, context);
     const label = targetLabel(action, target);
     if (bundleId && label) {
@@ -195,18 +247,6 @@ export async function executeInteractionAction(
         args.push("--role", role);
       }
       await context.runHost(args[0], ...args.slice(1));
-      return;
-    }
-
-    const point = action.target?.point;
-    if (point) {
-      await context.runHost(
-        "click-point",
-        "--x",
-        String(point.x),
-        "--y",
-        String(point.y),
-      );
       return;
     }
 

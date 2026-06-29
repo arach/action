@@ -1,0 +1,181 @@
+{
+  "id": "talkie-tune-settings-primitive",
+  "title": "Talkie Tune Settings Primitive",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "to.talkie.app.mac.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 900,
+    "actionCadenceMs": 900
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "preframe": {
+    "projectName": "Talkie",
+    "scenarioFamily": "primitive-settings",
+    "captureMode": "continuous-screen-take",
+    "editorialIntent": "Show that Talkie is a native utility the user can shape: shortcut, mic, display, and model choices are visible and inspectable.",
+    "expectedTakesPerBeat": 2,
+    "anchorTimecodes": [
+      "t_settings_open",
+      "t_dictation_controls",
+      "t_models_controls",
+      "t_return_ready"
+    ],
+    "intendedHoldPoints": [
+      "settings-sidebar-readable",
+      "dictation-shortcuts-visible",
+      "model-cards-visible",
+      "home-ready-after-setup"
+    ],
+    "companions": [
+      {
+        "id": "after-settings-short-dictation",
+        "status": "pending",
+        "description": "Optional manual after-shot: return to a text field and do a 5-second dictation using the configured hotkey.",
+        "intendedHoldPoints": [
+          "text-lands-after-settings"
+        ]
+      }
+    ],
+    "tags": [
+      "talkie",
+      "primitive",
+      "settings",
+      "dictation",
+      "models",
+      "mac"
+    ]
+  },
+  "scene": {
+    "goal": "Capture Talkie's primitive settings surfaces: dictation controls and transcription model choices.",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open Settings",
+        "target": {
+          "text": "Settings",
+          "point": {
+            "x": 440,
+            "y": 1229
+          }
+        },
+        "input": {
+          "beatId": "settings-open",
+          "timecodeAnchor": "t_settings_open",
+          "hold": "settings-sidebar-readable",
+          "holdDurationHint": "medium",
+          "beatPhase": "pre-roll",
+          "preRoll": true
+        },
+        "cue": {
+          "kind": "chapter",
+          "text": "Tune Talkie",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on Settings shell",
+        "input": {
+          "durationMs": 900,
+          "beatId": "settings-shell-hold",
+          "hold": "settings-sidebar-readable",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Dictation settings",
+        "target": {
+          "text": "Dictation",
+          "point": {
+            "x": 494,
+            "y": 374
+          }
+        },
+        "input": {
+          "beatId": "dictation-settings-open",
+          "timecodeAnchor": "t_dictation_controls",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on shortcuts, mic, sounds, and display controls",
+        "input": {
+          "durationMs": 2200,
+          "beatId": "dictation-controls-hold",
+          "hold": "dictation-shortcuts-visible",
+          "holdDurationHint": "long"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open Models settings",
+        "target": {
+          "text": "Models",
+          "point": {
+            "x": 494,
+            "y": 524
+          }
+        },
+        "input": {
+          "beatId": "models-settings-open",
+          "timecodeAnchor": "t_models_controls",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on transcription model cards",
+        "input": {
+          "durationMs": 2200,
+          "beatId": "models-controls-hold",
+          "hold": "model-cards-visible",
+          "holdDurationHint": "long"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Return Home after setup",
+        "target": {
+          "text": "Home",
+          "point": {
+            "x": 440,
+            "y": 205
+          }
+        },
+        "input": {
+          "beatId": "return-home",
+          "timecodeAnchor": "t_return_ready",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on ready state after setup",
+        "input": {
+          "durationMs": 1400,
+          "beatId": "home-ready-hold",
+          "hold": "home-ready-after-setup",
+          "holdDurationHint": "medium",
+          "beatPhase": "post-roll",
+          "postRoll": true
+        }
+      }
+    ]
+  }
+}

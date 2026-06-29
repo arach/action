@@ -306,6 +306,7 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 stopSignalPath: request.params["stopFile"],
                 finishedSignalPath: request.params["finishedFile"],
                 debugLogPath: request.params["debugLog"],
+                fps: request.params["fps"].flatMap(Double.init) ?? 30,
                 scale: request.params["scale"].flatMap(Double.init) ?? 1,
                 bitRate: request.params["bitrate"].flatMap(Int.init),
                 codec: request.params["codec"]

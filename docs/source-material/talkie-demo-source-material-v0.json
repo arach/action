@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-material-plan",
+  "project": "Talkie",
+  "stage": "pre-execution",
+  "seedMaterialsPath": "docs/source-material/talkie-demo-seed-materials-v0.md",
+  "actionScenarioDraftsPath": "docs/source-material/talkie-action-scenario-drafts-v0.md",
+  "latestPreframeGuidance": {
+    "priority": "continuous-screen-takes",
+    "stillFramePolicy": "mark beats in the manifest; let composition freeze or extract stills later",
+    "requiredBeatField": "hold",
+    "optionalBeatFields": ["holdDurationHint", "preRoll", "postRoll"],
+    "minimumTakesPerBeat": 2,
+    "postActionHoldSeconds": 2,
+    "notes": [
+      "Start from a cold deterministic state",
+      "Use real plausible content",
+      "Keep cursor movement deliberate",
+      "Keep window chrome, theme, scale, and sidebar state consistent",
+      "Capture clean separated audio"
+    ],
+    "reviewOutcome": "Preframe signed off on v0 Action drafts with light polish: keep hold in action input, add holdDurationHint, mark companion captures pending, and extract a separate manifest later from real traces."
+  },
+  "scenarioDrafts": [
+    {
+      "id": "talkie-thought-lands",
+      "path": "scenarios/talkie-thought-lands.json",
+      "companionCapture": "Manual destination-app hotkey take showing text returning to the origin field",
+      "companionStatus": "pending",
+      "intendedHoldPoints": ["talkie-home-clean", "saved-capture-row-readable", "saved-context-visible", "text-landed-in-field"]
+    },
+    {
+      "id": "talkie-voice-to-agent",
+      "path": "scenarios/talkie-voice-to-agent.json",
+      "companionCapture": "Spoken instruction plus resolved intent payload before the agent destination receives it",
+      "companionStatus": "pending",
+      "intendedHoldPoints": ["workflow-list-visible", "payload-fully-resolved", "agent-console-ready"]
+    },
+    {
+      "id": "talkie-work-reconstruction",
+      "path": "scenarios/talkie-work-reconstruction.json",
+      "companionCapture": "Terminal or CLI plate showing local dictation query and generated summary",
+      "companionStatus": "pending",
+      "intendedHoldPoints": ["local-records-visible", "local-activity-context-visible", "resume-line-highlighted", "cli-query-output-visible", "work-summary-visible"]
+    }
+  ],
+  "stories": [
+    {
+      "id": "talkie-thought-lands",
+      "title": "The Thought Lands",
+      "editorialIntent": "Show Talkie as an invisible capture layer that returns text to active work.",
+      "screenInventory": [
+        "Destination app with an active text field and cursor",
+        "Talkie listening state over the destination app",
+        "Destination app after text insertion",
+        "Talkie library or dictation detail with saved capture context"
+      ],
+      "rawMaterials": [
+        "Clean destination app take",
+        "Short natural spoken line",
+        "Inserted destination text",
+        "Saved dictation detail with transcript and app/window metadata",
+        "Optional HUD or menu bar close-up",
+        "Optional trace or metadata export for return-to-origin"
+      ],
+      "preframeHooks": [
+        "Before/after text reveal",
+        "Cursor-return emphasis",
+        "Context card after the fact",
+        "Origin/return rect framing",
+        "Hold gesture as visual metronome",
+        "Focused-window breadcrumb overlay"
+      ],
+      "tags": ["talkie", "dictation", "return-to-origin", "hud", "mac", "local-first"]
+    },
+    {
+      "id": "talkie-voice-to-agent",
+      "title": "Voice To Agent",
+      "editorialIntent": "Show a spoken instruction becoming an agent-ready task with local context.",
+      "screenInventory": [
+        "Developer workspace with current task visible",
+        "Talkie listening state while the instruction is spoken",
+        "Agent destination receiving the cleaned instruction",
+        "Agent running or acknowledging the work",
+        "Optional Talkie workflow or console record showing the handoff path"
+      ],
+      "rawMaterials": [
+        "Realistic developer workspace",
+        "Specific spoken instruction",
+        "Cleaned handoff prompt or task body",
+        "Agent acknowledgement or initial response",
+        "Workflow/run metadata for the route",
+        "Optional CLI or JSON artifact for the handoff payload"
+      ],
+      "preframeHooks": [
+        "Transcript-to-prompt split",
+        "Handoff pulse into terminal or agent surface",
+        "Small audit trail of input, route, destination, and status",
+        "Word-timed transcript beside resolved intent payload",
+        "Long hold on agent handoff moment",
+        "First-token emphasis after handoff"
+      ],
+      "tags": ["talkie", "agent", "developer", "workflow", "handoff", "cli", "mac"]
+    },
+    {
+      "id": "talkie-work-reconstruction",
+      "title": "What Was I Working On?",
+      "editorialIntent": "Show Talkie reconstructing work from local voice records and context signals.",
+      "screenInventory": [
+        "Talkie library or dictations list with recent captures",
+        "CLI or local data query showing structured voice records",
+        "Work reconstruction output such as timeline, standup, or ready-to-ship list",
+        "Optional git or project state beside the Talkie-derived summary"
+      ],
+      "rawMaterials": [
+        "Seeded dictation records across several apps or projects",
+        "Metadata-rich rows with app, window, URL, or project context",
+        "CLI outputs for dictations, search, and stats",
+        "Generated work summary grouped by state",
+        "Optional git log or branch state"
+      ],
+      "preframeHooks": [
+        "Timeline build-up from individual captures",
+        "Local signals stack",
+        "Final standup or ready-to-ship checklist",
+        "Cold terminal CLI reveal",
+        "Context card pile assembled from local signals",
+        "End frame on the file or task where work left off"
+      ],
+      "tags": ["talkie", "memory", "cli", "context", "local-first", "agents", "timeline"]
+    }
+  ],
+  "preframeIntakeContract": {
+    "preferredFields": [
+      "scenario_id",
+      "beat_id",
+      "take_id",
+      "source.screenRecordPath",
+      "source.micWavPath",
+      "source.optionalCameraPath",
+      "fps",
+      "resolution",
+      "device_scale",
+      "timecodes.t_press",
+      "timecodes.t_release",
+      "timecodes.t_first_token",
+      "timecodes.t_handoff",
+      "timecodes.t_return",
+      "hold",
+      "holdDurationHint",
+      "preRoll",
+      "postRoll",
+      "cursor_path",
+      "focus_app",
+      "focus_window_title",
+      "transcript.wordTimings",
+      "intent_payload",
+      "context_snapshot",
+      "redaction_map",
+      "audio_levels",
+      "keypress_log",
+      "notes_md"
+    ],
+    "capturePitfalls": [
+      "Avoid mixed display scale factors across takes",
+      "Keep screen and mic audio as separate tracks",
+      "Disable accidental tooltips where possible",
+      "Mark redactions during capture",
+      "Keep window chrome, theme, and zoom consistent",
+      "Capture real screen and voice timing together",
+      "Prioritize continuous source takes over stills",
+      "Hold at least two seconds after the payoff moment",
+      "Leave idle headroom before press and after return",
+      "Record at least two usable takes per beat"
+    ]
+  },
+  "handoffFieldsToAdd": [
+    "preframe.projectName",
+    "preframe.scenarioFamily",
+    "preframe.editorialIntent",
+    "preframe.storyBeats",
+    "preframe.captureMode",
+    "preframe.anchorTimecodes",
+    "preframe.intendedHoldPoints",
+    "preframe.companions",
+    "preframe.styleCandidates",
+    "preframe.tags",
+    "preframe.keyScreens",
+    "preframe.captureWarnings"
+  ]
+}

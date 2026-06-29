@@ -3,7 +3,7 @@
   "title": "Talkie Source Review Medium",
   "targetApp": {
     "name": "Talkie",
-    "bundleId": "jdi.talkie.core.dev"
+    "bundleId": "to.talkie.app.mac.dev"
   },
   "run": {
     "initialActionDelayMs": 800,

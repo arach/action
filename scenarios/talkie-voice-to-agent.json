@@ -1,0 +1,142 @@
+{
+  "id": "talkie-voice-to-agent",
+  "title": "Talkie Voice To Agent Source Pass",
+  "targetApp": {
+    "name": "Talkie",
+    "bundleId": "to.talkie.app.mac.dev"
+  },
+  "run": {
+    "initialActionDelayMs": 900,
+    "actionCadenceMs": 1100
+  },
+  "stage": {
+    "backdrop": "studio",
+    "viewport": {
+      "id": "main",
+      "bounds": {
+        "x": 420,
+        "y": 96,
+        "width": 1320,
+        "height": 1180
+      },
+      "dimming": "surround"
+    }
+  },
+  "preframe": {
+    "projectName": "Talkie",
+    "scenarioFamily": "voice-to-agent",
+    "captureMode": "continuous-screen-take",
+    "editorialIntent": "Show speech becoming an agent-ready workflow route, then arriving at the agent surface.",
+    "sourceContinuity": "Keep the cursor movement from workflow surface to console deliberate; this is the handoff gesture.",
+    "expectedTakesPerBeat": 2,
+    "anchorTimecodes": [
+      "t_press",
+      "t_payload_resolved",
+      "t_handoff",
+      "t_first_token"
+    ],
+    "intendedHoldPoints": [
+      "workflow-list-visible",
+      "payload-fully-resolved",
+      "agent-console-ready"
+    ]
+  },
+  "scene": {
+    "goal": "Capture Talkie workflow and console surfaces for a voice-to-agent handoff story.",
+    "sequence": [
+      {
+        "action": "click",
+        "description": "Open Workflows",
+        "target": {
+          "text": "Workflows"
+        },
+        "input": {
+          "beatId": "workflow-surface-open",
+          "timecodeAnchor": "t_payload_resolved",
+          "beatPhase": "transition"
+        },
+        "preconditions": [
+          "Talkie advanced features are unlocked"
+        ],
+        "cue": {
+          "kind": "chapter",
+          "text": "Voice becomes work",
+          "atMs": 0
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on workflow list",
+        "input": {
+          "durationMs": 900,
+          "beatId": "workflow-list-hold",
+          "hold": "workflow-list-visible",
+          "holdDurationHint": "medium"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Select the Hey Talkie workflow route",
+        "target": {
+          "text": "Hey Talkie, 3 steps"
+        },
+        "input": {
+          "beatId": "route-select",
+          "timecodeAnchor": "t_route_selected",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Open workflow visualizer",
+        "target": {
+          "text": "VIEW",
+          "role": "button"
+        },
+        "input": {
+          "beatId": "payload-visualizer",
+          "timecodeAnchor": "t_payload_resolved",
+          "beatPhase": "transition"
+        }
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on the resolved workflow path",
+        "input": {
+          "durationMs": 1600,
+          "beatId": "payload-hold",
+          "hold": "payload-fully-resolved",
+          "holdDurationHint": "long"
+        }
+      },
+      {
+        "action": "click",
+        "description": "Move to Console as the agent destination",
+        "target": {
+          "text": "Console"
+        },
+        "input": {
+          "beatId": "agent-destination-open",
+          "timecodeAnchor": "t_handoff",
+          "beatPhase": "transition"
+        },
+        "preconditions": [
+          "Talkie Pro Tools console is active"
+        ]
+      },
+      {
+        "action": "wait-for-condition",
+        "description": "Hold on the agent destination",
+        "input": {
+          "durationMs": 2200,
+          "beatId": "agent-ack-hold",
+          "timecodeAnchor": "t_first_token",
+          "hold": "agent-console-ready",
+          "holdDurationHint": "long",
+          "beatPhase": "post-roll",
+          "postRoll": true
+        }
+      }
+    ]
+  }
+}
