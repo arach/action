@@ -50,6 +50,12 @@ switch (command) {
     await openBridgePage(extensionId);
     console.log(`Opened bridge page for ${extensionId}.`);
     break;
+  case "import-cookies": {
+    const importArgs = ["scripts/import-cookies.mjs", ...args];
+    const importRun = spawnSync("bun", importArgs, { cwd: rootPath, stdio: "inherit" });
+    process.exit(importRun.status ?? 1);
+    break;
+  }
   case "path":
     console.log(profileDir);
     break;
@@ -203,6 +209,8 @@ function printHelp() {
   bun run profile -- setup [name]
   bun run profile -- launch [name] [--url URL]
   bun run profile -- bridge [name] --extension-id EXTENSION_ID
+  bun run profile -- import-cookies list --domains DOMAIN
+  bun run profile -- import-cookies import --domains DOMAIN --only NAME --confirm
   bun run profile -- check [name]
   bun run profile -- path [name]
 
