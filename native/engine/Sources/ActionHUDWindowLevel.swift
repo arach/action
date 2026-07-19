@@ -1,5 +1,8 @@
 import AppKit
 
 func actionHUDPanelLevel() -> NSWindow.Level {
-    NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) - 1)
+    // Interactive, key-capable panels are clamped to the floating layer by
+    // WindowServer. Use that supported level explicitly so paired overlays can
+    // share the same layer and control their order deterministically.
+    .floating
 }

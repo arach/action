@@ -156,6 +156,7 @@ final class ActionSupervisionOverlayController: NSObject {
     private var windowMoveObserver: NSObjectProtocol?
     private var lastEscapeTimestamp: Date?
     private var hasPositionedWindow = false
+    private var isWindowPresented = false
 
     init(replyFile: String?, debugLogPath: String?) {
         self.writer = ResponseWriter(replyFile: replyFile)
@@ -255,7 +256,6 @@ final class ActionSupervisionOverlayController: NSObject {
             return
         }
 
-        window?.orderFrontRegardless()
         refresh()
     }
 
@@ -273,7 +273,17 @@ final class ActionSupervisionOverlayController: NSObject {
         if !hasPositionedWindow {
             positionWindow()
         }
-        window?.orderFrontRegardless()
+
+        let ownsVisibleControls = registrations.contains { $0.ownsVisibleControls == true }
+        if ownsVisibleControls {
+            if isWindowPresented {
+                window?.orderOut(nil)
+                isWindowPresented = false
+            }
+        } else if !isWindowPresented {
+            window?.orderFrontRegardless()
+            isWindowPresented = true
+        }
     }
 
     private func positionWindow() {
@@ -407,8 +417,9 @@ final class ActionSupervisionOverlayController: NSObject {
             self.windowMoveObserver = nil
         }
         window?.orderOut(nil)
-        ActionSupervisionRegistry.clearOverlayPID()
+        isWindowPresented = false
+        ActionSupervisionRegistry.clearOverlayPID(ifOwnedBy: ProcessInfo.processInfo.processIdentifier)
         try? FileManager.default.removeItem(at: ActionSupervisionRegistry.overlayStopSignalURL)
-        NSApplication.shared.stop(nil)
+        NSApplication.shared.terminate(nil)
     }
 }

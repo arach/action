@@ -13,6 +13,7 @@ final class StageHUDViewModel: ObservableObject {
         let title: String
         let enabled: Bool
         let tone: ButtonTone
+        let hint: String
     }
 
     @Published var phase: String = "staging"
@@ -133,11 +134,11 @@ final class StageHUDViewModel: ObservableObject {
 
     var buttons: [ButtonModel] {
         [
-            ButtonModel(id: "start", title: startButtonTitle, enabled: isEnabled("start"), tone: .primary),
-            ButtonModel(id: "stop", title: stopButtonTitle, enabled: isEnabled("stop"), tone: .destructive),
-            ButtonModel(id: "replay", title: "Replay", enabled: isEnabled("replay"), tone: .secondary),
-            ButtonModel(id: "clear", title: clearButtonTitle, enabled: isEnabled("clear"), tone: .secondary),
-            ButtonModel(id: "quit", title: "Quit", enabled: isEnabled("quit"), tone: .secondary),
+            ButtonModel(id: "start", title: startButtonTitle, enabled: isEnabled("start"), tone: .primary, hint: startButtonHint),
+            ButtonModel(id: "stop", title: stopButtonTitle, enabled: isEnabled("stop"), tone: .destructive, hint: stopButtonHint),
+            ButtonModel(id: "replay", title: "Replay Take", enabled: isEnabled("replay"), tone: .secondary, hint: "Replay the saved capture."),
+            ButtonModel(id: "clear", title: clearButtonTitle, enabled: isEnabled("clear"), tone: .secondary, hint: clearButtonHint),
+            ButtonModel(id: "quit", title: "Quit", enabled: isEnabled("quit"), tone: .secondary, hint: "Close Action and leave the current app untouched."),
         ]
     }
 
@@ -186,6 +187,10 @@ final class StageHUDViewModel: ObservableObject {
             return "Start Now"
         case "paused":
             return "Resume"
+        case "failed":
+            return "Try Again"
+        case "cancelled":
+            return "New Take"
         default:
             return "Start"
         }
@@ -199,10 +204,8 @@ final class StageHUDViewModel: ObservableObject {
             return "Interrupt"
         case "countdown":
             return "Cancel"
-        case "paused":
+        case "paused", "recording":
             return "End Take"
-        case "recording":
-            return "Interrupt"
         default:
             return "Stop"
         }
@@ -214,6 +217,47 @@ final class StageHUDViewModel: ObservableObject {
             return "Dismiss"
         default:
             return "Clear"
+        }
+    }
+
+    private var startButtonHint: String {
+        switch phase {
+        case "observing":
+            return "Inspect the current surface before acting."
+        case "awaiting-decision":
+            return "Apply the prepared action."
+        case "countdown":
+            return "Skip the remaining countdown and begin capture."
+        case "paused":
+            return "Resume the paused capture."
+        case "failed":
+            return "Start a fresh attempt after the failed run."
+        case "cancelled":
+            return "Create a new take."
+        default:
+            return "Begin the staged run."
+        }
+    }
+
+    private var stopButtonHint: String {
+        switch phase {
+        case "recording", "paused":
+            return "Stop capture cleanly and package the take."
+        case "acting":
+            return "Interrupt the current action and stop the run."
+        case "countdown":
+            return "Cancel before capture begins."
+        default:
+            return "Cancel the current operation."
+        }
+    }
+
+    private var clearButtonHint: String {
+        switch phase {
+        case "completed", "failed", "cancelled":
+            return "Dismiss this session from the HUD."
+        default:
+            return "Clear the staged session."
         }
     }
 }

@@ -107,7 +107,17 @@ public enum ActionNativeAutomation {
 
     public static func activateApplication(bundleId: String) throws {
         let app = try runningApplication(bundleId: bundleId)
-        app.activate(options: [.activateAllWindows])
+        let application = AXUIElementCreateApplication(app.processIdentifier)
+        let result = AXUIElementSetAttributeValue(
+            application,
+            kAXFrontmostAttribute as CFString,
+            kCFBooleanTrue
+        )
+        guard result == .success else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Failed to activate \(bundleId): \(result.rawValue)"
+            )
+        }
     }
 
     public static func typeText(_ text: String) throws {
@@ -575,6 +585,16 @@ private func firstWindowElement(for bundleId: String) throws -> AXUIElement {
     let app = try ActionNativeAutomation.runningApplication(bundleId: bundleId)
     let application = AXUIElementCreateApplication(app.processIdentifier)
 
+    if let focusedWindow = axValue(application, attribute: kAXFocusedWindowAttribute),
+       CFGetTypeID(focusedWindow) == AXUIElementGetTypeID() {
+        return unsafeDowncast(focusedWindow, to: AXUIElement.self)
+    }
+
+    if let mainWindow = axValue(application, attribute: kAXMainWindowAttribute),
+       CFGetTypeID(mainWindow) == AXUIElementGetTypeID() {
+        return unsafeDowncast(mainWindow, to: AXUIElement.self)
+    }
+
     if let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
        !windows.isEmpty {
         return windows.max { lhs, rhs in
@@ -622,7 +642,8 @@ private func findAccessibilityElement(
     maxDepth: Int = 20,
     maxNodes: Int = 12_000
 ) throws -> ActionAccessibilityElementMatch {
-    let root = try firstWindowElement(for: bundleId)
+    let app = try ActionNativeAutomation.runningApplication(bundleId: bundleId)
+    let root = AXUIElementCreateApplication(app.processIdentifier)
     let expectedLabel = normalizedText(label)
     let expectedRole = normalizedRole(role)
     var queue: [(AXUIElement, Int)] = [(root, 0)]

@@ -7,6 +7,7 @@ struct ActionSupervisionRegistration: Codable {
     let detail: String?
     let controlFile: String?
     let stopFile: String?
+    let ownsVisibleControls: Bool?
     let updatedAt: String
 }
 
@@ -39,7 +40,8 @@ enum ActionSupervisionRegistry {
         title: String,
         detail: String?,
         controlFile: String?,
-        stopFile: String?
+        stopFile: String?,
+        ownsVisibleControls: Bool = false
     ) throws {
         let registration = ActionSupervisionRegistration(
             id: id,
@@ -47,6 +49,7 @@ enum ActionSupervisionRegistry {
             detail: detail,
             controlFile: controlFile,
             stopFile: stopFile,
+            ownsVisibleControls: ownsVisibleControls,
             updatedAt: ISO8601DateFormatter().string(from: Date())
         )
         try FileManager.default.createDirectory(at: registrationsDirectoryURL, withIntermediateDirectories: true)
@@ -58,7 +61,8 @@ enum ActionSupervisionRegistry {
 
     static func unregister(id: String) {
         try? FileManager.default.removeItem(at: registrationURL(for: id))
-        if activeRegistrations().isEmpty {
+        let remaining = activeRegistrations().count
+        if remaining == 0 {
             stopOverlay()
         }
     }
@@ -104,7 +108,12 @@ enum ActionSupervisionRegistry {
         } catch {}
     }
 
-    static func clearOverlayPID() {
+    static func clearOverlayPID(ifOwnedBy ownerPID: pid_t) {
+        let existing = (try? String(contentsOf: overlayPIDURL, encoding: .utf8)) ?? "missing"
+        let normalized = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized == String(ownerPID) else {
+            return
+        }
         try? FileManager.default.removeItem(at: overlayPIDURL)
     }
 

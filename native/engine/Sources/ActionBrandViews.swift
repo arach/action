@@ -96,11 +96,35 @@ struct MiraSpriteView: View {
     var height: CGFloat = 64
 
     var body: some View {
+        ActionCharacterSpriteView(treatmentID: "mira", state: state, width: width, height: height)
+    }
+}
+
+struct ActionCharacterSpriteView: View {
+    var treatmentID: String = "mira"
+    var state: String = "idle"
+    var width: CGFloat = 58
+    var height: CGFloat = 64
+
+    private var petID: String {
+        ActionCharacterTreatmentRegistry.shared.petID(for: treatmentID) ?? treatmentID
+    }
+
+    private var sheetState: String {
+        ActionCharacterTreatmentRegistry.shared.sheetState(for: treatmentID, logicalState: state)
+    }
+
+    private var scale: CGFloat {
+        ActionCharacterTreatmentRegistry.shared.scale(for: treatmentID)
+    }
+
+    var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { timeline in
-            ActionPetSpriteFrameView(petID: "mira", state: state, date: timeline.date)
+            ActionPetSpriteFrameView(petID: petID, state: sheetState, date: timeline.date)
         }
+        .scaleEffect(scale)
         .frame(width: width, height: height)
-        .accessibilityLabel("Mira")
+        .accessibilityLabel(ActionCharacterTreatmentRegistry.shared.displayName(for: treatmentID))
     }
 }
 
@@ -210,6 +234,7 @@ private final class ActionPetAssetCache {
             let fps: Double?
         }
 
+        let inherits: String?
         let spritesheetPath: String?
         let states: [String: State]?
     }
@@ -268,6 +293,7 @@ private final class ActionPetAssetCache {
         let spritesheetURL = resolveSpritesheetURL(
             root: root,
             petID: petID,
+            inherits: metadata?.inherits,
             spritesheetPath: metadata?.spritesheetPath ?? "spritesheet.webp"
         )
         guard let image = NSImage(contentsOf: spritesheetURL),
@@ -321,13 +347,32 @@ private final class ActionPetAssetCache {
         return roots
     }
 
-    private func resolveSpritesheetURL(root: URL, petID: String, spritesheetPath: String) -> URL {
+    private func resolveSpritesheetURL(
+        root: URL,
+        petID: String,
+        inherits: String?,
+        spritesheetPath: String
+    ) -> URL {
         let bundledURL = root.appendingPathComponent(spritesheetPath)
         if FileManager.default.fileExists(atPath: bundledURL.path) {
             return bundledURL
         }
 
-        if petID == "mira",
+        if let inherits,
+           let inheritedRoot = petRoot(petID: inherits) {
+            let inheritedURL = inheritedRoot.appendingPathComponent(spritesheetPath)
+            if FileManager.default.fileExists(atPath: inheritedURL.path) {
+                return inheritedURL
+            }
+            return resolveSpritesheetURL(
+                root: inheritedRoot,
+                petID: inherits,
+                inherits: nil,
+                spritesheetPath: spritesheetPath
+            )
+        }
+
+        if petID == "mira" || inherits == "mira",
            let repoRoot = sourceRepoRoot() {
             let sourceURL = repoRoot
                 .appendingPathComponent("assets/pets/explorer-cat/sprites/explorer-cat.sheet.webp")
@@ -353,5 +398,114 @@ private final class ActionPetAssetCache {
         url.deleteLastPathComponent()
         url.deleteLastPathComponent()
         return url
+    }
+}
+
+@MainActor
+final class ActionCharacterTreatmentRegistry {
+    static let shared = ActionCharacterTreatmentRegistry()
+
+    private struct Treatment {
+        let displayName: String
+        let petID: String?
+        let scale: CGFloat
+        let stateAliases: [String: String]
+    }
+
+    private let treatments: [String: Treatment] = [
+        "mira": Treatment(displayName: "Mira", petID: "mira", scale: 1, stateAliases: [:]),
+        "director": Treatment(
+            displayName: "Director",
+            petID: "director",
+            scale: 1,
+            stateAliases: [
+                "countdown": "countdown",
+                "recording": "recording",
+                "interrupt": "interrupt",
+                "wrap": "wrap",
+            ]
+        ),
+        "scout": Treatment(
+            displayName: "Scout",
+            petID: "scout",
+            scale: 1,
+            stateAliases: [
+                "observe": "observe",
+                "analyze": "analyze",
+                "finding": "finding",
+                "await-decision": "await-decision",
+            ]
+        ),
+        "relay": Treatment(
+            displayName: "Relay",
+            petID: "relay",
+            scale: 0.85,
+            stateAliases: [
+                "bridge": "bridge",
+                "navigate": "navigate",
+                "act": "act",
+                "offline": "offline",
+            ]
+        ),
+        "compositor": Treatment(
+            displayName: "Compositor",
+            petID: "compositor",
+            scale: 1,
+            stateAliases: [
+                "timeline": "timeline",
+                "render": "render",
+                "done": "done",
+            ]
+        ),
+        "dock": Treatment(displayName: "Dock", petID: "mira", scale: 1, stateAliases: [:]),
+    ]
+
+    private let applicationTreatments: [String: String] = [
+        "Action.app": "mira",
+        "recording-probe": "director",
+        "chrome-companion": "relay",
+        "action-cli": "terminal",
+        "action-mcp": "terminal",
+        "composer": "compositor",
+        "desktop-pet": "dock",
+    ]
+
+    private let phaseTreatments: [String: (treatment: String, state: String)] = [
+        "session.staging": ("mira", "idle"),
+        "session.countdown": ("director", "countdown"),
+        "session.recording": ("director", "recording"),
+        "session.observing": ("scout", "observe"),
+        "session.analyzing": ("scout", "analyze"),
+        "session.awaiting-decision": ("scout", "await-decision"),
+        "session.acting": ("relay", "act"),
+        "session.composing": ("compositor", "timeline"),
+        "session.completed": ("mira", "success"),
+        "session.failed": ("mira", "error"),
+    ]
+
+    private init() {}
+
+    func displayName(for treatmentID: String) -> String {
+        treatments[treatmentID]?.displayName ?? treatmentID
+    }
+
+    func petID(for treatmentID: String) -> String? {
+        treatments[treatmentID]?.petID ?? treatmentID
+    }
+
+    func scale(for treatmentID: String) -> CGFloat {
+        treatments[treatmentID]?.scale ?? 1
+    }
+
+    func sheetState(for treatmentID: String, logicalState: String) -> String {
+        treatments[treatmentID]?.stateAliases[logicalState] ?? logicalState
+    }
+
+    func treatment(forApplication application: String) -> String? {
+        applicationTreatments[application]
+    }
+
+    func binding(forPhase phase: String) -> (treatment: String, state: String)? {
+        phaseTreatments[phase]
     }
 }

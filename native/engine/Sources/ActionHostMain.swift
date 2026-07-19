@@ -74,6 +74,8 @@ enum ActionHostCommand: String {
     case recordingProbe = "recording-probe"
     case screenshotRegion = "screenshot-region"
     case screenshotScreen = "screenshot-screen"
+    case ocrScreenshot = "ocr-screenshot"
+    case requestApplicationActivation = "_request-application-activation"
 }
 
 enum ActionHostError: LocalizedError {
@@ -86,6 +88,7 @@ enum ActionHostError: LocalizedError {
     case captureFailed(String)
     case appleScriptFailed(String)
     case applicationNotRunning(String)
+    case applicationActivationTimedOut(expected: String, actual: String?)
     case accessibilityLookupFailed(String)
     case accessibilityActionFailed(String)
     case fileNotFound(String)
@@ -111,6 +114,9 @@ enum ActionHostError: LocalizedError {
             return detail
         case .applicationNotRunning(let bundleId):
             return "Application with bundle identifier \(bundleId) is not running"
+        case .applicationActivationTimedOut(let expected, let actual):
+            let actualBundleId = actual ?? "none"
+            return "Timed out activating \(expected); frontmost application is \(actualBundleId)"
         case .accessibilityLookupFailed(let detail):
             return detail
         case .accessibilityActionFailed(let detail):
@@ -275,8 +281,63 @@ func runningApplication(bundleId: String) throws -> NSRunningApplication {
 }
 
 func activateApplication(bundleId: String) throws {
-    let app = try runningApplication(bundleId: bundleId)
-    app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+    _ = try runningApplication(bundleId: bundleId)
+
+    guard let executableURL = Bundle.main.executableURL else {
+        throw ActionHostError.applicationActivationTimedOut(
+            expected: bundleId,
+            actual: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        )
+    }
+
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = [
+        ActionHostCommand.requestApplicationActivation.rawValue,
+        "--bundle-id",
+        bundleId,
+    ]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+
+    guard process.terminationStatus == 0 else {
+        throw ActionHostError.applicationActivationTimedOut(
+            expected: bundleId,
+            actual: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        )
+    }
+}
+
+@MainActor
+func activateApplicationAndWait(
+    bundleId: String,
+    timeoutMilliseconds: Double,
+    logger: DebugLogger
+) async throws {
+    let frontmostBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
+    logger.log("activate-app: requested=\(bundleId) frontmost-before=\(frontmostBefore)")
+    try activateApplication(bundleId: bundleId)
+
+    let boundedTimeout = max(100, timeoutMilliseconds)
+    let deadline = Date().addingTimeInterval(boundedTimeout / 1_000)
+    var frontmostAfter = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    while frontmostAfter != bundleId, Date() < deadline {
+        try await Task.sleep(for: .milliseconds(50))
+        frontmostAfter = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    }
+
+    guard frontmostAfter == bundleId else {
+        let frontmostBundleId = frontmostAfter ?? "none"
+        logger.log(
+            "activate-app: timed-out requested=\(bundleId) frontmost=\(frontmostBundleId) timeout-ms=\(Int(boundedTimeout))"
+        )
+        throw ActionHostError.applicationActivationTimedOut(expected: bundleId, actual: frontmostAfter)
+    }
+
+    let confirmedBundleId = frontmostAfter ?? "none"
+    logger.log("activate-app: confirmed requested=\(bundleId) frontmost=\(confirmedBundleId)")
 }
 
 func runAppleScript(_ source: String) throws -> String {
@@ -499,6 +560,16 @@ func axChildren(of element: AXUIElement) -> [AXUIElement] {
 func firstWindowElement(for bundleId: String) throws -> AXUIElement {
     let app = try runningApplication(bundleId: bundleId)
     let application = AXUIElementCreateApplication(app.processIdentifier)
+
+    if let focusedWindow = axValue(application, attribute: kAXFocusedWindowAttribute),
+       CFGetTypeID(focusedWindow) == AXUIElementGetTypeID() {
+        return unsafeDowncast(focusedWindow, to: AXUIElement.self)
+    }
+
+    if let mainWindow = axValue(application, attribute: kAXMainWindowAttribute),
+       CFGetTypeID(mainWindow) == AXUIElementGetTypeID() {
+        return unsafeDowncast(mainWindow, to: AXUIElement.self)
+    }
 
     if let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
        !windows.isEmpty {
@@ -2900,7 +2971,9 @@ final class StageOverlayController: NSObject {
             defer: false,
             screen: screen
         )
-        overlayWindow.level = .screenSaver
+        // The interactive HUD is constrained to the floating layer. Keep the
+        // paired veil there too, then order the HUD after it deterministically.
+        overlayWindow.level = .floating
         overlayWindow.isOpaque = false
         overlayWindow.backgroundColor = .clear
         overlayWindow.hasShadow = false
@@ -2929,7 +3002,9 @@ final class StageOverlayController: NSObject {
         controlWindow.level = actionHUDPanelLevel()
         controlWindow.isOpaque = false
         controlWindow.backgroundColor = .clear
-        controlWindow.hasShadow = true
+        // AppKit shadows follow the rectangular window bounds, not the
+        // chamfered transparent shell. SwiftUI draws the shape-aware shadow.
+        controlWindow.hasShadow = false
         controlWindow.ignoresMouseEvents = false
         controlWindow.isMovable = false
         controlWindow.isFloatingPanel = true
@@ -2968,7 +3043,7 @@ final class StageOverlayController: NSObject {
         enforceTopOrder()
 
         if shouldHandleControlCommandsLocally() {
-            let commands = consumeControlCommands()
+            let commands = readControlCommands()
             if commands.contains("clear") || commands.contains("quit") {
                 logger.log("stage-overlay: local dismiss command received")
                 shutdown()
@@ -3043,7 +3118,7 @@ final class StageOverlayController: NSObject {
         }
     }
 
-    private func consumeControlCommands() -> [String] {
+    private func readControlCommands() -> [String] {
         guard let controlFile,
               FileManager.default.fileExists(atPath: controlFile),
               let raw = try? String(contentsOfFile: controlFile, encoding: .utf8) else {
@@ -3054,11 +3129,6 @@ final class StageOverlayController: NSObject {
             .split(whereSeparator: \.isNewline)
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
-        guard !commands.isEmpty else {
-            return []
-        }
-
-        try? "".write(toFile: controlFile, atomically: true, encoding: .utf8)
         return commands
     }
 
@@ -3087,7 +3157,8 @@ final class StageOverlayController: NSObject {
                 title: "Action Supervision",
                 detail: detail,
                 controlFile: controlFile,
-                stopFile: stopFile
+                stopFile: stopFile,
+                ownsVisibleControls: controlWindow != nil
             )
         } catch {
             logger.log("stage-overlay: supervision registration failed \(error.localizedDescription)")
@@ -3353,8 +3424,16 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         )
     case .activateApp:
         let bundleId = try options.required("bundle-id")
-        try ActionNativeAutomation.activateApplication(bundleId: bundleId)
+        try await activateApplicationAndWait(
+            bundleId: bundleId,
+            timeoutMilliseconds: options.double("timeout-ms", default: 3_000),
+            logger: logger
+        )
         try writer.write(ActionHostResponse(status: "activated", outputPath: nil, detail: bundleId))
+    case .requestApplicationActivation:
+        let bundleId = try options.required("bundle-id")
+        try ActionNativeAutomation.activateApplication(bundleId: bundleId)
+        try writer.write(ActionHostResponse(status: "activation-requested", outputPath: nil, detail: bundleId))
     case .launchApp:
         let bundleId = try options.required("bundle-id")
         try await MainActor.run {
@@ -3577,6 +3656,20 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
                 frame: overlayBounds(from: rect)
             )
         )
+    case .ocrScreenshot:
+        let inputPath = try options.required("input")
+        let result = try actionRecognizeText(in: inputPath)
+        if let outputPath = options.options["output"] {
+            let outputURL = URL(fileURLWithPath: outputPath)
+            try FileManager.default.createDirectory(
+                at: outputURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(result).write(to: outputURL)
+        }
+        try writer.write(result)
     }
 }
 

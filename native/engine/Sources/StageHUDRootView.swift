@@ -4,285 +4,944 @@ struct StageHUDRootView: View {
     @ObservedObject var model: StageHUDViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(spacing: 7) {
             header
-            captureStatus
-            primaryControls
-            utilityControls
-            logs
+            captureInstrument
+            controlBay
+            telemetryFooter
         }
-        .padding(16)
-        .frame(width: 336, height: 456, alignment: .topLeading)
-        .background(panelBackground)
+        .padding(10)
+        .frame(width: 336, height: 456, alignment: .top)
+        .background(monolithShell)
+        .preferredColorScheme(.dark)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 10) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(accentColor)
-                        .frame(width: 9, height: 9)
-                        .shadow(color: accentColor.opacity(0.35), radius: 10)
+        HStack(spacing: 10) {
+            ZStack {
+                ActionChamferedShape(cornerCut: 5)
+                    .fill(StageHUDTheme.hudCoral)
+                    .overlay(
+                        ActionChamferedShape(cornerCut: 5)
+                            .stroke(StageHUDTheme.hudPaper.opacity(0.22), lineWidth: 1)
+                    )
 
-                    Text(model.phaseLabel)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                Text("A")
+                    .font(.system(size: 17, weight: .black, design: .rounded))
+                    .foregroundStyle(StageHUDTheme.hudInk)
+            }
+            .frame(width: 32, height: 32)
+            .accessibilityHidden(true)
+
+            Rectangle()
+                .fill(StageHUDTheme.hudStrokeStrong)
+                .frame(width: 1, height: 23)
+
+            Text(model.targetApp.uppercased())
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .tracking(1.1)
+                .foregroundStyle(StageHUDTheme.hudPaper)
+                .lineLimit(1)
+
+            Spacer(minLength: 5)
+
+            Rectangle()
+                .fill(StageHUDTheme.hudStrokeStrong)
+                .frame(width: 1, height: 23)
+
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(accentColor)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: accentColor.opacity(isLive ? 0.85 : 0.3), radius: isLive ? 7 : 3)
+
+                Text(headerStateLabel)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(0.7)
+                    .foregroundStyle(accentColor)
+                    .lineLimit(1)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Capture status: \(model.phaseLabel)")
+        }
+        .padding(.horizontal, 3)
+        .frame(height: 44)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(StageHUDTheme.hudStrokeStrong)
+                .frame(height: 1)
+        }
+    }
+
+    private var captureInstrument: some View {
+        ZStack {
+            StageHUDAperture(color: accentColor, energized: isActive)
+                .frame(width: 220, height: 220)
+                .offset(y: -8)
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text(model.captureStatusTitle)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(0.5)
                         .foregroundStyle(accentColor)
-                }
 
-                Spacer()
+                    Spacer()
 
-                statusChip(model.targetApp)
-                if let elapsedText = model.elapsedText {
-                    statusChip(elapsedText)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text(model.summary)
-                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textPrimary)
-                    .lineLimit(2)
-
-                Text(model.detailText)
-                    .font(.system(size: 12, weight: .regular, design: .default))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
-                    .lineLimit(3)
-            }
-        }
-        .padding(15)
-        .background(cardBackground)
-    }
-
-    private var captureStatus: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(model.captureStatusTitle)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-
-                Spacer()
-
-                if let progress = model.stepProgressText {
-                    Text(progress)
-                        .font(.system(size: 10, weight: .regular, design: .monospaced))
-                        .foregroundStyle(StageHUDTheme.textMuted)
-                        .lineLimit(1)
-                }
-            }
-
-            if let countdown = model.countdownText {
-                HStack(alignment: .center, spacing: 14) {
-                    Text(countdown)
-                        .font(.system(size: 44, weight: .bold, design: .monospaced))
-                        .foregroundStyle(StageHUDTheme.textPrimary)
-                        .frame(width: 72, alignment: .leading)
-
-                    Text(model.captureStatusDetail)
-                        .font(.system(size: 12, weight: .regular, design: .default))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } else {
-                Text(model.captureStatusDetail)
-                    .font(.system(size: 12, weight: .regular, design: .default))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(15)
-        .background(cardBackground)
-    }
-
-    private var primaryControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Capture")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textMuted)
-
-            HStack(spacing: 10) {
-                controlButton("start")
-                controlButton("stop")
-            }
-        }
-        .padding(15)
-        .background(cardBackground)
-    }
-
-    private var utilityControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Session")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textMuted)
-
-            HStack(spacing: 10) {
-                controlButton("replay")
-                controlButton("clear")
-                controlButton("quit")
-            }
-        }
-        .padding(15)
-        .background(cardBackground)
-    }
-
-    private var logs: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center) {
-                Text("Recent Events")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-                Spacer()
-                Text("\(model.recentLogs.count)")
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-            }
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    if model.recentLogs.isEmpty {
-                        Text("No events yet.")
-                            .font(.system(size: 12, weight: .regular, design: .default))
-                            .foregroundStyle(StageHUDTheme.textMuted)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        ForEach(Array(model.recentLogs.enumerated().reversed()), id: \.offset) { index, line in
-                            HStack(alignment: .top, spacing: 10) {
-                                Text(String(format: "%02d", model.recentLogs.count - index))
-                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(StageHUDTheme.textMuted)
-                                    .padding(.top, 2)
-
-                                Text(line)
-                                    .font(.system(size: 12, weight: .regular, design: .default))
-                                    .foregroundStyle(StageHUDTheme.textSecondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding(.vertical, 9)
-                            .padding(.horizontal, 11)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color.primary.opacity(0.035))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                            )
-                        }
+                    if model.phase != "completing", let progress = model.stepProgressText {
+                        Text(progress)
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.hudMuted)
+                            .lineLimit(1)
+                            .frame(maxWidth: 118, alignment: .trailing)
                     }
                 }
+
+                Spacer(minLength: 0)
+
+                Text(readout)
+                    .font(.system(size: readout.count > 5 ? 41 : 55, weight: .medium, design: .monospaced))
+                    .tracking(-3)
+                    .foregroundStyle(StageHUDTheme.hudPaper)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                    .contentTransition(.numericText())
+                    .shadow(color: StageHUDTheme.hudPaper.opacity(0.08), radius: 5)
+                    .accessibilityLabel(readoutAccessibilityLabel)
+
+                Spacer(minLength: 0)
+
+                StageHUDWaveform(color: accentColor, energized: isActive)
+                    .frame(height: 26)
+
+                HStack(spacing: 9) {
+                    Rectangle()
+                        .fill(StageHUDTheme.hudStrokeStrong)
+                        .frame(width: 32, height: 1)
+
+                    Text(model.summary)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .tracking(0.35)
+                        .foregroundStyle(StageHUDTheme.hudPaper.opacity(0.82))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .frame(maxWidth: .infinity)
+
+                    Rectangle()
+                        .fill(StageHUDTheme.hudStrokeStrong)
+                        .frame(width: 32, height: 1)
+                }
+                .padding(.top, 3)
             }
-            .scrollIndicators(.hidden)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
-        .padding(15)
-        .background(cardBackground)
+        .frame(height: 244)
+        .background {
+            // The instrument sits in a sunken well: a dark floor that lifts
+            // slightly toward the aperture, with a shadow pooling at the top lip.
+            ZStack {
+                RadialGradient(
+                    colors: [
+                        StageHUDTheme.hudRecess.opacity(0.42),
+                        StageHUDTheme.hudRecess.opacity(0.78)
+                    ],
+                    center: .center,
+                    startRadius: 8,
+                    endRadius: 168
+                )
+                LinearGradient(
+                    colors: [StageHUDTheme.hudBevelShadow, .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+                .blendMode(.multiply)
+            }
+        }
+        .overlay(
+            ActionChamferedShape(cornerCut: 8)
+                .stroke(StageHUDTheme.hudStrokeStrong, lineWidth: 1)
+        )
+        .overlay {
+            // Recessed rim: shadow bites at the top, light grazes the bottom lip.
+            ActionChamferedShape(cornerCut: 8)
+                .stroke(
+                    LinearGradient(
+                        colors: [StageHUDTheme.hudBevelShadow, .clear, StageHUDTheme.hudBevelLight],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+                .padding(0.5)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(accentColor.opacity(0.55))
+                .frame(width: 44, height: 1)
+        }
+        .clipShape(ActionChamferedShape(cornerCut: 8))
+        .accessibilityElement(children: .contain)
     }
 
-    private var panelBackground: some View {
-        ActionChamferedShape(cornerCut: 8)
-            .fill(StageHUDTheme.panelBackgroundTop)
+    private var controlBay: some View {
+        HStack(spacing: 7) {
+            if model.phase == "completing" {
+                StageHUDBusyControl(title: "Saving Take", detail: "Writing movie + marker")
+            } else if usesPairedControls {
+                monolithButton("start", icon: model.phase == "paused" ? "play.fill" : "forward.fill")
+                monolithButton("stop", icon: "xmark")
+            } else {
+                leadingHardwareControl
+                monolithButton(primaryControlID, icon: primaryControlIcon)
+                trailingHardwareControl
+            }
+        }
+        .padding(8)
+        .frame(height: 78)
+        .background {
+            LinearGradient(
+                colors: [StageHUDTheme.hudMetalTrough, StageHUDTheme.hudRecess],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .overlay(
+            ActionChamferedShape(cornerCut: 8)
+                .stroke(StageHUDTheme.hudStrokeStrong, lineWidth: 1)
+        )
+        .overlay {
+            // Recessed tray: shadow sinks under the top lip, light rides the base.
+            ActionChamferedShape(cornerCut: 8)
+                .stroke(
+                    LinearGradient(
+                        colors: [StageHUDTheme.hudBevelShadow, .clear, StageHUDTheme.hudBevelLight],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+                .padding(0.5)
+                .allowsHitTesting(false)
+        }
+        .clipShape(ActionChamferedShape(cornerCut: 8))
+    }
+
+    @ViewBuilder
+    private var leadingHardwareControl: some View {
+        if showsSessionControls {
+            hardwareButton("clear", icon: "xmark")
+        } else {
+            StageHUDVent(color: accentColor)
+                .frame(width: 34)
+        }
+    }
+
+    @ViewBuilder
+    private var trailingHardwareControl: some View {
+        if showsSessionControls {
+            hardwareButton("quit", icon: "power")
+        } else {
+            StageHUDKnob(color: accentColor, energized: isActive)
+                .frame(width: 34)
+        }
+    }
+
+    private var telemetryFooter: some View {
+        HStack(spacing: 9) {
+            Text(latestEvent)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .tracking(0.45)
+                .foregroundStyle(StageHUDTheme.hudPaper.opacity(0.76))
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            Rectangle()
+                .fill(StageHUDTheme.hudStrokeStrong)
+                .frame(width: 1, height: 17)
+
+            Text(String(format: "%02d", model.recentLogs.count))
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(StageHUDTheme.hudPaper)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 31)
+        .background(StageHUDTheme.hudRecess.opacity(0.7))
+        .overlay(
+            ActionChamferedShape(cornerCut: 4)
+                .stroke(StageHUDTheme.hudStroke, lineWidth: 1)
+        )
+        .overlay {
+            ActionChamferedShape(cornerCut: 4)
+                .stroke(
+                    LinearGradient(
+                        colors: [StageHUDTheme.hudBevelShadow, .clear, StageHUDTheme.hudBevelLight],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+                .padding(0.5)
+                .allowsHitTesting(false)
+        }
+        .clipShape(ActionChamferedShape(cornerCut: 4))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Latest event: \(latestEvent). \(model.recentLogs.count) events.")
+    }
+
+    private var monolithShell: some View {
+        ActionChamferedShape(cornerCut: 11)
+            .fill(
+                LinearGradient(
+                    colors: [StageHUDTheme.hudMetalTop, StageHUDTheme.hudCanvas],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay {
+                // Brushed graphite grain + a soft top-lit vignette give the
+                // slab believable machined depth without reading as noise.
+                StageHUDGraphite()
+                    .clipShape(ActionChamferedShape(cornerCut: 11))
+                    .allowsHitTesting(false)
+            }
+            .overlay {
+                RadialGradient(
+                    colors: [.clear, StageHUDTheme.hudGrainDark],
+                    center: .center,
+                    startRadius: 90,
+                    endRadius: 260
+                )
+                .clipShape(ActionChamferedShape(cornerCut: 11))
+                .allowsHitTesting(false)
+            }
             .overlay(
+                ActionChamferedShape(cornerCut: 11)
+                    .stroke(StageHUDTheme.hudMetalEdge, lineWidth: 1)
+            )
+            .overlay {
+                // Rolled outer edge: a light catch along the top, a settled
+                // shadow along the bottom, so the slab has a chamfered lip.
+                ActionChamferedShape(cornerCut: 11)
+                    .stroke(
+                        LinearGradient(
+                            colors: [StageHUDTheme.hudBevelHairline, .clear, StageHUDTheme.hudBevelShadow],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+                    .padding(0.5)
+                    .allowsHitTesting(false)
+            }
+            .overlay {
                 ActionChamferedShape(cornerCut: 8)
-                    .stroke(StageHUDTheme.panelBorder, lineWidth: 1)
-            )
-            .shadow(color: StageHUDTheme.panelShadow, radius: 14, x: 0, y: 8)
+                    .stroke(StageHUDTheme.hudStroke, lineWidth: 1)
+                    .padding(4)
+            }
+            .overlay(alignment: .top) {
+                HStack(spacing: 0) {
+                    Rectangle().fill(StageHUDTheme.hudCoral).frame(width: 72)
+                    Rectangle().fill(StageHUDTheme.hudCyan).frame(width: 26)
+                    Rectangle().fill(StageHUDTheme.hudStroke)
+                }
+                .frame(height: 2)
+                .padding(.horizontal, 13)
+            }
+            .shadow(color: StageHUDTheme.hudShadow.opacity(0.72), radius: 12, x: 0, y: 6)
     }
 
-    private var cardBackground: some View {
-        ActionChamferedShape(cornerCut: 6)
-            .fill(StageHUDTheme.cardFill)
-            .overlay(
-                ActionChamferedShape(cornerCut: 6)
-                    .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-            )
+    private var headerStateLabel: String {
+        isLive ? "LIVE" : model.phaseLabel
     }
 
     private var accentColor: Color {
         switch model.phaseAccent {
         case .neutral:
-            return StageHUDTheme.accentIdle
+            return StageHUDTheme.hudCyan
         case .paused:
-            return StageHUDTheme.accentPaused
+            return StageHUDTheme.hudAmber
         case .recording:
-            return StageHUDTheme.accentRecording
+            return StageHUDTheme.hudCoral
         }
     }
 
-    private func statusChip(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .regular, design: .monospaced))
-            .foregroundStyle(StageHUDTheme.textSecondary)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(StageHUDTheme.buttonSecondary)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-            )
+    private var isLive: Bool {
+        model.phase == "recording" || model.phase == "acting"
     }
 
-    private func controlButton(_ id: String) -> some View {
-        let button = model.buttons.first(where: { $0.id == id })
+    private var isActive: Bool {
+        isLive || model.phase == "countdown" || model.phase == "analyzing"
+    }
 
-        return Button(button?.title ?? id.capitalized) {
+    private var showsSessionControls: Bool {
+        switch model.phase {
+        case "created", "staging", "completed", "failed", "cancelled":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var usesPairedControls: Bool {
+        buttonIsEnabled("start") && buttonIsEnabled("stop")
+    }
+
+    private var primaryControlID: String {
+        if model.phase == "completed", buttonIsEnabled("replay") {
+            return "replay"
+        }
+        if buttonIsEnabled("stop") && !buttonIsEnabled("start") {
+            return "stop"
+        }
+        return "start"
+    }
+
+    private var primaryControlIcon: String {
+        switch primaryControlID {
+        case "stop":
+            return "stop.fill"
+        case "replay":
+            return "arrow.counterclockwise"
+        default:
+            return "record.circle"
+        }
+    }
+
+    private var readout: String {
+        if let countdown = model.countdownText {
+            return countdown
+        }
+        if let elapsed = model.elapsedText {
+            return elapsed
+        }
+        switch model.phase {
+        case "completed":
+            return "SAVED"
+        case "failed":
+            return "FAULT"
+        case "cancelled":
+            return "ENDED"
+        case "completing":
+            return "WRITE"
+        default:
+            return "00:00"
+        }
+    }
+
+    private var readoutAccessibilityLabel: String {
+        if let countdown = model.countdownText {
+            return "Capture begins in \(countdown)"
+        }
+        if let elapsed = model.elapsedText {
+            return "Elapsed time \(elapsed)"
+        }
+        return readout.capitalized
+    }
+
+    private var latestEvent: String {
+        model.recentLogs.last ?? model.detailText
+    }
+
+    private func button(_ id: String) -> StageHUDViewModel.ButtonModel? {
+        model.buttons.first(where: { $0.id == id })
+    }
+
+    private func buttonIsEnabled(_ id: String) -> Bool {
+        button(id)?.enabled ?? false
+    }
+
+    private func displayTitle(for id: String) -> String {
+        return button(id)?.title ?? id.capitalized
+    }
+
+    private func monolithButton(_ id: String, icon: String) -> some View {
+        StageHUDMonolithButton(
+            title: displayTitle(for: id),
+            icon: icon,
+            tone: button(id)?.tone ?? .secondary,
+            enabled: buttonIsEnabled(id),
+            hint: button(id)?.hint ?? ""
+        ) {
             model.send(id)
         }
-        .buttonStyle(StageHUDButtonStyle(tone: button?.tone ?? .secondary))
-        .disabled(!(button?.enabled ?? false))
+    }
+
+    private func hardwareButton(_ id: String, icon: String) -> some View {
+        StageHUDHardwareButton(
+            title: displayTitle(for: id),
+            icon: icon,
+            enabled: buttonIsEnabled(id),
+            hint: button(id)?.hint ?? ""
+        ) {
+            model.send(id)
+        }
+        .frame(width: 44)
     }
 }
 
-struct StageHUDButtonStyle: ButtonStyle {
+private struct StageHUDAperture: View {
+    let color: Color
+    let energized: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let radius = min(size.width, size.height) / 2 - 8
+            let signal = energized ? 0.72 : 0.2
+
+            drawCrosshair(context: &context, center: center, radius: radius)
+            drawRings(context: &context, center: center, radius: radius, signal: signal)
+            drawTicks(context: &context, center: center, radius: radius)
+            drawArcs(context: &context, center: center, radius: radius)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func drawCrosshair(context: inout GraphicsContext, center: CGPoint, radius: CGFloat) {
+        var crosshair = Path()
+        crosshair.move(to: CGPoint(x: center.x, y: center.y - radius - 3))
+        crosshair.addLine(to: CGPoint(x: center.x, y: center.y + radius + 3))
+        crosshair.move(to: CGPoint(x: center.x - radius - 3, y: center.y))
+        crosshair.addLine(to: CGPoint(x: center.x + radius + 3, y: center.y))
+        context.stroke(crosshair, with: .color(StageHUDTheme.hudEtch.opacity(0.52)), lineWidth: 0.6)
+    }
+
+    private func drawRings(context: inout GraphicsContext, center: CGPoint, radius: CGFloat, signal: Double) {
+        for inset in [CGFloat(0), 22, 44] {
+            let ringRadius = radius - inset
+            let rect = CGRect(
+                x: center.x - ringRadius,
+                y: center.y - ringRadius,
+                width: ringRadius * 2,
+                height: ringRadius * 2
+            )
+            let opacity = inset == 22 ? 0.18 + signal * 0.12 : 0.13
+            context.stroke(
+                Path(ellipseIn: rect),
+                with: .color(inset == 24 ? color.opacity(opacity) : StageHUDTheme.hudEtch.opacity(opacity)),
+                lineWidth: inset == 0 ? 1.2 : 0.7
+            )
+        }
+    }
+
+    private func drawTicks(context: inout GraphicsContext, center: CGPoint, radius: CGFloat) {
+        for index in 0..<32 {
+            let angle = Double(index) / 32 * .pi * 2 - .pi / 2
+            let isMajor = index.isMultiple(of: 4)
+            let outer = radius - 13
+            let inner = outer - (isMajor ? 9 : 4)
+            var tick = Path()
+            tick.move(to: CGPoint(
+                x: center.x + CGFloat(cos(angle)) * inner,
+                y: center.y + CGFloat(sin(angle)) * inner
+            ))
+            tick.addLine(to: CGPoint(
+                x: center.x + CGFloat(cos(angle)) * outer,
+                y: center.y + CGFloat(sin(angle)) * outer
+            ))
+            context.stroke(
+                tick,
+                with: .color(isMajor ? StageHUDTheme.hudPaper.opacity(0.34) : StageHUDTheme.hudEtch.opacity(0.22)),
+                lineWidth: isMajor ? 1 : 0.6
+            )
+        }
+    }
+
+    private func drawArcs(context: inout GraphicsContext, center: CGPoint, radius: CGFloat) {
+        for index in 0..<3 {
+            let start = Double(index) * (.pi * 2 / 3) + 0.24
+            var arc = Path()
+            arc.addArc(
+                center: center,
+                radius: radius - 5,
+                startAngle: .radians(start),
+                endAngle: .radians(start + 0.52),
+                clockwise: false
+            )
+            context.stroke(arc, with: .color(StageHUDTheme.hudEtch.opacity(0.48)), lineWidth: 2)
+
+            var accent = Path()
+            accent.addArc(
+                center: center,
+                radius: radius - 5,
+                startAngle: .radians(start + 0.38),
+                endAngle: .radians(start + 0.48),
+                clockwise: false
+            )
+            context.stroke(accent, with: .color(color.opacity(0.85)), lineWidth: 2.4)
+        }
+    }
+}
+
+private struct StageHUDWaveform: View {
+    let color: Color
+    let energized: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 8.0, paused: !energized)) { timeline in
+            Canvas { context, size in
+                let centerY = size.height / 2
+                var baseline = Path()
+                baseline.move(to: CGPoint(x: 0, y: centerY))
+                baseline.addLine(to: CGPoint(x: size.width, y: centerY))
+                context.stroke(baseline, with: .color(StageHUDTheme.hudEtch.opacity(0.36)), lineWidth: 0.5)
+
+                let barCount = 28
+                let spacing = size.width / CGFloat(barCount)
+                let time = timeline.date.timeIntervalSinceReferenceDate
+                for index in 0..<barCount {
+                    let normalized = Double(index) / Double(barCount - 1)
+                    let envelope = sin(normalized * .pi)
+                    let wave = abs(sin(time * 3.2 + Double(index) * 0.64))
+                    let activity = energized ? (0.28 + wave * 0.5) : 0.16
+                    let height = max(1.5, size.height * 0.5 * envelope * activity)
+                    let x = CGFloat(index) * spacing + spacing / 2
+                    let rect = CGRect(x: x - 1, y: centerY - height, width: 2, height: height * 2)
+                    context.fill(Path(rect), with: .color(color.opacity(index.isMultiple(of: 9) ? 1 : 0.78)))
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct StageHUDGraphite: View {
+    var body: some View {
+        Canvas { context, size in
+            // A top-to-bottom ambient wash: the slab catches a little light up
+            // high and settles into shadow below.
+            context.fill(
+                Path(CGRect(origin: .zero, size: size)),
+                with: .linearGradient(
+                    Gradient(colors: [StageHUDTheme.hudGrain, .clear, StageHUDTheme.hudGrainDark]),
+                    startPoint: .zero,
+                    endPoint: CGPoint(x: 0, y: size.height)
+                )
+            )
+
+            // Fine brushed striations. Deterministic per-column opacity keeps the
+            // grain stable between frames and reads as metal, not photographic noise.
+            let step: CGFloat = 2
+            var x: CGFloat = 0
+            var column = 0
+            while x < size.width {
+                let hash = (column &* 2654435761) & 0xFF
+                let weight = Double(hash) / 255.0
+                let light = (column & 1) == 0
+                let opacity = 0.012 + weight * 0.02
+                var line = Path()
+                line.move(to: CGPoint(x: x, y: 0))
+                line.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(
+                    line,
+                    with: .color((light ? Color.white : Color.black).opacity(opacity)),
+                    lineWidth: 0.5
+                )
+                x += step
+                column += 1
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct StageHUDVent: View {
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(0..<4, id: \.self) { index in
+                // Each louver is a cut groove: a dark slit with a faint light
+                // hairline beneath, so the stack reads as machined, not printed.
+                Capsule(style: .continuous)
+                    .fill(index == 1 ? color.opacity(0.62) : StageHUDTheme.hudMetalTrough)
+                    .frame(height: 2)
+                    .overlay(alignment: .bottom) {
+                        if index != 1 {
+                            Capsule(style: .continuous)
+                                .fill(StageHUDTheme.hudBevelLight)
+                                .frame(height: 0.5)
+                                .offset(y: 1)
+                        }
+                    }
+                    .shadow(color: index == 1 ? color.opacity(0.42) : .clear, radius: 2)
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(maxHeight: .infinity)
+        .background(
+            LinearGradient(
+                colors: [StageHUDTheme.hudMetalCore, StageHUDTheme.hudMetalTop.opacity(0.7)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .overlay(
+            ActionChamferedShape(cornerCut: 4)
+                .stroke(
+                    LinearGradient(
+                        colors: [StageHUDTheme.hudBevelShadow, .clear, StageHUDTheme.hudBevelLight],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+                .padding(0.5)
+        )
+        .clipShape(ActionChamferedShape(cornerCut: 4))
+        .accessibilityHidden(true)
+    }
+}
+
+private struct StageHUDKnob: View {
+    let color: Color
+    let energized: Bool
+
+    var body: some View {
+        ZStack {
+            // Domed machined dial: a diagonal metal sheen over the body, a
+            // rim bevel catching light at the top and shading at the base.
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [StageHUDTheme.hudMetalSheen, StageHUDTheme.hudMetalTop, StageHUDTheme.hudMetalTrough],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(Circle().stroke(StageHUDTheme.hudMetalEdge, lineWidth: 1))
+                .overlay(
+                    Circle()
+                        .stroke(
+                            LinearGradient(
+                                colors: [StageHUDTheme.hudBevelHairline, .clear, StageHUDTheme.hudBevelShadow],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                        .padding(0.5)
+                )
+
+            ForEach(0..<4, id: \.self) { index in
+                Capsule(style: .continuous)
+                    .fill(StageHUDTheme.hudEtch.opacity(0.58))
+                    .frame(width: 1, height: 9)
+                    .offset(y: -8)
+                    .rotationEffect(.degrees(Double(index) * 90))
+            }
+
+            Circle()
+                .fill(color.opacity(energized ? 0.86 : 0.28))
+                .frame(width: 5, height: 5)
+                .shadow(color: color.opacity(energized ? 0.7 : 0), radius: 3)
+        }
+        .frame(width: 28, height: 28)
+        .frame(maxHeight: .infinity)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct StageHUDMonolithButton: View {
+    let title: String
+    let icon: String
     let tone: StageHUDViewModel.ButtonTone
+    let enabled: Bool
+    let hint: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .black))
+                Text(title)
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .tracking(0.3)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(StageHUDMonolithButtonStyle(
+            tone: tone,
+            enabled: enabled,
+            isHovered: isHovered,
+            isFocused: isFocused
+        ))
+        .disabled(!enabled)
+        .focused($isFocused)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(title)
+        .accessibilityHint(enabled ? hint : "Unavailable in the current capture state")
+        .help(hint)
+    }
+}
+
+private struct StageHUDMonolithButtonStyle: ButtonStyle {
+    let tone: StageHUDViewModel.ButtonTone
+    let enabled: Bool
+    let isHovered: Bool
+    let isFocused: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .regular, design: .monospaced))
-            .foregroundStyle(foregroundColor(configuration: configuration))
-            .frame(maxWidth: .infinity, minHeight: 40)
-            .background(background(configuration: configuration))
-            .overlay(
-                ActionChamferedShape(cornerCut: 4)
-                    .stroke(borderColor(configuration: configuration), lineWidth: 1)
-            )
-            .clipShape(ActionChamferedShape(cornerCut: 4))
-            .scaleEffect(configuration.isPressed ? 0.992 : 1)
-            .opacity(configuration.isPressed ? 0.94 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-
-    private func background(configuration: Configuration) -> some View {
-        Group {
-            switch tone {
-            case .primary:
-                Color(configuration.isPressed ? StageHUDTheme.buttonPrimaryBottom : StageHUDTheme.buttonPrimaryTop)
-            case .secondary:
-                Color(configuration.isPressed ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.buttonSecondary)
-            case .destructive:
-                Color(StageHUDTheme.accentRecording.opacity(configuration.isPressed ? 0.78 : 0.88))
+            .foregroundStyle(foregroundColor)
+            .background {
+                // Convex key: solid tone, then a top-lit/bottom-shaded bevel so
+                // the button reads as raised machined material, not a flat swatch.
+                ActionChamferedShape(cornerCut: 7)
+                    .fill(buttonFill(configuration: configuration))
+                    .overlay {
+                        ActionChamferedShape(cornerCut: 7)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        StageHUDTheme.hudBevelLight,
+                                        .clear,
+                                        StageHUDTheme.hudBevelShadow.opacity(0.55)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .blendMode(configuration.isPressed ? .plusDarker : .normal)
+                    }
             }
-        }
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(StageHUDTheme.hudPaper.opacity(0.18))
+                    .frame(height: 1)
+                    .padding(.horizontal, 7)
+            }
+            .overlay(
+                ActionChamferedShape(cornerCut: 7)
+                    .stroke(isFocused ? StageHUDTheme.hudCyan : borderColor, lineWidth: isFocused ? 2 : 1)
+            )
+            .clipShape(ActionChamferedShape(cornerCut: 7))
+            .offset(y: configuration.isPressed ? 1 : 0)
+            .scaleEffect(configuration.isPressed ? 0.992 : 1)
+            .opacity(enabled ? 1 : 0.32)
+            .shadow(color: shadowColor, radius: isHovered ? 8 : 3, y: 2)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+            .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 
-    private func foregroundColor(configuration: Configuration) -> Color {
-        switch tone {
-        case .primary:
-            return StageHUDTheme.buttonPrimaryText.opacity(configuration.isPressed ? 0.88 : 1)
-        case .secondary, .destructive:
-            return StageHUDTheme.textPrimary.opacity(configuration.isPressed ? 0.88 : 1)
-        }
+    private var foregroundColor: Color {
+        tone == .secondary ? StageHUDTheme.hudPaper : StageHUDTheme.hudInk
     }
 
-    private func borderColor(configuration: Configuration) -> Color {
+    private func buttonFill(configuration: Configuration) -> Color {
         switch tone {
         case .primary:
-            return StageHUDTheme.panelBorder.opacity(configuration.isPressed ? 1 : 0.9)
-        case .secondary:
-            return StageHUDTheme.cardBorder.opacity(configuration.isPressed ? 1 : 0.95)
+            return isHovered ? StageHUDTheme.hudCyan : StageHUDTheme.hudPaper
         case .destructive:
-            return StageHUDTheme.cardBorder.opacity(configuration.isPressed ? 1 : 0.95)
+            return configuration.isPressed ? StageHUDTheme.hudCoral.opacity(0.78) : (isHovered ? StageHUDTheme.hudCoralHot : StageHUDTheme.hudCoral)
+        case .secondary:
+            return isHovered ? StageHUDTheme.hudPanelRaised : StageHUDTheme.hudMetalTop
         }
+    }
+
+    private var borderColor: Color {
+        switch tone {
+        case .primary:
+            return StageHUDTheme.hudPaper.opacity(0.74)
+        case .destructive:
+            return StageHUDTheme.hudCoralHot.opacity(0.64)
+        case .secondary:
+            return StageHUDTheme.hudStrokeStrong
+        }
+    }
+
+    private var shadowColor: Color {
+        switch tone {
+        case .primary:
+            return StageHUDTheme.hudCyan.opacity(isHovered ? 0.22 : 0.06)
+        case .destructive:
+            return StageHUDTheme.hudCoral.opacity(isHovered ? 0.28 : 0.08)
+        case .secondary:
+            return StageHUDTheme.hudShadow.opacity(0.35)
+        }
+    }
+}
+
+private struct StageHUDHardwareButton: View {
+    let title: String
+    let icon: String
+    let enabled: Bool
+    let hint: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(isHovered ? StageHUDTheme.hudPaper : StageHUDTheme.hudMuted)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(isHovered ? StageHUDTheme.hudPanelRaised : StageHUDTheme.hudMetalTop.opacity(0.58))
+        .overlay(
+            ActionChamferedShape(cornerCut: 4)
+                .stroke(isFocused ? StageHUDTheme.hudCyan : StageHUDTheme.hudStrokeStrong, lineWidth: isFocused ? 2 : 1)
+        )
+        .clipShape(ActionChamferedShape(cornerCut: 4))
+        .opacity(enabled ? 1 : 0.3)
+        .disabled(!enabled)
+        .focused($isFocused)
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .animation(.easeOut(duration: 0.12), value: isFocused)
+        .accessibilityLabel(title)
+        .accessibilityHint(enabled ? hint : "Unavailable in the current capture state")
+        .help(hint)
+    }
+}
+
+private struct StageHUDBusyControl: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(StageHUDTheme.hudCyan)
+                .frame(width: 7, height: 7)
+                .overlay(Circle().stroke(StageHUDTheme.hudPaper.opacity(0.22), lineWidth: 1))
+                .shadow(color: StageHUDTheme.hudCyan.opacity(0.32), radius: 3)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(StageHUDTheme.hudPaper)
+                Text(detail)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(StageHUDTheme.hudMuted)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(StageHUDTheme.hudMetalTop.opacity(0.58))
+        .overlay(
+            ActionChamferedShape(cornerCut: 7)
+                .stroke(StageHUDTheme.hudStrokeStrong, lineWidth: 1)
+        )
+        .clipShape(ActionChamferedShape(cornerCut: 7))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Saving take")
+        .accessibilityValue("Writing the movie and finished marker")
     }
 }

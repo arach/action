@@ -87,6 +87,39 @@ enum StageHUDTheme {
         dark: NSColor(calibratedWhite: 0.08, alpha: 1)
     )
 
+    // Capture HUD tokens. The recorder is deliberately dark in both system
+    // appearances so its operational state remains stable over any surface.
+    static let hudCanvas = Color(red: 0.055, green: 0.071, blue: 0.074)
+    static let hudPanel = Color(red: 0.095, green: 0.118, blue: 0.122)
+    static let hudPanelRaised = Color(red: 0.125, green: 0.153, blue: 0.157)
+    static let hudPaper = Color(red: 0.953, green: 0.922, blue: 0.867)
+    static let hudInk = Color(red: 0.055, green: 0.071, blue: 0.074)
+    static let hudMuted = Color(red: 0.60, green: 0.65, blue: 0.64)
+    static let hudGrid = Color.white.opacity(0.045)
+    static let hudStroke = Color.white.opacity(0.10)
+    static let hudStrokeStrong = Color.white.opacity(0.19)
+    static let hudCoral = Color(red: 0.937, green: 0.416, blue: 0.278)
+    static let hudCoralHot = Color(red: 1.0, green: 0.49, blue: 0.32)
+    static let hudCyan = Color(red: 0.122, green: 0.725, blue: 0.776)
+    static let hudAmber = Color(red: 0.894, green: 0.725, blue: 0.412)
+    static let hudMetalTop = Color(red: 0.115, green: 0.118, blue: 0.112)
+    static let hudMetalEdge = Color(red: 0.39, green: 0.39, blue: 0.35)
+    static let hudRecess = Color(red: 0.026, green: 0.031, blue: 0.031)
+    static let hudEtch = Color(red: 0.68, green: 0.68, blue: 0.61)
+    static let hudShadow = Color.black.opacity(0.58)
+
+    // Finishing tokens (texture + bevel pass). Restrained graphite polish:
+    // a rolled top highlight, a settled bottom shadow, brushed grain, and a
+    // brighter sheen for machined cylinder controls. All additive, all subtle.
+    static let hudBevelLight = Color.white.opacity(0.055)
+    static let hudBevelHairline = Color.white.opacity(0.11)
+    static let hudBevelShadow = Color.black.opacity(0.34)
+    static let hudGrain = Color.white.opacity(0.028)
+    static let hudGrainDark = Color.black.opacity(0.05)
+    static let hudMetalSheen = Color(red: 0.30, green: 0.31, blue: 0.29)
+    static let hudMetalCore = Color(red: 0.165, green: 0.170, blue: 0.160)
+    static let hudMetalTrough = Color(red: 0.045, green: 0.048, blue: 0.046)
+
     // Review surface tokens (premium pass V1)
     static let reviewCanvas = dynamic(
         light: NSColor(calibratedRed: 0.975, green: 0.978, blue: 0.985, alpha: 1),
