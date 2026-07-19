@@ -21,6 +21,10 @@
       "name": "@action/cli",
       "version": "0.0.0",
     },
+    "packages/companion": {
+      "name": "@action/companion",
+      "version": "0.0.0",
+    },
     "packages/compiler": {
       "name": "@action/compiler",
       "version": "0.0.0",
@@ -54,6 +58,8 @@
     "@action/chrome-companion": ["@action/chrome-companion@workspace:packages/chrome-companion"],
 
     "@action/cli": ["@action/cli@workspace:packages/cli"],
+
+    "@action/companion": ["@action/companion@workspace:packages/companion"],
 
     "@action/compiler": ["@action/compiler@workspace:packages/compiler"],
 

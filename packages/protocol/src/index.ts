@@ -316,6 +316,8 @@ export type ArtifactKind =
   | "raw-capture"
   | "trace"
   | "ax-snapshot"
+  | "ocr-snapshot"
+  | "vision-analysis"
   | "inspection-request"
   | "inspection-response"
   | "findings"

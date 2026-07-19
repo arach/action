@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { compileScenario } from "@action/compiler";
-import { inspectCurrentSurface, settleCurrentSurfaceViewport } from "@action/runtime";
+import { CompanionClient, inspectCurrentSurface, settleCurrentSurfaceViewport } from "@action/runtime";
 
 import { runScenarioGuidedCaptureDemo } from "./index.js";
 import { loadScenario } from "./scenarios.js";
@@ -47,6 +47,27 @@ function parseFlags(args: string[]): {
   return { positionals, flags };
 }
 
+
+async function tryCompanionJob(kind: string, payload: Record<string, unknown>, waitMs = 120_000): Promise<unknown | undefined> {
+  const client = new CompanionClient({ timeoutMs: 2_000 });
+  if (!(await client.isReachable())) {
+    return undefined;
+  }
+
+  const job = await client.createJob({
+    kind,
+    payload,
+    sessionId: typeof payload.sessionId === "string" ? payload.sessionId : undefined,
+    client: "action-cli",
+  });
+  return client.waitJob(job.id, waitMs);
+}
+
+
+function parseVisionProvider(value: string | undefined): "minimax" | "moondream" | undefined {
+  return value === "moondream" || value === "minimax" ? value : undefined;
+}
+
 function requiredNumber(flags: Record<string, string>, key: string): number {
   const raw = flags[key];
   const value = raw === undefined ? Number.NaN : Number(raw);
@@ -88,8 +109,40 @@ async function main(argv: string[]): Promise<void> {
   }
 
   if (command === "inspect" && arg === "current-surface") {
-    const result = await inspectCurrentSurface();
+    const payload = {
+      includeOcr: flags["no-ocr"] !== "true",
+      includeVision: flags.vision === "true",
+      visionPrompt: flags["vision-prompt"],
+      visionProvider: parseVisionProvider(flags["vision-provider"]),
+      mockNative: flags.mock === "true" ? true : undefined,
+    };
+
+    if (flags.direct !== "true") {
+      const companionJob = await tryCompanionJob("observe.snapshot", payload);
+      if (companionJob) {
+        printJson({ ok: true, companion: true, job: companionJob });
+        return;
+      }
+    }
+
+    const result = await inspectCurrentSurface(payload);
     printJson(result);
+    return;
+  }
+
+  if (command === "vision" && arg === "log") {
+    const client = new CompanionClient({ timeoutMs: 2_000 });
+    const timeline = await client.timeline({
+      sessionId: flags["session-id"],
+      limit: flags.limit ? requiredNumber(flags, "limit") : undefined,
+    });
+    printJson({ ok: true, timeline });
+    return;
+  }
+
+  if (command === "companion" && arg === "status") {
+    const client = new CompanionClient({ timeoutMs: 2_000 });
+    printJson(await client.status());
     return;
   }
 
@@ -110,7 +163,9 @@ async function main(argv: string[]): Promise<void> {
 
   printJson({
     commands: [
-      "bun packages/cli/src/main.ts inspect current-surface",
+      "bun packages/cli/src/main.ts inspect current-surface [--direct] [--mock] [--no-ocr] [--vision] [--vision-provider minimax|moondream] [--vision-prompt <prompt>]",
+      "bun packages/cli/src/main.ts vision log [--session-id <id>] [--limit <n>]",
+      "bun packages/cli/src/main.ts companion status",
       "bun packages/cli/src/main.ts settle current-surface --x <x> --y <y> --width <w> --height <h> [--provider mock|pie-minimax]",
       "bun run demo:calculator",
       "bun run demo:notes",

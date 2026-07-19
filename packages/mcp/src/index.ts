@@ -20,7 +20,14 @@ import type {
   SessionMode,
   TargetQuery,
 } from "@action/protocol";
-import { inspectCurrentSurface, MacOSCommandEngine } from "@action/runtime";
+import {
+  analyzeScreenshotVision,
+  CompanionClient,
+  inspectCurrentSurface,
+  MacOSCommandEngine,
+  ocrScreenshot,
+  searchOCRText,
+} from "@action/runtime";
 
 export const toolFamilies = [
   "session",
@@ -118,6 +125,11 @@ function numberProperty(description: string): object {
 
 function objectProperty(description: string): object {
   return { type: "object", description, additionalProperties: true };
+}
+
+
+function parseVisionProvider(value: unknown): "minimax" | "moondream" | undefined {
+  return value === "moondream" || value === "minimax" ? value : undefined;
 }
 
 function enumProperty(values: string[], description: string): object {
@@ -459,10 +471,41 @@ const tools: Tool[] = [
   tool(
     "action.observe.snapshot",
     "Observe Snapshot",
-    "Capture the current focused surface screenshot and AX snapshot as session artifacts.",
+    "Capture the current focused surface screenshot, AX snapshot, and Apple Vision OCR as session artifacts.",
     objectSchema({
       sessionId: textProperty("Optional session id. A new inspection session id is generated when omitted."),
       outputDir: textProperty("Optional absolute or Action-root-relative output directory."),
+      includeOcr: booleanProperty("Whether to run Apple Vision OCR on the screenshot. Defaults to true."),
+      includeVision: booleanProperty("Whether to run vision analysis via MiniMax MCP. Defaults to false."),
+      visionPrompt: textProperty("Optional vision prompt when includeVision is true."),
+      visionProvider: enumProperty(["minimax", "moondream"], "Vision provider. Defaults to minimax when MINIMAX_API_KEY is set."),
+      direct: booleanProperty("Bypass action-companion and run as a one-shot MCP call."),
+      mockNative: booleanProperty("Use companion mock native mode for verification when ActionAgent is unavailable."),
+    }),
+    { readOnlyHint: false, idempotentHint: false },
+  ),
+  tool(
+    "action.observe.ocr",
+    "Observe OCR",
+    "Run Apple Vision OCR on an existing screenshot or the current focused surface.",
+    objectSchema({
+      imagePath: textProperty("Optional screenshot path. Captures the current surface when omitted."),
+      outputPath: textProperty("Optional JSON output path for OCR results."),
+      query: textProperty("Optional text search filter applied to OCR blocks."),
+    }),
+    { readOnlyHint: false, idempotentHint: false },
+  ),
+  tool(
+    "action.observe.vision",
+    "Observe Vision",
+    "Run vision analysis on an existing screenshot or the current focused surface. Defaults to MiniMax MCP understand_image.",
+    objectSchema({
+      imagePath: textProperty("Optional screenshot path. Captures the current surface when omitted."),
+      outputPath: textProperty("Optional JSON output path for vision analysis."),
+      prompt: textProperty("Optional vision prompt."),
+      provider: enumProperty(["minimax", "moondream"], "Vision provider. Defaults to minimax when MINIMAX_API_KEY is set."),
+      direct: booleanProperty("Bypass action-companion and run as a one-shot MCP call."),
+      mockNative: booleanProperty("Use companion mock native mode for verification when ActionAgent is unavailable."),
     }),
     { readOnlyHint: false, idempotentHint: false },
   ),
@@ -550,6 +593,31 @@ const tools: Tool[] = [
   ),
 ];
 
+
+async function runCompanionJobIfAvailable(kind: string, payload: JsonObject, direct: boolean | undefined): Promise<JsonObject | undefined> {
+  if (direct || process.env.ACTION_COMPANION_DIRECT === "1") {
+    return undefined;
+  }
+  const client = new CompanionClient({ timeoutMs: 2_000 });
+  if (!(await client.isReachable())) {
+    return undefined;
+  }
+  const job = await client.createJob({
+    kind,
+    payload,
+    sessionId: optionalString(payload.sessionId),
+    client: "action-mcp",
+  });
+  const completed = await client.waitJob(job.id, 120_000);
+  return {
+    ok: completed.state === "completed",
+    companion: true,
+    job: completed as unknown as JsonObject,
+    result: completed.result as JsonObject | undefined,
+    error: completed.error,
+  };
+}
+
 const handlers: Record<string, ToolHandler> = {
   async "action.health"() {
     const engine = newEngine();
@@ -607,10 +675,28 @@ const handlers: Record<string, ToolHandler> = {
   async "action.observe.snapshot"(args) {
     const sessionId = optionalString(args.sessionId) ?? defaultSessionId("inspection");
     const outputDir = resolve(actionRoot, optionalString(args.outputDir) ?? sessionOutputDir(sessionId));
+    const payload = {
+      sessionId,
+      outputDir,
+      includeOcr: args.includeOcr === false ? false : true,
+      includeVision: args.includeVision === true,
+      visionPrompt: optionalString(args.visionPrompt),
+      visionProvider: parseVisionProvider(args.visionProvider),
+      mockNative: optionalBoolean(args.mockNative),
+    };
+    const companion = await runCompanionJobIfAvailable("observe.snapshot", payload, optionalBoolean(args.direct));
+    if (companion) {
+      return companion;
+    }
+
     const result = await inspectCurrentSurface({
       engine: newEngine(),
       sessionId,
       outputDir,
+      includeOcr: payload.includeOcr,
+      includeVision: payload.includeVision,
+      visionPrompt: payload.visionPrompt,
+      visionProvider: payload.visionProvider,
     });
 
     return {
@@ -618,6 +704,84 @@ const handlers: Record<string, ToolHandler> = {
       currentSurface: result.currentSurface,
       session: result.session,
       manifest: result.manifest,
+      ocr: result.ocr,
+      vision: result.vision,
+    };
+  },
+
+  async "action.observe.ocr"(args) {
+    const engine = newEngine();
+    const sessionId = defaultSessionId("inspection");
+    const outputDir = resolve(actionRoot, sessionOutputDir(sessionId));
+    const existingImagePath = optionalString(args.imagePath);
+    let currentSurface;
+    let screenshotPath: string;
+
+    if (existingImagePath) {
+      screenshotPath = resolve(actionRoot, existingImagePath);
+    } else {
+      await mkdir(outputDir, { recursive: true });
+      screenshotPath = resolve(outputDir, "snapshot.png");
+      const capture = await engine.captureCurrentSurfaceScreenshot(screenshotPath);
+      currentSurface = capture.currentSurface;
+    }
+
+    const outputPath = resolve(
+      actionRoot,
+      optionalString(args.outputPath) ?? (existingImagePath ? `${screenshotPath}.ocr.json` : resolve(outputDir, "ocr-snapshot.json")),
+    );
+    const result = await ocrScreenshot(screenshotPath, outputPath);
+    const query = optionalString(args.query);
+    const matches = query ? searchOCRText(result.result, query) : undefined;
+
+    return {
+      ok: true,
+      currentSurface,
+      artifact: result.artifact,
+      ocr: result.result,
+      matches,
+    };
+  },
+
+  async "action.observe.vision"(args) {
+    const payload = {
+      imagePath: optionalString(args.imagePath),
+      outputPath: optionalString(args.outputPath),
+      prompt: optionalString(args.prompt),
+      provider: parseVisionProvider(args.provider),
+      mockNative: optionalBoolean(args.mockNative),
+    };
+    const companion = await runCompanionJobIfAvailable("observe.vision", payload, optionalBoolean(args.direct));
+    if (companion) {
+      return companion;
+    }
+
+    const engine = newEngine();
+    let imagePath = payload.imagePath;
+
+    if (!imagePath) {
+      const sessionId = defaultSessionId("inspection");
+      const outputDir = resolve(actionRoot, sessionOutputDir(sessionId));
+      const capture = await engine.captureCurrentSurfaceScreenshot(resolve(outputDir, "snapshot.png"));
+      imagePath = capture.artifact.path;
+    } else {
+      imagePath = resolve(actionRoot, imagePath);
+    }
+
+    const outputPath = resolve(
+      actionRoot,
+      payload.outputPath ?? `${imagePath}.vision.json`,
+    );
+    const result = await analyzeScreenshotVision(imagePath, {
+      prompt: payload.prompt,
+      outputPath,
+      provider: payload.provider,
+    });
+
+    return {
+      ok: true,
+      artifact: result.artifact,
+      vision: result.result,
     };
   },
 

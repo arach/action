@@ -11,6 +11,8 @@ import type {
 import { Session } from "./session.js";
 import { buildPersistedSession, buildSessionManifest } from "./session-storage.js";
 import { CurrentSurfaceSnapshot, MacOSCommandEngine } from "./macos.js";
+import type { OCRResult, VisionAnalysisResult } from "./vision.js";
+import { analyzeScreenshotVision, ocrScreenshot } from "./vision.js";
 
 function now(): string {
   return new Date().toISOString();
@@ -108,12 +110,18 @@ export interface InspectCurrentSurfaceOptions {
   engine?: MacOSCommandEngine;
   outputDir?: string;
   sessionId?: string;
+  includeOcr?: boolean;
+  includeVision?: boolean;
+  visionPrompt?: string;
+  visionProvider?: "minimax" | "moondream";
 }
 
 export interface InspectCurrentSurfaceResult {
   currentSurface: CurrentSurfaceSnapshot;
   manifest: SessionArtifactManifest;
   session: PersistedRuntimeSession;
+  ocr?: OCRResult;
+  vision?: VisionAnalysisResult;
 }
 
 export async function inspectCurrentSurface(
@@ -125,6 +133,8 @@ export async function inspectCurrentSurface(
   const session = new Session(sessionId, "inspection");
   let phase: GuidedSessionPhase = "created";
   let currentSurface: CurrentSurfaceSnapshot | undefined;
+  let ocr: OCRResult | undefined;
+  let vision: VisionAnalysisResult | undefined;
 
   await mkdir(outputDir, { recursive: true });
 
@@ -179,6 +189,47 @@ export async function inspectCurrentSurface(
     });
     session.registerArtifact(axSnapshot.artifact);
 
+    if (options.includeOcr !== false) {
+      const ocrPath = resolve(outputDir, "ocr-snapshot.json");
+      const ocrCapture = await ocrScreenshot(screenshotPath, ocrPath);
+      ocr = ocrCapture.result;
+      session.recordObservation({
+        kind: "vision",
+        source: "engine",
+        at: now(),
+        surfaceId: currentSurface.surface.id,
+        data: {
+          provider: "apple-vision",
+          blockCount: ocr.blockCount,
+          artifactPath: ocrPath,
+        },
+      });
+      session.registerArtifact(ocrCapture.artifact);
+    }
+
+    if (options.includeVision) {
+      const visionPath = resolve(outputDir, "vision-analysis.json");
+      const visionCapture = await analyzeScreenshotVision(screenshotPath, {
+        prompt: options.visionPrompt,
+        outputPath: visionPath,
+        provider: options.visionProvider,
+      });
+      vision = visionCapture.result;
+      session.recordObservation({
+        kind: "analysis",
+        source: "runtime",
+        at: now(),
+        surfaceId: currentSurface.surface.id,
+        data: {
+          provider: vision.provider,
+          available: vision.available,
+          summary: vision.summary,
+          artifactPath: visionPath,
+        },
+      });
+      session.registerArtifact(visionCapture.artifact);
+    }
+
     session.transition("completing", { reason: "persist inspection session" });
     session.transition("completed", { reason: "inspection snapshot complete" });
     phase = "completed";
@@ -208,5 +259,7 @@ export async function inspectCurrentSurface(
     currentSurface: currentSurface!,
     manifest,
     session: sessionRecord,
+    ocr,
+    vision,
   };
 }

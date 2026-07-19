@@ -1,10 +1,13 @@
 import { readFile } from "node:fs/promises"
 
 import type { Bounds, Point } from "@action/protocol"
-import { Client } from "@modelcontextprotocol/sdk/client"
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 import type { CurrentSurfaceSnapshot } from "../macos.js"
+import {
+  callMinimaxUnderstandImage,
+  parseMinimaxArgsJSON,
+  resolveMinimaxMcpConfig,
+} from "./minimax-mcp.js"
 
 export interface ViewportSettleDragInstruction {
   from: Point
@@ -67,29 +70,6 @@ function defaultPrompt(): string {
     "- a drag.to point that would move the window closer to the requested viewport",
     "Return only JSON. Do not include markdown.",
   ].join("\n")
-}
-
-function parseArgsJSON(input: string | undefined): string[] {
-  if (!input) {
-    return []
-  }
-
-  const parsed = JSON.parse(input) as unknown
-  if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== "string")) {
-    throw new Error("ACTION_PIE_ARGS_JSON must be a JSON string array")
-  }
-
-  return parsed as string[]
-}
-
-function envRecord(env: NodeJS.ProcessEnv): Record<string, string> {
-  const record: Record<string, string> = {}
-  for (const [key, value] of Object.entries(env)) {
-    if (typeof value === "string") {
-      record[key] = value
-    }
-  }
-  return record
 }
 
 function asObject(input: unknown): Record<string, unknown> {
@@ -258,82 +238,6 @@ function buildAnalysisPrompt(request: ViewportSettleProviderRequest, axSummary?:
   ].join("\n")
 }
 
-function stripCodeFence(input: string): string {
-  const fencedMatch = input.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
-  if (fencedMatch) {
-    return fencedMatch[1].trim()
-  }
-
-  return input.trim()
-}
-
-function extractJSONObject(input: string): string {
-  const trimmed = stripCodeFence(input)
-  const start = trimmed.indexOf("{")
-  const end = trimmed.lastIndexOf("}")
-  if (start === -1 || end === -1 || end < start) {
-    throw new Error("Viewport settle provider did not return a JSON object")
-  }
-
-  return trimmed.slice(start, end + 1)
-}
-
-function parseJSONText(input: string): unknown {
-  const candidate = extractJSONObject(input)
-  return JSON.parse(candidate) as unknown
-}
-
-function extractTextResult(result: unknown): string {
-  const object = asObject(result)
-  let content = object.content
-
-  if (!Array.isArray(content) && object.toolResult !== undefined) {
-    const toolResult = asObject(object.toolResult)
-    content = toolResult.content
-  }
-
-  if (!Array.isArray(content)) {
-    throw new Error("MiniMax MCP returned no content payload for viewport settle")
-  }
-
-  const text = content
-    .filter((item): item is { type: string; text?: string } => {
-      return !!item && typeof item === "object" && !Array.isArray(item)
-    })
-    .filter((item) => item.type === "text" && typeof item.text === "string")
-    .map((item) => item.text ?? "")
-    .join("\n")
-    .trim()
-
-  if (text.length === 0) {
-    throw new Error("MiniMax MCP returned no text content for viewport settle")
-  }
-
-  return text
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`${label} timed out after ${timeoutMs}ms`))
-        }, timeoutMs)
-      }),
-    ])
-  } finally {
-    if (timer) {
-      clearTimeout(timer)
-    }
-  }
-}
-
 export class MockViewportSettleProvider implements ViewportSettleProvider {
   readonly id = "mock"
 
@@ -359,91 +263,43 @@ export class MockViewportSettleProvider implements ViewportSettleProvider {
 export class PieMinimaxViewportSettleProvider implements ViewportSettleProvider {
   readonly id: string
   readonly model: string
-  readonly command: string
-  readonly args: string[]
   readonly timeoutMs: number
   readonly env: NodeJS.ProcessEnv
 
   constructor(options: PieMinimaxViewportSettleProviderOptions = {}) {
-    const env = options.env ?? process.env
-    const model = options.model ?? env.ACTION_PIE_MODEL ?? "minimax-m2.7"
-    const command = options.command ?? env.ACTION_PIE_COMMAND ?? "uvx"
-    const args = options.args ?? parseArgsJSON(env.ACTION_PIE_ARGS_JSON)
-    const resolvedArgs = args.length > 0 ? args : ["minimax-coding-plan-mcp", "-y"]
-
-    this.model = model
-    this.command = command
-    this.args = resolvedArgs
-    this.timeoutMs = options.timeoutMs ?? Number(env.ACTION_PIE_TIMEOUT_MS ?? 20000)
-    this.env = env
-    this.id = `pie:${model}`
+    const config = resolveMinimaxMcpConfig(options)
+    this.model = config.model
+    this.timeoutMs = config.timeoutMs
+    this.env = config.env
+    this.id = config.providerId
   }
 
   async analyzeViewportTurn(
     request: ViewportSettleProviderRequest,
   ): Promise<ViewportSettleProviderResponse> {
-    const apiKey = this.env.MINIMAX_API_KEY
-    if (!apiKey) {
-      throw new Error("MINIMAX_API_KEY is required for the MiniMax viewport-settle provider")
-    }
-
     const axSummary = await readAxSummary(request.axSnapshotPath)
     const prompt = buildAnalysisPrompt(request, axSummary)
-    const stderrLines: string[] = []
-    const transport = new StdioClientTransport({
-      command: this.command,
-      args: this.args,
-      env: {
-        ...envRecord(this.env),
-        MINIMAX_API_KEY: apiKey,
-        MINIMAX_API_HOST: this.env.MINIMAX_API_HOST ?? "https://api.minimax.io",
-      },
-      stderr: "pipe",
-    })
-    const stderr = transport.stderr
-    if (stderr) {
-      stderr.on("data", (chunk: Buffer | string) => {
-        const line = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk)
-        stderrLines.push(line)
-      })
-    }
-
-    const client = new Client(
-      { name: "action-runtime", version: "0.0.0" },
-      { capabilities: {} },
-    )
-
-    try {
-      await withTimeout(client.connect(transport), this.timeoutMs, "MiniMax MCP connect")
-
-      const toolResult = await withTimeout(
-        client.callTool({
-          name: "understand_image",
-          arguments: {
-            prompt,
-            image_source: request.screenshotPath,
-          },
-        }),
-        this.timeoutMs,
-        "MiniMax understand_image",
-      )
-      const text = extractTextResult(toolResult)
-      const parsed = parseJSONText(text)
-      const normalized = normalizeProviderResponse(parsed)
-      normalized.raw = {
-        provider: this.id,
+    const analysis = await callMinimaxUnderstandImage({
+      prompt,
+      imageSource: request.screenshotPath,
+      options: {
+        env: this.env,
         model: this.model,
-        text,
-        parsed,
-      }
-      return normalized
-    } catch (error) {
-      const stderrText = stderrLines.join("").trim()
-      const suffix = stderrText.length > 0 ? `\n${stderrText}` : ""
-      throw new Error(`MiniMax viewport-settle failed: ${errorMessage(error)}${suffix}`)
-    } finally {
-      await transport.close().catch(() => {})
+        timeoutMs: this.timeoutMs,
+        args: parseMinimaxArgsJSON(this.env.ACTION_PIE_ARGS_JSON),
+      },
+    })
+    if (!analysis.parsed) {
+      throw new Error("Viewport settle provider did not return a JSON object")
     }
+    const normalized = normalizeProviderResponse(analysis.parsed)
+    normalized.raw = {
+      provider: this.id,
+      model: this.model,
+      text: analysis.text,
+      parsed: analysis.parsed,
+    }
+    return normalized
   }
 }
 
