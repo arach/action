@@ -3,487 +3,667 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Action — Native macOS capture and demo workstation</title>
-  <meta name="description" content="A native macOS runtime for staging scenes, recording deterministic sessions, and feeding structured output to agents or post-production.">
+  <title>Action — An API for agents to record and share computer use</title>
+  <meta name="description" content="Action gives agents an API to record and share computer use on macOS.">
+  <meta name="theme-color" content="#f3ebdd">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Action — An API for agents to record and share computer use">
+  <meta property="og:description" content="Action gives agents an API to record and share computer use on macOS.">
+  <meta property="og:image" content="https://arach.github.io/action/assets/brand/action-og.jpg">
+  <meta property="og:url" content="https://arach.github.io/action/">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing: border-box; }
 
     :root {
-      --bg:      #0e0f0d;
-      --canvas:  #181916;
-      --panel:   #201f1b;
-      --text:    #f0ece4;
-      --muted:   #a09890;
-      --accent:  #c8854a;
-      --border:  #2e2d28;
-      --serif:   'EB Garamond', Georgia, serif;
-      --mono:    'JetBrains Mono', 'Menlo', 'Monaco', monospace;
+      --paper: #f3ebdd;
+      --paper-deep: #dccfb9;
+      --paper-light: #faf5eb;
+      --ink: #20282b;
+      --slate: #596261;
+      --coral: #ef6a47;
+      --cyan: #1fb9c6;
+      --tan: #a77850;
+      --rule: rgb(32 40 43 / 0.22);
+      --rule-light: rgb(243 235 221 / 0.17);
+      --serif: "EB Garamond", Georgia, serif;
+      --mono: "JetBrains Mono", Menlo, Monaco, monospace;
+      --shell: min(1180px, calc(100vw - 48px));
     }
 
     html {
-      color-scheme: only dark;
-      background: var(--bg);
-      color: var(--text);
+      scroll-behavior: smooth;
+      background: var(--paper);
+      color: var(--ink);
       font-family: var(--serif);
       font-size: 18px;
-      line-height: 1.6;
+      line-height: 1.55;
       -webkit-font-smoothing: antialiased;
     }
 
     body {
-      background-image:
-        linear-gradient(hsla(28, 60%, 55%, 0.035) 1px, transparent 1px),
-        linear-gradient(90deg, hsla(28, 60%, 55%, 0.035) 1px, transparent 1px);
-      background-size: 32px 32px;
-      min-height: 100vh;
+      margin: 0;
+      min-width: 320px;
       overflow-x: hidden;
+      background:
+        linear-gradient(90deg, transparent 0 31px, rgb(32 40 43 / 0.025) 32px, transparent 33px) 0 0 / 64px 64px,
+        var(--paper);
     }
 
-    .wrap {
-      max-width: 64rem;
-      margin: 0 auto;
-      padding: 0 2rem;
+    img, video { display: block; max-width: 100%; }
+    a { color: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+
+    :focus-visible {
+      outline: 3px solid var(--cyan);
+      outline-offset: 3px;
     }
 
-    nav {
-      padding: 1.5rem 0;
+    .skip-link {
+      position: fixed;
+      z-index: 100;
+      top: 12px;
+      left: 12px;
+      transform: translateY(-160%);
+      padding: 10px 14px;
+      background: var(--ink);
+      color: var(--paper-light);
+      font: 600 0.72rem var(--mono);
+      text-decoration: none;
+    }
+    .skip-link:focus { transform: translateY(0); }
+
+    .shell { width: var(--shell); margin-inline: auto; }
+
+    .site-nav {
+      position: absolute;
+      z-index: 20;
+      inset: 0 0 auto;
+      border-bottom: 1px solid rgb(32 40 43 / 0.16);
+    }
+
+    .nav-inner {
+      min-height: 76px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      border-bottom: 1px solid var(--border);
+      gap: 24px;
     }
 
-    .nav-brand {
-      font-family: var(--mono);
-      font-size: 0.85rem;
-      color: var(--text);
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink);
+      font: 600 0.78rem var(--mono);
+      letter-spacing: -0.02em;
       text-decoration: none;
-      letter-spacing: -0.01em;
     }
-    .nav-brand .dim { color: var(--muted); }
+    .brand img { width: 31px; height: 31px; border-radius: 8px; }
+    .brand span { color: var(--slate); font-weight: 400; }
 
     .nav-links {
       display: flex;
-      gap: 1.5rem;
+      align-items: center;
+      gap: 28px;
+      margin: 0;
+      padding: 0;
       list-style: none;
     }
     .nav-links a {
-      font-family: var(--mono);
-      font-size: 0.75rem;
-      color: var(--muted);
+      color: var(--slate);
+      font: 500 0.67rem var(--mono);
+      letter-spacing: 0.02em;
       text-decoration: none;
-      transition: color 0.15s;
     }
-    .nav-links a:hover { color: var(--accent); }
+    .nav-links a:hover { color: var(--coral); }
 
     .hero {
-      padding: 6rem 0 5rem;
-    }
-
-    .eyebrow {
-      font-family: var(--mono);
-      font-size: 0.7rem;
-      color: var(--accent);
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      margin-bottom: 1.25rem;
-    }
-
-    .hero h1 {
-      font-size: clamp(2.4rem, 5vw, 3.75rem);
-      font-weight: 500;
-      line-height: 1.1;
-      margin-bottom: 1.5rem;
-      max-width: 20ch;
-    }
-
-    .hero-sub {
-      font-size: 1.2rem;
-      color: var(--muted);
-      max-width: 52ch;
-      margin-bottom: 3rem;
-    }
-
-    .terminal {
-      background: var(--canvas);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      overflow: hidden;
-      width: 100%;
-      max-width: 44rem;
-    }
-
-    .terminal-bar {
-      display: flex;
+      position: relative;
+      min-height: min(860px, 100svh);
+      display: grid;
       align-items: center;
-      gap: 6px;
-      padding: 0.65rem 1rem;
-      border-bottom: 1px solid var(--border);
-    }
-    .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: var(--border);
-    }
-    .terminal-title {
-      font-family: var(--mono);
-      font-size: 0.68rem;
-      color: var(--muted);
-      margin-left: auto;
+      isolation: isolate;
+      overflow: hidden;
+      background: var(--paper);
     }
 
-    .terminal-body {
-      padding: 1.2rem 1.5rem;
-      font-family: var(--mono);
-      font-size: 0.82rem;
-      line-height: 2;
-      overflow-x: auto;
+    .hero-art {
+      position: absolute;
+      z-index: -2;
+      inset: 0;
     }
-    .prompt { color: var(--muted); user-select: none; }
-    .cmd    { color: var(--text); white-space: nowrap; }
-    .out    { color: var(--muted); padding-left: 1.2rem; white-space: nowrap; }
-
-    section {
-      padding: 4.5rem 0;
-      border-top: 1px solid var(--border);
+    .hero-art img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center center;
+    }
+    .hero-art::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, var(--paper) 0%, rgb(243 235 221 / 0.98) 23%, rgb(243 235 221 / 0.72) 43%, transparent 65%),
+        linear-gradient(0deg, rgb(243 235 221 / 0.9) 0%, transparent 22%);
     }
 
-    .label {
-      font-family: var(--mono);
-      font-size: 0.68rem;
-      color: var(--accent);
-      letter-spacing: 0.12em;
+    .hero-copy {
+      width: min(620px, 54%);
+      padding: 150px 0 110px;
+    }
+
+    .eyebrow, .section-label {
+      margin: 0 0 18px;
+      color: var(--coral);
+      font: 600 0.65rem var(--mono);
+      letter-spacing: 0.14em;
       text-transform: uppercase;
-      margin-bottom: 0.9rem;
+    }
+    .eyebrow::before, .section-label::before {
+      content: "";
+      display: inline-block;
+      width: 26px;
+      height: 1px;
+      margin: 0 10px 3px 0;
+      background: currentColor;
     }
 
-    h2 {
-      font-size: clamp(1.6rem, 3vw, 2.25rem);
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 10.5ch;
+      margin-bottom: 24px;
+      font-size: clamp(3.5rem, 6.5vw, 6.3rem);
       font-weight: 500;
-      margin-bottom: 0.75rem;
-      line-height: 1.2;
+      letter-spacing: -0.055em;
+      line-height: 0.91;
+    }
+    h1 em { color: var(--coral); font-weight: 400; }
+
+    .hero-lead {
+      max-width: 48ch;
+      margin-bottom: 34px;
+      color: var(--slate);
+      font-size: clamp(1.08rem, 1.6vw, 1.28rem);
+      line-height: 1.46;
     }
 
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .button {
+      min-height: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      padding: 0 18px;
+      border: 1px solid var(--ink);
+      background: var(--ink);
+      color: var(--paper-light);
+      font: 600 0.68rem var(--mono);
+      text-decoration: none;
+      transition: transform 160ms ease, background 160ms ease, color 160ms ease;
+    }
+    .button:hover { transform: translateY(-2px); background: var(--coral); border-color: var(--coral); }
+    .button.secondary { background: rgb(243 235 221 / 0.66); color: var(--ink); }
+    .button.secondary:hover { background: var(--paper-light); color: var(--coral); border-color: var(--coral); }
+
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 20px;
+      margin-top: 34px;
+      color: var(--slate);
+      font: 500 0.61rem var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .hero-meta span::before { content: "•"; margin-right: 9px; color: var(--coral); }
+
+    .proof-rail {
+      border-block: 1px solid var(--rule);
+      background: rgb(250 245 235 / 0.76);
+    }
+    .proof-items {
+      min-height: 78px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      align-items: center;
+    }
+    .proof-items span {
+      padding: 10px 20px;
+      border-left: 1px solid var(--rule);
+      color: var(--slate);
+      font: 500 0.63rem var(--mono);
+      letter-spacing: 0.04em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .proof-items span:last-child { border-right: 1px solid var(--rule); }
+
+    .section { padding: 112px 0; border-bottom: 1px solid var(--rule); }
+    .section-heading { max-width: 720px; margin-bottom: 54px; }
+    h2 {
+      margin-bottom: 18px;
+      font-size: clamp(2.35rem, 4.6vw, 4.4rem);
+      font-weight: 500;
+      letter-spacing: -0.045em;
+      line-height: 0.98;
+    }
     .lead {
-      font-size: 1.05rem;
-      color: var(--muted);
-      max-width: 55ch;
-      margin-bottom: 2.75rem;
+      max-width: 58ch;
+      margin-bottom: 0;
+      color: var(--slate);
+      font-size: 1.08rem;
     }
 
+    .capability-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-top: 1px solid var(--rule);
+      border-left: 1px solid var(--rule);
+    }
+    .capability {
+      min-height: 250px;
+      padding: 26px;
+      border-right: 1px solid var(--rule);
+      border-bottom: 1px solid var(--rule);
+      background: rgb(250 245 235 / 0.45);
+    }
+    .capability-index {
+      display: block;
+      margin-bottom: 68px;
+      color: var(--coral);
+      font: 500 0.62rem var(--mono);
+    }
+    .capability h3 { margin-bottom: 9px; font: 600 0.76rem var(--mono); text-transform: uppercase; }
+    .capability p { margin: 0; color: var(--slate); font-size: 0.95rem; line-height: 1.5; }
+
+    .demo-section { background: var(--ink); color: var(--paper-light); }
+    .demo-section .section-label { color: var(--coral); }
+    .demo-section .lead { color: rgb(243 235 221 / 0.66); }
     .demo-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(15rem, 0.65fr);
-      gap: 1.75rem;
-      align-items: start;
-      min-width: 0;
+      grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+      gap: 42px;
+      align-items: center;
     }
-    .demo-video {
-      display: block;
-      width: 100%;
-      aspect-ratio: 1280 / 1050;
-      background: #050504;
-      border: 1px solid var(--border);
-      border-radius: 4px;
+    .video-frame { position: relative; padding: 10px; border: 1px solid var(--rule-light); }
+    .video-frame::before, .video-frame::after {
+      content: "";
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      border-color: var(--coral);
     }
-    .demo-copy {
-      padding-top: 0.2rem;
+    .video-frame::before { top: -1px; left: -1px; border-top: 2px solid var(--coral); border-left: 2px solid var(--coral); }
+    .video-frame::after { right: -1px; bottom: -1px; border-right: 2px solid var(--coral); border-bottom: 2px solid var(--coral); }
+    .demo-video { width: 100%; aspect-ratio: 1280 / 1050; object-fit: cover; background: #0c1113; }
+    .demo-copy blockquote {
+      margin: 0 0 28px;
+      color: var(--paper-light);
+      font-size: clamp(1.5rem, 2.4vw, 2.2rem);
+      line-height: 1.16;
     }
-    .demo-copy p {
-      font-size: 0.96rem;
-      color: var(--muted);
-      line-height: 1.55;
-      margin-bottom: 1rem;
-    }
-    .demo-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.7rem;
-      margin-top: 1.25rem;
-    }
-    .demo-links a {
-      font-family: var(--mono);
-      font-size: 0.72rem;
-      color: var(--text);
+    .demo-copy p { color: rgb(243 235 221 / 0.62); font-size: 0.95rem; }
+    .text-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--coral);
+      font: 600 0.66rem var(--mono);
       text-decoration: none;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 0.45rem 0.65rem;
-      background: var(--canvas);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
     }
-    .demo-links a:hover {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
+    .text-link:hover { color: var(--cyan); }
 
-    .cards {
+    .trace-section {
+      position: relative;
+      min-height: 790px;
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1.25rem;
-    }
-    @media (max-width: 700px) {
-      .cards { grid-template-columns: 1fr; }
-      .demo-grid { grid-template-columns: 1fr; }
-      .wrap { padding: 0 1.25rem; }
-      .hero h1 { font-size: 2.25rem; }
-      .terminal-body { font-size: 0.72rem; }
-      nav { align-items: flex-start; gap: 1rem; flex-direction: column; }
-    }
-
-    .card {
-      background: var(--canvas);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 1.5rem;
-    }
-    .card-name {
-      font-family: var(--mono);
-      font-size: 0.82rem;
-      color: var(--accent);
-      margin-bottom: 0.6rem;
-    }
-    .card-desc {
-      font-size: 0.95rem;
-      color: var(--muted);
-      line-height: 1.55;
-    }
-
-    .steps {
-      display: flex;
-      flex-direction: column;
-      gap: 2rem;
-      max-width: 50rem;
-    }
-    .step {
-      display: flex;
-      gap: 1.75rem;
-    }
-    .step-n {
-      font-family: var(--mono);
-      font-size: 0.7rem;
-      color: var(--accent);
-      flex-shrink: 0;
-      padding-top: 0.25rem;
-      width: 1.5rem;
-    }
-    .step h3 {
-      font-size: 1rem;
-      font-weight: 500;
-      margin-bottom: 0.25rem;
-    }
-    .step p {
-      font-size: 0.95rem;
-      color: var(--muted);
-      line-height: 1.55;
-    }
-
-    code {
-      font-family: var(--mono);
-      font-size: 0.82em;
-      color: var(--accent);
-      background: var(--panel);
-      padding: 0.1em 0.35em;
-      border-radius: 2px;
-    }
-
-    .reqs {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 0.6rem;
-    }
-    .reqs li {
-      font-family: var(--mono);
-      font-size: 0.82rem;
-      color: var(--muted);
-      display: flex;
       align-items: center;
-      gap: 0.75rem;
+      overflow: hidden;
+      background: var(--paper-light);
     }
-    .reqs li::before {
-      content: '—';
-      color: var(--accent);
+    .trace-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .trace-content { position: relative; z-index: 1; width: min(660px, 62%); margin-inline: auto; text-align: center; }
+    .trace-content .section-label::before { display: none; }
+    .trace-content .lead { margin-inline: auto; }
+    .trace-steps {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1px;
+      margin-top: 42px;
+      border: 1px solid var(--rule);
+      background: var(--rule);
+      text-align: left;
+    }
+    .trace-step { min-height: 150px; padding: 20px; background: rgb(250 245 235 / 0.92); backdrop-filter: blur(6px); }
+    .trace-step span { color: var(--coral); font: 500 0.58rem var(--mono); }
+    .trace-step h3 { margin: 25px 0 6px; font: 600 0.72rem var(--mono); text-transform: uppercase; }
+    .trace-step p { margin: 0; color: var(--slate); font-size: 0.88rem; line-height: 1.4; }
+
+    .artifact-grid { display: grid; grid-template-columns: 0.78fr 1.22fr; gap: 64px; align-items: center; }
+    .artifact-list { display: grid; gap: 0; border-top: 1px solid var(--rule); }
+    .artifact-row {
+      display: grid;
+      grid-template-columns: 42px 1fr auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 62px;
+      border-bottom: 1px solid var(--rule);
+      font: 500 0.67rem var(--mono);
+    }
+    .artifact-row span:first-child { color: var(--coral); }
+    .artifact-row small { color: var(--slate); font: 400 0.58rem var(--mono); }
+    .manifest {
+      position: relative;
+      padding: 34px;
+      background: var(--ink);
+      color: var(--paper-light);
+      box-shadow: 18px 18px 0 var(--paper-deep);
+      font: 0.68rem/1.9 var(--mono);
+      overflow-x: auto;
+    }
+    .manifest::before { content: "session.json"; display: block; margin-bottom: 25px; color: var(--coral); font-weight: 600; }
+    .manifest .key { color: #8dd8df; }
+    .manifest .value { color: #f1a284; }
+    .manifest .muted { color: rgb(243 235 221 / 0.5); }
+
+    .mira-section { background: var(--paper-light); }
+    .mira-grid { display: grid; grid-template-columns: 0.72fr 1.28fr; gap: 60px; align-items: center; }
+    .mira-copy h2 { max-width: 9ch; }
+    .mira-copy .lead { margin-bottom: 26px; }
+    .mira-art { border: 1px solid var(--rule); background: var(--paper); }
+    .mira-art img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+
+    .developer-grid { display: grid; grid-template-columns: 0.72fr 1.28fr; gap: 60px; align-items: start; }
+    .terminal {
+      border: 1px solid rgb(243 235 221 / 0.15);
+      background: #141a1c;
+      color: var(--paper-light);
+      box-shadow: 14px 14px 0 var(--paper-deep);
+    }
+    .terminal-bar { display: flex; align-items: center; gap: 7px; min-height: 46px; padding: 0 16px; border-bottom: 1px solid rgb(243 235 221 / 0.12); }
+    .terminal-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--slate); }
+    .terminal-dot:first-child { background: var(--coral); }
+    .terminal-title { margin-left: auto; color: rgb(243 235 221 / 0.45); font: 0.58rem var(--mono); }
+    .terminal-body { padding: 24px; overflow-x: auto; font: 0.67rem/2 var(--mono); }
+    .terminal-body div { white-space: nowrap; }
+    .prompt { color: var(--coral); user-select: none; }
+    .output { padding-left: 18px; color: rgb(243 235 221 / 0.48); }
+    .requirements { margin: 32px 0 0; padding: 0; list-style: none; }
+    .requirements li { padding: 9px 0; border-bottom: 1px solid var(--rule); color: var(--slate); font: 0.66rem var(--mono); }
+    .requirements li::before { content: "+"; margin-right: 10px; color: var(--coral); }
+
+    .site-footer { padding: 42px 0; background: var(--ink); color: var(--paper-light); }
+    .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+    .footer-inner p { margin: 0; color: rgb(243 235 221 / 0.5); font: 0.61rem var(--mono); }
+    .footer-links { display: flex; flex-wrap: wrap; gap: 22px; }
+    .footer-links a { color: var(--paper-light); font: 0.61rem var(--mono); text-decoration: none; }
+    .footer-links a:hover { color: var(--coral); }
+
+    @media (max-width: 940px) {
+      :root { --shell: min(100% - 36px, 760px); }
+      .hero { min-height: 820px; align-items: end; }
+      .hero-art img { object-position: 62% center; }
+      .hero-art::after { background: linear-gradient(0deg, var(--paper) 0%, rgb(243 235 221 / 0.97) 43%, rgb(243 235 221 / 0.1) 78%); }
+      .hero-copy { width: 100%; padding: 380px 0 78px; }
+      h1 { max-width: 9ch; font-size: clamp(3.2rem, 12vw, 5.2rem); }
+      .proof-items { grid-template-columns: repeat(2, 1fr); }
+      .proof-items span:nth-child(3) { border-top: 1px solid var(--rule); }
+      .proof-items span:nth-child(4) { border-top: 1px solid var(--rule); }
+      .capability-grid { grid-template-columns: repeat(2, 1fr); }
+      .demo-grid, .artifact-grid, .mira-grid, .developer-grid { grid-template-columns: 1fr; }
+      .mira-copy h2 { max-width: 13ch; }
+      .mira-art { order: -1; }
     }
 
-    footer {
-      padding: 2.5rem 0 3rem;
-      border-top: 1px solid var(--border);
+    @media (max-width: 620px) {
+      :root { --shell: calc(100vw - 28px); }
+      html { font-size: 17px; }
+      .nav-inner { min-height: 64px; }
+      .nav-links { gap: 14px; }
+      .nav-links li:first-child { display: none; }
+      .hero { min-height: 760px; }
+      .hero-art { inset: 0 -56%; 250px -22%; }
+      .hero-art img { object-position: 70% center; }
+      .hero-copy { padding: 320px 0 58px; }
+      .hero-lead { font-size: 1rem; }
+      .hero-meta { gap: 7px 14px; }
+      .proof-items { width: 100%; grid-template-columns: 1fr 1fr; }
+      .proof-items span { padding: 13px 6px; font-size: 0.54rem; }
+      .section { padding: 78px 0; }
+      .section-heading { margin-bottom: 36px; }
+      .capability-grid { grid-template-columns: 1fr; }
+      .capability { min-height: 190px; }
+      .capability-index { margin-bottom: 40px; }
+      .demo-grid { gap: 28px; }
+      .trace-section { min-height: 920px; }
+      .trace-art { width: 160%; max-width: none; left: -30%; opacity: 0.72; }
+      .trace-content { width: 100%; }
+      .trace-steps { grid-template-columns: 1fr; }
+      .trace-step { min-height: 122px; }
+      .manifest { padding: 24px 18px; box-shadow: 8px 8px 0 var(--paper-deep); font-size: 0.58rem; }
+      .mira-grid, .developer-grid { gap: 36px; }
+      .terminal { box-shadow: 8px 8px 0 var(--paper-deep); }
+      .terminal-body { padding: 20px 14px; font-size: 0.58rem; }
+      .footer-inner { align-items: flex-start; flex-direction: column; }
     }
-    .footer-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 0.75rem;
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .button { transition: none; }
     }
-    .footer-row p {
-      font-family: var(--mono);
-      font-size: 0.72rem;
-      color: var(--muted);
-    }
-    .footer-row a {
-      color: var(--accent);
-      text-decoration: none;
-    }
-    .footer-row a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <a class="skip-link" href="#main">Skip to content</a>
 
-    <nav>
-      <a class="nav-brand" href="/">action<span class="dim">.app</span></a>
+  <header class="site-nav">
+    <nav class="shell nav-inner" aria-label="Primary navigation">
+      <a class="brand" href="./" aria-label="Action home">
+        <img src="assets/brand/action-mark.svg" alt="">
+        action<span>.app</span>
+      </a>
       <ul class="nav-links">
         <li><a href="#demo">Demo</a></li>
         <li><a href="getting-started.md">Docs</a></li>
         <li><a href="https://github.com/arach/action">GitHub</a></li>
       </ul>
     </nav>
+  </header>
 
-    <div class="hero">
-      <p class="eyebrow">macOS native runtime</p>
-      <h1>Stage. Record. Review. Hand off.</h1>
-      <p class="hero-sub">A native macOS workstation for capturing deterministic sessions, building structured trace artifacts, and feeding output to agents or post-production.</p>
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-art" aria-hidden="true">
+        <img src="assets/brand/landing-hero.webp" alt="">
+      </div>
+      <div class="shell">
+        <div class="hero-copy">
+          <p class="eyebrow">Native macOS automation</p>
+          <h1 id="hero-title">Action gives agents an API to record and share computer use.</h1>
+          <p class="hero-lead">Each macOS run can include video, screenshots, accessibility context, and traces.</p>
+          <div class="actions">
+            <a class="button" href="getting-started.md">Build Action.app <span aria-hidden="true">→</span></a>
+            <a class="button secondary" href="#demo">Watch the capture</a>
+          </div>
+          <div class="hero-meta" aria-label="Project status">
+            <span>macOS native</span>
+            <span>local first</span>
+            <span>early project</span>
+          </div>
+        </div>
+      </div>
+    </section>
 
-      <div class="terminal">
-        <div class="terminal-bar">
-          <div class="dot"></div>
-          <div class="dot"></div>
-          <div class="dot"></div>
-          <span class="terminal-title">quick start</span>
-        </div>
-        <div class="terminal-body">
-          <div><span class="prompt">$ </span><span class="cmd">bun install && bun run native:app:build</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">bun run action-dev -- launch</span></div>
-          <div class="out"># Action.app running · console ready</div>
-          <div><span class="prompt">$ </span><span class="cmd">action-dev host guided-calculator-demo</span></div>
-          <div class="out"># capture started · artifact writing…</div>
-        </div>
+    <div class="proof-rail" aria-label="Core technologies">
+      <div class="shell proof-items">
+        <span>AppKit lifecycle</span>
+        <span>ScreenCaptureKit</span>
+        <span>AX + OCR</span>
+        <span>CLI + MCP</span>
       </div>
     </div>
 
-    <section id="demo">
-      <p class="label">Dogfood capture</p>
-      <h2>Mira uses Action to make Action a logo.</h2>
-      <p class="lead">A real take captured from Mira's persistent Chrome profile while Midjourney explored the mark that became the favorite.</p>
+    <section class="section" aria-labelledby="runtime-title">
+      <div class="shell">
+        <div class="section-heading">
+          <p class="section-label">Built for agent runs</p>
+          <h2 id="runtime-title">A native recording layer for agents at work.</h2>
+          <p class="lead">Action lets agents use the real interface and records the run as it happens. The finished session is ready to review or replay.</p>
+        </div>
+        <div class="capability-grid">
+          <article class="capability">
+            <span class="capability-index">01 / OBSERVE</span>
+            <h3>See the surface</h3>
+            <p>Capture the active window, screenshot, accessibility tree, and Apple Vision OCR.</p>
+          </article>
+          <article class="capability">
+            <span class="capability-index">02 / RESOLVE</span>
+            <h3>Find a stable target</h3>
+            <p>Prefer semantic, DOM, or AX evidence before falling back to coordinates.</p>
+          </article>
+          <article class="capability">
+            <span class="capability-index">03 / ACT</span>
+            <h3>Execute deliberately</h3>
+            <p>Run deterministic actions through native controls with explicit runtime state.</p>
+          </article>
+          <article class="capability">
+            <span class="capability-index">04 / RECORD</span>
+            <h3>Package the run</h3>
+            <p>Write the video, trace, screenshots, manifest, and finished marker as one session.</p>
+          </article>
+        </div>
+      </div>
+    </section>
 
-      <div class="demo-grid">
-        <video class="demo-video" controls playsinline preload="metadata" poster="assets/action-mira-logo-poster.png">
-          <source src="assets/action-mira-midjourney-logo.mp4" type="video/mp4">
-        </video>
-        <div class="demo-copy">
-          <p>The capture uses Action's native recording path against the exact Mira Chrome window region, with a finished marker proving the recording completed.</p>
-          <p>The selected direction keeps the abstract A, cursor form, cyan stroke, coral recording dot, and capture-corner ticks.</p>
-          <div class="demo-links">
-            <a href="assets/action-mira-midjourney-logo.mp4">Open MP4</a>
-            <a href="assets/action-mira-logo-poster.png">Open poster</a>
+    <section class="section demo-section" id="demo" aria-labelledby="demo-title">
+      <div class="shell">
+        <div class="section-heading">
+          <p class="section-label">Dogfood capture</p>
+          <h2 id="demo-title">A real agent run, recorded end to end.</h2>
+          <p class="lead">A real take from Mira’s persistent Chrome profile while Midjourney explored the mark used throughout this page.</p>
+        </div>
+        <div class="demo-grid">
+          <div class="video-frame">
+            <video class="demo-video" controls playsinline preload="metadata" poster="assets/action-mira-logo-poster.png">
+              <source src="assets/action-mira-midjourney-logo.mp4" type="video/mp4">
+              Your browser does not support embedded video.
+            </video>
+          </div>
+          <div class="demo-copy">
+            <blockquote>“The agent records the work, then shares the run.”</blockquote>
+            <p>The native recording probe runs inside a real AppKit lifecycle, watches for a stop file, and writes a finished marker only after capture completes.</p>
+            <p>The selected mark carries the same visual grammar: capture corners, cursor motion, coral recording state, and a small cyan signal.</p>
+            <a class="text-link" href="assets/action-mira-midjourney-logo.mp4">Open the MP4 <span aria-hidden="true">↗</span></a>
           </div>
         </div>
       </div>
     </section>
 
-    <section>
-      <p class="label">What it is</p>
-      <h2>Not just screen recording.</h2>
-      <p class="lead">Action is a runtime where a human or an agent can stage a scene, run deterministic actions, and produce machine-readable output with every capture.</p>
-
-      <div class="cards">
-        <div class="card">
-          <p class="card-name">Action.app</p>
-          <p class="card-desc">Signed AppKit host. Owns permissions UX, WebKit console, recording-probe lifecycle, and the supervision overlay.</p>
-        </div>
-        <div class="card">
-          <p class="card-name">agent runtime</p>
-          <p class="card-desc">Local orchestration process for transport, automation-facing methods, and agent-to-app coordination.</p>
-        </div>
-        <div class="card">
-          <p class="card-name">session artifacts</p>
-          <p class="card-desc">Every capture produces raw media, structured trace data, screenshots, and a finished marker file.</p>
+    <section class="trace-section" aria-labelledby="trace-title">
+      <img class="trace-art" src="assets/brand/landing-trace-field.webp" alt="" aria-hidden="true">
+      <div class="shell trace-content">
+        <p class="section-label">One session, end to end</p>
+        <h2 id="trace-title">The path stays inspectable.</h2>
+        <p class="lead">No daemon mystery state. No UI-only source of truth. Each transition has a reason, an owner, and an artifact trail.</p>
+        <div class="trace-steps">
+          <article class="trace-step"><span>01</span><h3>Preflight</h3><p>Resolve permissions, process state, and the target surface.</p></article>
+          <article class="trace-step"><span>02</span><h3>Running</h3><p>Act, observe, and capture under explicit session state.</p></article>
+          <article class="trace-step"><span>03</span><h3>Completing</h3><p>Stop cleanly and wait for the runtime’s finished marker.</p></article>
+          <article class="trace-step"><span>04</span><h3>Review</h3><p>Reopen the session with its media, trace, and context intact.</p></article>
         </div>
       </div>
     </section>
 
-    <section>
-      <p class="label">The loop</p>
-      <h2>One tight cycle.</h2>
-      <p class="lead">Action is organized around a single repeatable loop you can run manually or drive with an agent.</p>
-
-      <div class="steps">
-        <div class="step">
-          <span class="step-n">01</span>
-          <div>
-            <h3>Launch and stage</h3>
-            <p>Start <code>Action.app</code>, open the embedded console, and set up the scene you want to capture.</p>
+    <section class="section" aria-labelledby="artifacts-title">
+      <div class="shell artifact-grid">
+        <div>
+          <p class="section-label">Durable output</p>
+          <h2 id="artifacts-title">More than pixels.</h2>
+          <p class="lead">A capture should explain itself later. Action preserves the media alongside the runtime context that produced it.</p>
+          <div class="artifact-list" aria-label="Session artifacts">
+            <div class="artifact-row"><span>01</span><strong>capture.mov</strong><small>raw media</small></div>
+            <div class="artifact-row"><span>02</span><strong>trace.json</strong><small>runtime events</small></div>
+            <div class="artifact-row"><span>03</span><strong>snapshot.png</strong><small>visual state</small></div>
+            <div class="artifact-row"><span>04</span><strong>ax-snapshot.json</strong><small>interface context</small></div>
+            <div class="artifact-row"><span>05</span><strong>manifest.json</strong><small>artifact index</small></div>
           </div>
         </div>
-        <div class="step">
-          <span class="step-n">02</span>
-          <div>
-            <h3>Run a guided capture</h3>
-            <p>Use <code>action-dev host &lt;scenario&gt;</code> to start a recording probe. The probe runs in a fresh app instance for clean, deterministic output.</p>
-          </div>
-        </div>
-        <div class="step">
-          <span class="step-n">03</span>
-          <div>
-            <h3>Review in-app</h3>
-            <p>The session library surfaces the playable artifact plus trace data. Completion is marker-based, not response-based — the artifact is authoritative.</p>
-          </div>
-        </div>
-        <div class="step">
-          <span class="step-n">04</span>
-          <div>
-            <h3>Hand off</h3>
-            <p>Leave machine-readable feedback or pass the artifact directly to an editor, composer, or downstream agent.</p>
-          </div>
+        <div class="manifest" aria-label="Example session manifest">
+          <div>{</div>
+          <div>&nbsp;&nbsp;<span class="key">"mode"</span>: <span class="value">"inspection"</span>,</div>
+          <div>&nbsp;&nbsp;<span class="key">"state"</span>: <span class="value">"completed"</span>,</div>
+          <div>&nbsp;&nbsp;<span class="key">"surface"</span>: {</div>
+          <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"kind"</span>: <span class="value">"window"</span>,</div>
+          <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"bundleId"</span>: <span class="value">"com.apple.Calculator"</span></div>
+          <div>&nbsp;&nbsp;},</div>
+          <div>&nbsp;&nbsp;<span class="key">"artifacts"</span>: <span class="muted">["screenshot", "ax", "ocr", "trace"]</span>,</div>
+          <div>&nbsp;&nbsp;<span class="key">"recordingFinished"</span>: <span class="value">true</span></div>
+          <div>}</div>
         </div>
       </div>
     </section>
 
-    <section>
-      <p class="label">Developer CLI</p>
-      <h2>One alias, all commands.</h2>
-      <p class="lead">The repo-local CLI covers the full build and runtime loop.</p>
-
-      <div class="terminal">
-        <div class="terminal-bar">
-          <div class="dot"></div>
-          <div class="dot"></div>
-          <div class="dot"></div>
-          <span class="terminal-title">action-dev</span>
+    <section class="section mira-section" aria-labelledby="mira-title">
+      <div class="shell mira-grid">
+        <div class="mira-copy">
+          <p class="section-label">Field companion</p>
+          <h2 id="mira-title">A second set of eyes on every take.</h2>
+          <p class="lead">Mira is the companion direction for following a session, surfacing what changed, and turning raw capture into an inspectable handoff.</p>
+          <a class="text-link" href="LIVE_INSPECTION_RUNTIME.md">Read the inspection direction <span aria-hidden="true">→</span></a>
         </div>
-        <div class="terminal-body">
-          <div><span class="prompt">$ </span><span class="cmd">alias action-dev='bun packages/cli/src/action-dev.ts'</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">action-dev build</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">action-dev relaunch</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">action-dev doctor</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">action-dev hud</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">action-dev logs</span></div>
+        <div class="mira-art">
+          <img src="assets/brand/landing-mira.webp" alt="Mira, a compact cat-like field companion, monitoring a technical capture console">
         </div>
       </div>
     </section>
 
-    <section>
-      <p class="label">Requirements</p>
-      <h2>What you need.</h2>
-      <ul class="reqs">
-        <li>macOS on Apple Silicon</li>
-        <li>Bun (package manager and script runner)</li>
-        <li>Xcode command line tools or a full Swift toolchain</li>
-        <li>Accessibility and Screen Recording permissions granted on first launch</li>
-      </ul>
-    </section>
-
-    <footer>
-      <div class="footer-row">
-        <p>Native-first macOS capture workstation · <a href="https://github.com/arach/action">github.com/arach/action</a></p>
-        <p><a href="ARCHITECTURE.md">Architecture docs</a></p>
+    <section class="section" aria-labelledby="developer-title">
+      <div class="shell developer-grid">
+        <div>
+          <p class="section-label">Developer loop</p>
+          <h2 id="developer-title">Build it. Launch it. Prove it.</h2>
+          <p class="lead">The local workflow builds and signs a real app bundle, reports native permission state, and keeps recording completion explicit.</p>
+          <ul class="requirements">
+            <li>macOS on Apple Silicon</li>
+            <li>Bun and the Swift toolchain</li>
+            <li>Accessibility permission</li>
+            <li>Screen Recording permission</li>
+          </ul>
+        </div>
+        <div class="terminal" aria-label="Action quick start commands">
+          <div class="terminal-bar">
+            <span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span>
+            <span class="terminal-title">action / quick-start</span>
+          </div>
+          <div class="terminal-body">
+            <div><span class="prompt">$ </span>bun install</div>
+            <div><span class="prompt">$ </span>bun run native:app:build</div>
+            <div class="output">Action.app signed and ready</div>
+            <div><span class="prompt">$ </span>bun run native:doctor</div>
+            <div class="output">Accessibility: granted · Screen Recording: granted</div>
+            <div><span class="prompt">$ </span>bun run action-dev -- launch</div>
+            <div class="output">Action.app running</div>
+          </div>
+        </div>
       </div>
-    </footer>
+    </section>
+  </main>
 
-  </div>
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <p>Action · native macOS automation, capture, and review.</p>
+      <div class="footer-links">
+        <a href="getting-started.md">Getting started</a>
+        <a href="ARCHITECTURE.md">Architecture</a>
+        <a href="https://github.com/arach/action">GitHub</a>
+      </div>
+    </div>
+  </footer>
 </body>
 </html>
