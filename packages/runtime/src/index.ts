@@ -8,4 +8,5 @@ export * from "./session.js";
 export * from "./session-storage.js";
 export * from "./viewport-settle.js";
 export * from "./vision.js";
+export * from "./characters.js";
 export * from "./companion-client.js";
