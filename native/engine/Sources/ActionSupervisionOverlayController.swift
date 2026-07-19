@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+// The panel window is grown by a transparent margin on every side so the card's
+// soft drop shadow has room to render. The AppKit window shadow (which follows
+// the rectangular window bounds, not the rounded card) stays off; this margin
+// keeps the shape-aware SwiftUI shadow from being clipped to a hard rectangle.
+private let actionSupervisionShadowMargin: CGFloat = 24
+
 @MainActor
 final class ActionSupervisionViewModel: ObservableObject {
     @Published var title: String = "Action Supervision"
@@ -75,8 +81,9 @@ struct ActionSupervisionView: View {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .stroke(Color.white.opacity(0.09), lineWidth: 1)
                 )
-                .shadow(color: Color.black.opacity(0.28), radius: 18, x: 0, y: 12)
+                .shadow(color: Color.black.opacity(0.26), radius: 14, x: 0, y: 8)
         )
+        .padding(actionSupervisionShadowMargin)
     }
 
     private var minimizedBody: some View {
@@ -116,8 +123,9 @@ struct ActionSupervisionView: View {
                     Capsule(style: .continuous)
                         .stroke(Color.white.opacity(0.09), lineWidth: 1)
                 )
-                .shadow(color: Color.black.opacity(0.28), radius: 16, x: 0, y: 10)
+                .shadow(color: Color.black.opacity(0.26), radius: 13, x: 0, y: 7)
         )
+        .padding(actionSupervisionShadowMargin)
     }
 }
 
@@ -140,8 +148,12 @@ struct ActionSupervisionButtonStyle: ButtonStyle {
 @MainActor
 final class ActionSupervisionOverlayController: NSObject {
     private enum OverlayLayout {
-        static let expandedSize = CGSize(width: 296, height: 84)
-        static let minimizedSize = CGSize(width: 206, height: 44)
+        // Window sizes include the transparent shadow margin on every side; the
+        // visible card is inset by `margin` and reads at its card size.
+        static let margin = actionSupervisionShadowMargin
+        static let expandedSize = CGSize(width: 296 + margin * 2, height: 84 + margin * 2)
+        static let minimizedSize = CGSize(width: 206 + margin * 2, height: 44 + margin * 2)
+        static let edgeInset: CGFloat = 18
         static let frameDefaultsKey = "Action.SupervisionOverlay.Frame"
         static let minimizedDefaultsKey = "Action.SupervisionOverlay.Minimized"
     }
@@ -203,7 +215,9 @@ final class ActionSupervisionOverlayController: NSObject {
         window.level = actionHUDPanelLevel()
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = true
+        // The card draws its own shape-aware shadow. Leaving the AppKit window
+        // shadow on would stack a hard rectangle behind the rounded silhouette.
+        window.hasShadow = false
         window.ignoresMouseEvents = false
         window.isMovable = true
         window.isMovableByWindowBackground = true
@@ -266,10 +280,20 @@ final class ActionSupervisionOverlayController: NSObject {
             return
         }
 
+        // Only publish when a value actually changes. The poll runs several
+        // times a second; assigning unconditionally would fire objectWillChange
+        // on every tick and churn the view — the source of the visible flicker.
         let detail = registrations.last?.detail ?? "Supervisor stop · Cmd+Ctrl+. or Esc Esc"
-        model.title = "Action Supervision"
-        model.detail = detail
-        model.countLabel = registrations.count == 1 ? "1 live" : "\(registrations.count) live"
+        let countLabel = registrations.count == 1 ? "1 live" : "\(registrations.count) live"
+        if model.title != "Action Supervision" {
+            model.title = "Action Supervision"
+        }
+        if model.detail != detail {
+            model.detail = detail
+        }
+        if model.countLabel != countLabel {
+            model.countLabel = countLabel
+        }
         if !hasPositionedWindow {
             positionWindow()
         }
@@ -302,8 +326,11 @@ final class ActionSupervisionOverlayController: NSObject {
             return
         }
 
-        let x = visibleFrame.maxX - size.width - 18
-        let y = visibleFrame.maxY - size.height - 18
+        // Offset by the transparent margin so the visible card — not the padded
+        // window — sits `edgeInset` from the top-right corner.
+        let cornerInset = OverlayLayout.edgeInset - OverlayLayout.margin
+        let x = visibleFrame.maxX - size.width - cornerInset
+        let y = visibleFrame.maxY - size.height - cornerInset
         window.setFrame(CGRect(origin: CGPoint(x: x, y: y), size: size), display: true)
         hasPositionedWindow = true
         persistWindowFrame()
