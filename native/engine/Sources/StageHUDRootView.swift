@@ -228,13 +228,13 @@ struct StageHUDRootView: View {
         .clipShape(ActionChamferedShape(cornerCut: 8))
     }
 
+    // During live phases the control bay carries only the real stop/interrupt
+    // affordance. The clear/quit hardware buttons appear only for terminal or
+    // idle sessions; no decorative controls flank the primary action.
     @ViewBuilder
     private var leadingHardwareControl: some View {
         if showsSessionControls {
             hardwareButton("clear", icon: "xmark")
-        } else {
-            StageHUDVent(color: accentColor)
-                .frame(width: 34)
         }
     }
 
@@ -242,9 +242,6 @@ struct StageHUDRootView: View {
     private var trailingHardwareControl: some View {
         if showsSessionControls {
             hardwareButton("quit", icon: "power")
-        } else {
-            StageHUDKnob(color: accentColor, energized: isActive)
-                .frame(width: 34)
         }
     }
 
@@ -581,27 +578,26 @@ private struct StageHUDWaveform: View {
     let energized: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 8.0, paused: !energized)) { timeline in
-            Canvas { context, size in
-                let centerY = size.height / 2
-                var baseline = Path()
-                baseline.move(to: CGPoint(x: 0, y: centerY))
-                baseline.addLine(to: CGPoint(x: size.width, y: centerY))
-                context.stroke(baseline, with: .color(StageHUDTheme.hudEtch.opacity(0.36)), lineWidth: 0.5)
+        // A fixed signal trace. Live state reads through tint and the header
+        // indicator, never through motion — the HUD stays calm while recording.
+        Canvas { context, size in
+            let centerY = size.height / 2
+            var baseline = Path()
+            baseline.move(to: CGPoint(x: 0, y: centerY))
+            baseline.addLine(to: CGPoint(x: size.width, y: centerY))
+            context.stroke(baseline, with: .color(StageHUDTheme.hudEtch.opacity(0.30)), lineWidth: 0.5)
 
-                let barCount = 28
-                let spacing = size.width / CGFloat(barCount)
-                let time = timeline.date.timeIntervalSinceReferenceDate
-                for index in 0..<barCount {
-                    let normalized = Double(index) / Double(barCount - 1)
-                    let envelope = sin(normalized * .pi)
-                    let wave = abs(sin(time * 3.2 + Double(index) * 0.64))
-                    let activity = energized ? (0.28 + wave * 0.5) : 0.16
-                    let height = max(1.5, size.height * 0.5 * envelope * activity)
-                    let x = CGFloat(index) * spacing + spacing / 2
-                    let rect = CGRect(x: x - 1, y: centerY - height, width: 2, height: height * 2)
-                    context.fill(Path(rect), with: .color(color.opacity(index.isMultiple(of: 9) ? 1 : 0.78)))
-                }
+            let barCount = 28
+            let spacing = size.width / CGFloat(barCount)
+            for index in 0..<barCount {
+                let normalized = Double(index) / Double(barCount - 1)
+                let envelope = sin(normalized * .pi)
+                let profile = 0.34 + 0.28 * abs(sin(Double(index) * 0.7))
+                let activity = energized ? profile : 0.14
+                let height = max(1.5, size.height * 0.5 * envelope * activity)
+                let x = CGFloat(index) * spacing + spacing / 2
+                let rect = CGRect(x: x - 1, y: centerY - height, width: 2, height: height * 2)
+                context.fill(Path(rect), with: .color(color.opacity(index.isMultiple(of: 9) ? 0.92 : 0.66)))
             }
         }
         .accessibilityHidden(true)
@@ -644,103 +640,6 @@ private struct StageHUDGraphite: View {
                 column += 1
             }
         }
-        .accessibilityHidden(true)
-    }
-}
-
-private struct StageHUDVent: View {
-    let color: Color
-
-    var body: some View {
-        VStack(spacing: 4) {
-            ForEach(0..<4, id: \.self) { index in
-                // Each louver is a cut groove: a dark slit with a faint light
-                // hairline beneath, so the stack reads as machined, not printed.
-                Capsule(style: .continuous)
-                    .fill(index == 1 ? color.opacity(0.62) : StageHUDTheme.hudMetalTrough)
-                    .frame(height: 2)
-                    .overlay(alignment: .bottom) {
-                        if index != 1 {
-                            Capsule(style: .continuous)
-                                .fill(StageHUDTheme.hudBevelLight)
-                                .frame(height: 0.5)
-                                .offset(y: 1)
-                        }
-                    }
-                    .shadow(color: index == 1 ? color.opacity(0.42) : .clear, radius: 2)
-            }
-        }
-        .padding(.horizontal, 6)
-        .frame(maxHeight: .infinity)
-        .background(
-            LinearGradient(
-                colors: [StageHUDTheme.hudMetalCore, StageHUDTheme.hudMetalTop.opacity(0.7)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .overlay(
-            ActionChamferedShape(cornerCut: 4)
-                .stroke(
-                    LinearGradient(
-                        colors: [StageHUDTheme.hudBevelShadow, .clear, StageHUDTheme.hudBevelLight],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 1
-                )
-                .padding(0.5)
-        )
-        .clipShape(ActionChamferedShape(cornerCut: 4))
-        .accessibilityHidden(true)
-    }
-}
-
-private struct StageHUDKnob: View {
-    let color: Color
-    let energized: Bool
-
-    var body: some View {
-        ZStack {
-            // Domed machined dial: a diagonal metal sheen over the body, a
-            // rim bevel catching light at the top and shading at the base.
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [StageHUDTheme.hudMetalSheen, StageHUDTheme.hudMetalTop, StageHUDTheme.hudMetalTrough],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(Circle().stroke(StageHUDTheme.hudMetalEdge, lineWidth: 1))
-                .overlay(
-                    Circle()
-                        .stroke(
-                            LinearGradient(
-                                colors: [StageHUDTheme.hudBevelHairline, .clear, StageHUDTheme.hudBevelShadow],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1
-                        )
-                        .padding(0.5)
-                )
-
-            ForEach(0..<4, id: \.self) { index in
-                Capsule(style: .continuous)
-                    .fill(StageHUDTheme.hudEtch.opacity(0.58))
-                    .frame(width: 1, height: 9)
-                    .offset(y: -8)
-                    .rotationEffect(.degrees(Double(index) * 90))
-            }
-
-            Circle()
-                .fill(color.opacity(energized ? 0.86 : 0.28))
-                .frame(width: 5, height: 5)
-                .shadow(color: color.opacity(energized ? 0.7 : 0), radius: 3)
-        }
-        .frame(width: 28, height: 28)
-        .frame(maxHeight: .infinity)
         .accessibilityHidden(true)
     }
 }
@@ -828,7 +727,7 @@ private struct StageHUDMonolithButtonStyle: ButtonStyle {
             .offset(y: configuration.isPressed ? 1 : 0)
             .scaleEffect(configuration.isPressed ? 0.992 : 1)
             .opacity(enabled ? 1 : 0.32)
-            .shadow(color: shadowColor, radius: isHovered ? 8 : 3, y: 2)
+            .shadow(color: shadowColor, radius: 4, y: 2)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
             .animation(.easeOut(duration: 0.12), value: isHovered)
             .animation(.easeOut(duration: 0.12), value: isFocused)
@@ -861,13 +760,15 @@ private struct StageHUDMonolithButtonStyle: ButtonStyle {
     }
 
     private var shadowColor: Color {
+        // A steady, calm grounding shadow. Hover changes fill and border only,
+        // so moving the pointer over the bay does not pulse light around it.
         switch tone {
         case .primary:
-            return StageHUDTheme.hudCyan.opacity(isHovered ? 0.22 : 0.06)
+            return StageHUDTheme.hudCyan.opacity(0.10)
         case .destructive:
-            return StageHUDTheme.hudCoral.opacity(isHovered ? 0.28 : 0.08)
+            return StageHUDTheme.hudCoral.opacity(0.12)
         case .secondary:
-            return StageHUDTheme.hudShadow.opacity(0.35)
+            return StageHUDTheme.hudShadow.opacity(0.30)
         }
     }
 }
