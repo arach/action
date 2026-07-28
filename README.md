@@ -145,6 +145,26 @@ The MCP server exposes health, session creation, snapshot/OCR/vision/AX observat
 bun run mcp
 ```
 
+### Action Browser Plugin
+
+Action Browser is the smallest agent-ready surface: it opens an isolated, real
+Chrome profile in the background and exposes navigation, page inspection,
+lightweight DOM actions, and PNG screenshots through MCP.
+
+Install it from the Action plugin marketplace:
+
+```bash
+codex plugin marketplace add arach/action
+codex plugin add action-browser@action
+```
+
+Start a new Codex task after installation, then ask:
+
+> Open https://example.com in Action Browser, take a screenshot, and show it to me.
+
+This starter requires macOS, Google Chrome, and Bun. Its isolated Chrome profile
+does not inherit personal logins, cookies, tabs, or extensions.
+
 ### Action Companion
 
 The in-development companion stores queued jobs, observations, artifacts, and vision timeline entries in a local SQLite database. A small Rust supervisor manages its process lifecycle.
