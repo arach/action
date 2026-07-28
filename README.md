@@ -175,10 +175,11 @@ session. Run `/mcp` to confirm that `action-browser` is connected, then use the
 same example prompt above.
 
 Kimi Code reads the root `kimi.plugin.json` and installs the same bundle
-directly from the GitHub repository:
+directly from the GitHub repository. Pin the default branch — a bare
+repository URL installs the latest release, which may predate the manifest:
 
 ```
-/plugins install https://github.com/arach/action
+/plugins install https://github.com/arach/action/tree/main
 /reload
 ```
 
