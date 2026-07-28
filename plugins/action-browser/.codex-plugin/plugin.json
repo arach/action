@@ -35,5 +35,5 @@
     ],
     "brandColor": "#EF6A47"
   },
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.codex-plugin/mcp.json"
 }

@@ -3,11 +3,8 @@
     "action-browser": {
       "command": "/bin/bash",
       "args": [
-        "-lc",
-        "exec \"${CLAUDE_PLUGIN_ROOT:-.}/scripts/run-action-browser-mcp.sh\""
-      ],
-      "cwd": ".",
-      "note": "Launches the Action Browser MCP, which opens an isolated real Chrome profile on demand and exposes browser screenshots and lightweight DOM actions."
+        "${CLAUDE_PLUGIN_ROOT}/scripts/run-action-browser-mcp.sh"
+      ]
     }
   }
 }
