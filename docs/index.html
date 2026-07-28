@@ -326,6 +326,36 @@
       background: var(--coral);
     }
     .workbench-status { margin-left: auto; color: var(--cyan); }
+    .platform-switch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      padding: 10px;
+      border-bottom: 1px solid rgb(243 235 221 / 0.13);
+      background: rgb(243 235 221 / 0.04);
+    }
+    .platform-tab {
+      min-height: 38px;
+      border: 1px solid rgb(243 235 221 / 0.14);
+      background: transparent;
+      color: rgb(243 235 221 / 0.58);
+      cursor: pointer;
+      font: 600 0.6rem var(--mono);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .platform-tab[aria-selected="true"] {
+      border-color: var(--cyan);
+      background: rgb(73 199 211 / 0.1);
+      color: var(--paper-light);
+    }
+    .platform-tab:hover { color: var(--paper-light); }
+    .platform-tab:focus-visible,
+    .copy-button:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 2px;
+    }
+    .platform-panel[hidden] { display: none; }
     .install-step {
       display: grid;
       grid-template-columns: 38px 1fr;
@@ -696,35 +726,73 @@
         <div class="install-workbench" aria-label="Agent plugin installation">
           <div class="workbench-bar">
             <span class="workbench-light" aria-hidden="true"></span>
-            Action marketplace
+            Agent marketplace
             <span class="workbench-status">MCP ready</span>
           </div>
 
-          <div class="install-step">
-            <span class="step-number" aria-hidden="true">01</span>
-            <div class="step-body">
-              <h3>Ask your agent to install it</h3>
-              <p>Paste this into Codex. The agent can run the marketplace commands for you.</p>
-              <div class="prompt-block">
-                <pre id="install-prompt">Install the Action plugin marketplace from arach/action, then install action-browser@action. When installation finishes, tell me to start a new task so the browser tools can load.</pre>
-                <button class="copy-button" type="button" data-copy-target="install-prompt" aria-label="Copy agent install prompt">Copy</button>
-              </div>
-              <details class="cli-fallback">
-                <summary>Or install from the terminal</summary>
-                <pre>codex plugin marketplace add arach/action
+          <div class="platform-switch" role="tablist" aria-label="Choose your agent">
+            <button class="platform-tab" type="button" role="tab" id="codex-tab" aria-controls="codex-install" aria-selected="true" data-platform="codex-install">Codex</button>
+            <button class="platform-tab" type="button" role="tab" id="claude-tab" aria-controls="claude-install" aria-selected="false" data-platform="claude-install">Claude Code</button>
+          </div>
+
+          <div class="platform-panel" id="codex-install" role="tabpanel" aria-labelledby="codex-tab">
+            <div class="install-step">
+              <span class="step-number" aria-hidden="true">01</span>
+              <div class="step-body">
+                <h3>Ask Codex to install it</h3>
+                <p>Paste this into Codex. The agent can run the marketplace commands for you.</p>
+                <div class="prompt-block">
+                  <pre id="codex-install-prompt">Install the Action plugin marketplace from arach/action, then install action-browser@action. When installation finishes, tell me to start a new task so the browser tools can load.</pre>
+                  <button class="copy-button" type="button" data-copy-target="codex-install-prompt" aria-label="Copy Codex install prompt">Copy</button>
+                </div>
+                <details class="cli-fallback">
+                  <summary>Or install from the terminal</summary>
+                  <pre>codex plugin marketplace add arach/action
 codex plugin add action-browser@action</pre>
-              </details>
+                </details>
+              </div>
+            </div>
+
+            <div class="install-step">
+              <span class="step-number" aria-hidden="true">02</span>
+              <div class="step-body">
+                <h3>Start a new task and try it</h3>
+                <p>A new Codex task loads the plugin’s MCP tools. This prompt exercises the shortest useful loop.</p>
+                <div class="prompt-block">
+                  <pre id="codex-first-task-prompt">Open https://example.com in Action Browser, take a screenshot, and show it to me.</pre>
+                  <button class="copy-button" type="button" data-copy-target="codex-first-task-prompt" aria-label="Copy first Codex task prompt">Copy</button>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div class="install-step">
-            <span class="step-number" aria-hidden="true">02</span>
-            <div class="step-body">
-              <h3>Start a new task and try it</h3>
-              <p>A new task loads the plugin’s MCP tools. This prompt exercises the shortest useful loop.</p>
-              <div class="prompt-block">
-                <pre id="first-task-prompt">Open https://example.com in Action Browser, take a screenshot, and show it to me.</pre>
-                <button class="copy-button" type="button" data-copy-target="first-task-prompt" aria-label="Copy first task prompt">Copy</button>
+          <div class="platform-panel" id="claude-install" role="tabpanel" aria-labelledby="claude-tab" hidden>
+            <div class="install-step">
+              <span class="step-number" aria-hidden="true">01</span>
+              <div class="step-body">
+                <h3>Ask Claude Code to install it</h3>
+                <p>Claude Code uses its own marketplace manifest and can reload the MCP without starting a new session.</p>
+                <div class="prompt-block">
+                  <pre id="claude-install-prompt">Install Action Browser for Claude Code. Run `claude plugin marketplace add arach/action`, then `claude plugin install action-browser@action --scope user`. When both commands finish, tell me to run `/reload-plugins`.</pre>
+                  <button class="copy-button" type="button" data-copy-target="claude-install-prompt" aria-label="Copy Claude Code install prompt">Copy</button>
+                </div>
+                <details class="cli-fallback">
+                  <summary>Or install from the terminal</summary>
+                  <pre>claude plugin marketplace add arach/action
+claude plugin install action-browser@action --scope user</pre>
+                </details>
+              </div>
+            </div>
+
+            <div class="install-step">
+              <span class="step-number" aria-hidden="true">02</span>
+              <div class="step-body">
+                <h3>Reload and try it</h3>
+                <p>Run <code>/reload-plugins</code> inside Claude Code. If needed, run <code>/mcp</code> and confirm that <code>action-browser</code> is connected.</p>
+                <div class="prompt-block">
+                  <pre id="claude-first-task-prompt">Open https://example.com in Action Browser, take a screenshot, and show it to me.</pre>
+                  <button class="copy-button" type="button" data-copy-target="claude-first-task-prompt" aria-label="Copy first Claude Code task prompt">Copy</button>
+                </div>
               </div>
             </div>
           </div>
@@ -922,6 +990,20 @@ codex plugin add action-browser@action</pre>
 
     document.querySelectorAll("[data-copy-target]").forEach((button) => {
       button.addEventListener("click", () => copyPrompt(button));
+    });
+
+    const platformTabs = document.querySelectorAll("[data-platform]");
+    const platformPanels = document.querySelectorAll(".platform-panel");
+
+    platformTabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        platformTabs.forEach((candidate) => {
+          candidate.setAttribute("aria-selected", String(candidate === tab));
+        });
+        platformPanels.forEach((panel) => {
+          panel.hidden = panel.id !== tab.dataset.platform;
+        });
+      });
     });
   </script>
 </body>

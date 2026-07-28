@@ -151,7 +151,7 @@ Action Browser is the smallest agent-ready surface: it opens an isolated, real
 Chrome profile in the background and exposes navigation, page inspection,
 lightweight DOM actions, and PNG screenshots through MCP.
 
-Install it from the Action plugin marketplace:
+Install it from the Action plugin marketplace in Codex:
 
 ```bash
 codex plugin marketplace add arach/action
@@ -161,6 +161,18 @@ codex plugin add action-browser@action
 Start a new Codex task after installation, then ask:
 
 > Open https://example.com in Action Browser, take a screenshot, and show it to me.
+
+Claude Code uses its own plugin marketplace format. Install the same MCP bundle
+with the Claude Code CLI:
+
+```bash
+claude plugin marketplace add arach/action
+claude plugin install action-browser@action --scope user
+```
+
+Run `/reload-plugins` inside Claude Code to activate the MCP in the current
+session. Run `/mcp` to confirm that `action-browser` is connected, then use the
+same example prompt above.
 
 This starter requires macOS, Google Chrome, and Bun. Its isolated Chrome profile
 does not inherit personal logins, cookies, tabs, or extensions.
