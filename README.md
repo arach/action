@@ -174,6 +174,17 @@ Run `/reload-plugins` inside Claude Code to activate the MCP in the current
 session. Run `/mcp` to confirm that `action-browser` is connected, then use the
 same example prompt above.
 
+Kimi Code reads the root `kimi.plugin.json` and installs the same bundle
+directly from the GitHub repository:
+
+```
+/plugins install https://github.com/arach/action
+/reload
+```
+
+Run `/plugins info action-browser` to confirm the plugin loaded, then use the
+same example prompt above.
+
 This starter requires macOS, Google Chrome, and Bun. Its isolated Chrome profile
 does not inherit personal logins, cookies, tabs, or extensions.
 
