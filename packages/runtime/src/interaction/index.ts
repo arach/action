@@ -283,5 +283,47 @@ export async function executeInteractionAction(
     }
 
     await context.runHost(args[0], ...args.slice(1));
+    return;
   }
+
+  if (action.kind === "open-app") {
+    const bundleId = targetBundleId(action, target, context);
+    if (!bundleId) {
+      throw new Error("open-app action requires a bundleId (input.bundleId or a resolved surface)");
+    }
+
+    const args = ["launch-app", "--bundle-id", bundleId];
+    const timeoutMs = numberFromInput(action.input?.timeoutMs);
+    if (timeoutMs !== undefined && timeoutMs > 0) {
+      args.push("--timeout-ms", String(Math.round(timeoutMs)));
+    }
+    await context.runHost(args[0], ...args.slice(1));
+    return;
+  }
+
+  if (action.kind === "focus-window") {
+    const bundleId = targetBundleId(action, target, context);
+    if (!bundleId) {
+      throw new Error("focus-window action requires a bundleId (input.bundleId or a resolved surface)");
+    }
+
+    const args = ["focus-window", "--bundle-id", bundleId];
+    const title = stringValue(action.input?.title) ?? stringValue(action.input?.windowTitle);
+    if (title) {
+      args.push("--title", title);
+    }
+    const timeoutMs = numberFromInput(action.input?.timeoutMs);
+    if (timeoutMs !== undefined && timeoutMs > 0) {
+      args.push("--timeout-ms", String(Math.round(timeoutMs)));
+    }
+    await context.runHost(args[0], ...args.slice(1));
+    return;
+  }
+
+  // Every kind this runtime can perform returns above. Falling through means the action was
+  // never dispatched, and reporting success for it would be a lie: callers derive
+  // status: "succeeded" from this function returning without throwing.
+  throw new Error(
+    `Unsupported action kind "${action.kind}" — the macOS runtime has no handler for it, so nothing was performed.`,
+  );
 }
