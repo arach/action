@@ -23,6 +23,28 @@ import { executeInteractionAction } from "./interaction/index.js";
 
 const execFileAsync = promisify(execFile);
 
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Pulls the `detail` field out of the native host's JSON reply, which it writes to stdout even
+ * when it exits non-zero.
+ */
+function hostFailureDetail(error: unknown): string | undefined {
+  const stdout = (error as { stdout?: unknown } | undefined)?.stdout;
+  if (typeof stdout !== "string" || stdout.trim().length === 0) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(stdout) as { detail?: unknown };
+    return typeof parsed.detail === "string" && parsed.detail.length > 0 ? parsed.detail : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function appSurfaceId(app: TargetApp): string {
   return `surface_${app.bundleId.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`;
 }
@@ -749,8 +771,16 @@ export class MacOSCommandEngine implements CaptureEngine {
     )
   }
 
-  private runHost(command: string, ...args: string[]) {
-    return execFileAsync(this.nativeHostPath, [command, ...args]);
+  private async runHost(command: string, ...args: string[]) {
+    try {
+      return await execFileAsync(this.nativeHostPath, [command, ...args]);
+    } catch (error) {
+      // The host reports why it failed in the JSON reply on stdout; execFile's own message is
+      // just the command line, so surface the host's detail or the caller cannot act on it.
+      throw new Error(`${command} failed: ${hostFailureDetail(error) ?? describeError(error)}`, {
+        cause: error,
+      });
+    }
   }
 
   private async startRecordingSession(

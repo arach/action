@@ -120,6 +120,46 @@ public enum ActionNativeAutomation {
         }
     }
 
+    /// Brings the window whose title matches `title` to the front of its application's
+    /// window order and marks it as the main window. Returns the title that matched so the
+    /// caller can report which window it actually landed on.
+    @discardableResult
+    public static func raiseWindow(bundleId: String, matching title: String) throws -> String {
+        let app = try runningApplication(bundleId: bundleId)
+        let application = AXUIElementCreateApplication(app.processIdentifier)
+
+        guard let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
+              !windows.isEmpty else {
+            throw ActionNativeAutomationError.accessibilityLookupFailed(
+                "No accessibility windows found for \(bundleId)"
+            )
+        }
+
+        let titles = windows.map { stringValue(axValue($0, attribute: kAXTitleAttribute)) ?? "" }
+        let needle = title.lowercased()
+        let match = titles.firstIndex(of: title)
+            ?? titles.firstIndex { $0.lowercased() == needle }
+            ?? titles.firstIndex { $0.lowercased().contains(needle) }
+
+        guard let match else {
+            let available = titles.filter { !$0.isEmpty }.map { "\"\($0)\"" }.joined(separator: ", ")
+            throw ActionNativeAutomationError.accessibilityLookupFailed(
+                "No window titled \"\(title)\" in \(bundleId); open windows: \(available.isEmpty ? "none" : available)"
+            )
+        }
+
+        let window = windows[match]
+        _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        let raise = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        guard raise == .success else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Failed to raise window \"\(titles[match])\" in \(bundleId): \(raise.rawValue)"
+            )
+        }
+
+        return titles[match]
+    }
+
     public static func typeText(_ text: String) throws {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")

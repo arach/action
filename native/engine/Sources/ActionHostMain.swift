@@ -51,6 +51,7 @@ enum ActionHostCommand: String {
     case recordAppWindowLocal = "record-app-window-local"
     case screenshotAppWindow = "screenshot-app-window"
     case activateApp = "activate-app"
+    case focusWindow = "focus-window"
     case typeText = "type-text"
     case typeAppText = "type-app-text"
     case pressKey = "press-key"
@@ -311,6 +312,22 @@ func activateApplication(bundleId: String) throws {
     }
 }
 
+/// Waits for the app to exist *and* finish launching. A process that exists but is still
+/// starting up has no accessibility interface yet, so activating it would fail spuriously.
+func waitForRunningApplication(bundleId: String, timeoutMilliseconds: Double) async throws {
+    let deadline = Date().addingTimeInterval(max(100, timeoutMilliseconds) / 1_000)
+    while true {
+        let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first
+        if let app, app.isFinishedLaunching {
+            return
+        }
+        if Date() >= deadline {
+            throw ActionHostError.applicationNotRunning(bundleId)
+        }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+}
+
 @MainActor
 func activateApplicationAndWait(
     bundleId: String,
@@ -319,26 +336,47 @@ func activateApplicationAndWait(
 ) async throws {
     let frontmostBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
     logger.log("activate-app: requested=\(bundleId) frontmost-before=\(frontmostBefore)")
-    try activateApplication(bundleId: bundleId)
 
     let boundedTimeout = max(100, timeoutMilliseconds)
     let deadline = Date().addingTimeInterval(boundedTimeout / 1_000)
-    var frontmostAfter = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-    while frontmostAfter != bundleId, Date() < deadline {
-        try await Task.sleep(for: .milliseconds(50))
-        frontmostAfter = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-    }
+    var attempts = 0
 
-    guard frontmostAfter == bundleId else {
-        let frontmostBundleId = frontmostAfter ?? "none"
-        logger.log(
-            "activate-app: timed-out requested=\(bundleId) frontmost=\(frontmostBundleId) timeout-ms=\(Int(boundedTimeout))"
-        )
-        throw ActionHostError.applicationActivationTimedOut(expected: bundleId, actual: frontmostAfter)
-    }
+    // A freshly launched app can accept the activation request before it is ready to come
+    // forward, so a single request is not enough: keep re-requesting until the window server
+    // agrees that the app is frontmost, or until the deadline makes it a real failure.
+    while true {
+        attempts += 1
+        let requestError: Error?
+        do {
+            try activateApplication(bundleId: bundleId)
+            requestError = nil
+        } catch {
+            requestError = error
+        }
 
-    let confirmedBundleId = frontmostAfter ?? "none"
-    logger.log("activate-app: confirmed requested=\(bundleId) frontmost=\(confirmedBundleId)")
+        let settleDeadline = min(deadline, Date().addingTimeInterval(0.5))
+        var frontmostAfter = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        while frontmostAfter != bundleId, Date() < settleDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+            frontmostAfter = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        }
+
+        if frontmostAfter == bundleId {
+            logger.log("activate-app: confirmed requested=\(bundleId) attempts=\(attempts)")
+            return
+        }
+
+        if Date() >= deadline {
+            let frontmostBundleId = frontmostAfter ?? "none"
+            let requestDetail = requestError.map { " last-error=\($0.localizedDescription)" } ?? ""
+            logger.log(
+                "activate-app: timed-out requested=\(bundleId) frontmost=\(frontmostBundleId) attempts=\(attempts) timeout-ms=\(Int(boundedTimeout))\(requestDetail)"
+            )
+            throw ActionHostError.applicationActivationTimedOut(expected: bundleId, actual: frontmostAfter)
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+    }
 }
 
 func runAppleScript(_ source: String) throws -> String {
@@ -3434,15 +3472,51 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             logger: logger
         )
         try writer.write(ActionHostResponse(status: "activated", outputPath: nil, detail: bundleId))
+    case .focusWindow:
+        let bundleId = try options.required("bundle-id")
+        let requestedTitle = options.options["title"].flatMap { $0.isEmpty ? nil : $0 }
+        var focusedTitle: String?
+        if let requestedTitle {
+            // Raise before activating so the app comes forward with the requested window on top.
+            // A title that matches nothing throws here rather than quietly focusing some other window.
+            focusedTitle = try ActionNativeAutomation.raiseWindow(bundleId: bundleId, matching: requestedTitle)
+            logger.log("focus-window: raised bundle=\(bundleId) title=\(focusedTitle ?? requestedTitle)")
+        }
+        try await activateApplicationAndWait(
+            bundleId: bundleId,
+            timeoutMilliseconds: options.double("timeout-ms", default: 3_000),
+            logger: logger
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: "focused",
+                outputPath: nil,
+                detail: focusedTitle.map { "\(bundleId): \($0)" } ?? bundleId
+            )
+        )
     case .requestApplicationActivation:
         let bundleId = try options.required("bundle-id")
         try ActionNativeAutomation.activateApplication(bundleId: bundleId)
         try writer.write(ActionHostResponse(status: "activation-requested", outputPath: nil, detail: bundleId))
     case .launchApp:
         let bundleId = try options.required("bundle-id")
-        try await MainActor.run {
-            try ActionNativeAutomation.launchApplication(bundleId: bundleId)
+        let timeoutMilliseconds = options.double("timeout-ms", default: 10_000)
+        if NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty {
+            try await MainActor.run {
+                try ActionNativeAutomation.launchApplication(bundleId: bundleId)
+            }
+            // openApplication only queues the launch, so wait for the process to exist before we
+            // insist on frontmost; otherwise activation races the launch and reports a false failure.
+            try await waitForRunningApplication(bundleId: bundleId, timeoutMilliseconds: timeoutMilliseconds)
         }
+        // An already-running app is activated below, never through openApplication: that call
+        // leaves an activation request in flight that outlives this process and blocks the
+        // accessibility activation from taking effect while we are still waiting on it.
+        try await activateApplicationAndWait(
+            bundleId: bundleId,
+            timeoutMilliseconds: timeoutMilliseconds,
+            logger: logger
+        )
         try writer.write(ActionHostResponse(status: "launched", outputPath: nil, detail: bundleId))
     case .prepareNotesNote:
         let noteName = try prepareNotesNote()
