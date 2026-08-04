@@ -188,7 +188,10 @@ final class ResponseWriter {
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try data.write(to: url)
+            // Atomic: callers poll the reply file for existence and then read it whole, so a
+            // plain write can hand back a truncated document mid-write. A rename makes the
+            // file appear only once it is complete.
+            try data.write(to: url, options: .atomic)
         } else {
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0a]))
