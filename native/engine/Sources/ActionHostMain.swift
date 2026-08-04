@@ -516,10 +516,14 @@ func postKeyPressToApp(bundleId: String, key: String, modifiers: [String] = []) 
     keyUp.postToPid(app.processIdentifier)
 }
 
+/// How long a plain click holds the mouse button down. Long enough for any app to see a
+/// press and a release as one click, short enough that nothing reads it as a press-and-hold.
+let defaultClickHoldMilliseconds = 30
+
 /// Clicks at a screen point, holding the button down for `holdMs` before releasing.
-/// The 30ms default is a plain click; larger values produce a press-and-hold, which is how
+/// The default is a plain click; larger values produce a press-and-hold, which is how
 /// watch-face editing, context menus, and other long-press affordances are triggered.
-func clickPoint(_ point: CGPoint, holdMs: Int = 30) throws {
+func clickPoint(_ point: CGPoint, holdMs: Int = defaultClickHoldMilliseconds) throws {
     CGWarpMouseCursorPosition(point)
     usleep(10000)
 
@@ -3588,9 +3592,11 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         guard x.isFinite, y.isFinite else {
             throw ActionHostError.missingOption("--x/--y")
         }
-        let holdMs = Int(options.double("hold-ms", default: 30))
+        let holdMs = Int(options.double("hold-ms", default: Double(defaultClickHoldMilliseconds)))
         try clickPoint(CGPoint(x: x, y: y), holdMs: holdMs)
-        let clickDetail = holdMs > 30 ? "\(Int(x)),\(Int(y)) hold=\(holdMs)ms" : "\(Int(x)),\(Int(y))"
+        let clickDetail = holdMs > defaultClickHoldMilliseconds
+            ? "\(Int(x)),\(Int(y)) hold=\(holdMs)ms"
+            : "\(Int(x)),\(Int(y))"
         try writer.write(ActionHostResponse(status: "clicked", outputPath: nil, detail: clickDetail))
     case .drag:
         let fromX = options.double("from-x", default: .nan)

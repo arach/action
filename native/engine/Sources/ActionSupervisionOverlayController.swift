@@ -7,6 +7,12 @@ import SwiftUI
 // keeps the shape-aware SwiftUI shadow from being clipped to a hard rectangle.
 private let actionSupervisionShadowMargin: CGFloat = 20
 
+// The card sizes live here rather than at each use site because the SwiftUI frame and the
+// panel window have to agree exactly: a window smaller than its card clips the card, and a
+// larger one leaves dead transparent space that still swallows clicks.
+private let actionSupervisionExpandedCard = CGSize(width: 296, height: 64)
+private let actionSupervisionMinimizedCard = CGSize(width: 178, height: 40)
+
 @MainActor
 final class ActionSupervisionViewModel: ObservableObject {
     @Published var title: String = "Action Supervision"
@@ -81,7 +87,11 @@ struct ActionSupervisionView: View {
         }
         .padding(.leading, 13)
         .padding(.trailing, 10)
-        .frame(width: 296, height: 64, alignment: .leading)
+        .frame(
+            width: actionSupervisionExpandedCard.width,
+            height: actionSupervisionExpandedCard.height,
+            alignment: .leading
+        )
         .background(
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .fill(StageHUDTheme.hudCanvas.opacity(0.97))
@@ -123,7 +133,11 @@ struct ActionSupervisionView: View {
             .accessibilityLabel("Stop all supervised Action sessions")
         }
         .padding(.horizontal, 10)
-        .frame(width: 178, height: 40, alignment: .leading)
+        .frame(
+            width: actionSupervisionMinimizedCard.width,
+            height: actionSupervisionMinimizedCard.height,
+            alignment: .leading
+        )
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(StageHUDTheme.hudCanvas.opacity(0.97))
@@ -201,8 +215,14 @@ final class ActionSupervisionOverlayController: NSObject {
         // Window sizes include the transparent shadow margin on every side; the
         // visible card is inset by `margin` and reads at its card size.
         static let margin = actionSupervisionShadowMargin
-        static let expandedSize = CGSize(width: 296 + margin * 2, height: 64 + margin * 2)
-        static let minimizedSize = CGSize(width: 178 + margin * 2, height: 40 + margin * 2)
+        static let expandedSize = CGSize(
+            width: actionSupervisionExpandedCard.width + margin * 2,
+            height: actionSupervisionExpandedCard.height + margin * 2
+        )
+        static let minimizedSize = CGSize(
+            width: actionSupervisionMinimizedCard.width + margin * 2,
+            height: actionSupervisionMinimizedCard.height + margin * 2
+        )
         static let edgeInset: CGFloat = 16
         static let frameDefaultsKey = "Action.SupervisionOverlay.Frame"
         static let minimizedDefaultsKey = "Action.SupervisionOverlay.Minimized"
