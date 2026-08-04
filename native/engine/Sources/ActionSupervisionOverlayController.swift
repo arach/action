@@ -5,7 +5,7 @@ import SwiftUI
 // soft drop shadow has room to render. The AppKit window shadow (which follows
 // the rectangular window bounds, not the rounded card) stays off; this margin
 // keeps the shape-aware SwiftUI shadow from being clipped to a hard rectangle.
-private let actionSupervisionShadowMargin: CGFloat = 24
+private let actionSupervisionShadowMargin: CGFloat = 20
 
 @MainActor
 final class ActionSupervisionViewModel: ObservableObject {
@@ -33,68 +33,74 @@ struct ActionSupervisionView: View {
     }
 
     private var expandedBody: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(model.title)
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color.white)
-                Text(model.detail)
-                    .font(.system(size: 11, weight: .regular, design: .default))
-                    .foregroundStyle(Color.white.opacity(0.82))
-                    .lineLimit(2)
-            }
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    supervisionSignal
 
-            Spacer(minLength: 10)
+                    Text(model.title)
+                        .font(.system(size: 10, weight: .semibold, design: .default))
+                        .foregroundStyle(StageHUDTheme.hudPaper)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
 
-            VStack(alignment: .trailing, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text(model.countLabel)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color.white.opacity(0.7))
-
-                    Button {
-                        model.onToggleMinimized?()
-                    } label: {
-                        Image(systemName: "minus")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(0.86))
-                            .frame(width: 22, height: 22)
-                            .background(Circle().fill(Color.white.opacity(0.10)))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Minimize supervision")
+                    Text(model.countLabel.uppercased())
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.hudMuted)
+                        .lineLimit(1)
                 }
 
-                Button("STOP") {
+                Text(model.detail)
+                    .font(.system(size: 10, weight: .regular, design: .default))
+                    .foregroundStyle(StageHUDTheme.hudMuted)
+                    .lineLimit(1)
+            }
+            .layoutPriority(1)
+
+            Spacer(minLength: 6)
+
+            HStack(spacing: 7) {
+                Button {
+                    model.onToggleMinimized?()
+                } label: {
+                    Image(systemName: "minus")
+                }
+                .buttonStyle(ActionSupervisionIconButtonStyle())
+                .help("Minimize supervision")
+                .accessibilityLabel("Minimize supervision")
+
+                Button {
                     model.onStop?()
+                } label: {
+                    ActionSupervisionStopLabel()
                 }
                 .buttonStyle(ActionSupervisionButtonStyle())
+                .help("Stop all supervised Action sessions")
+                .accessibilityLabel("Stop all supervised Action sessions")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(width: 296, height: 84, alignment: .leading)
+        .padding(.leading, 13)
+        .padding(.trailing, 10)
+        .frame(width: 296, height: 64, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(red: 0.18, green: 0.04, blue: 0.05).opacity(0.96))
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(StageHUDTheme.hudCanvas.opacity(0.97))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.white.opacity(0.09), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .stroke(StageHUDTheme.hudStrokeStrong, lineWidth: 1)
                 )
-                .shadow(color: Color.black.opacity(0.26), radius: 14, x: 0, y: 8)
+                .shadow(color: StageHUDTheme.hudShadow.opacity(0.72), radius: 12, x: 0, y: 7)
         )
         .padding(actionSupervisionShadowMargin)
     }
 
     private var minimizedBody: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(Color(red: 0.92, green: 0.20, blue: 0.19))
-                .frame(width: 8, height: 8)
+        HStack(spacing: 7) {
+            supervisionSignal
 
-            Text(model.countLabel)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(Color.white.opacity(0.86))
+            Text(model.countLabel.uppercased())
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(StageHUDTheme.hudPaper)
 
             Spacer(minLength: 4)
 
@@ -102,45 +108,89 @@ struct ActionSupervisionView: View {
                 model.onToggleMinimized?()
             } label: {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.86))
-                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ActionSupervisionIconButtonStyle())
             .help("Expand supervision")
+            .accessibilityLabel("Expand supervision")
 
-            Button("STOP") {
+            Button {
                 model.onStop?()
+            } label: {
+                ActionSupervisionStopLabel()
             }
             .buttonStyle(ActionSupervisionButtonStyle())
+            .help("Stop all supervised Action sessions")
+            .accessibilityLabel("Stop all supervised Action sessions")
         }
-        .padding(.horizontal, 12)
-        .frame(width: 206, height: 44, alignment: .leading)
+        .padding(.horizontal, 10)
+        .frame(width: 178, height: 40, alignment: .leading)
         .background(
-            Capsule(style: .continuous)
-                .fill(Color(red: 0.18, green: 0.04, blue: 0.05).opacity(0.96))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(StageHUDTheme.hudCanvas.opacity(0.97))
                 .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(Color.white.opacity(0.09), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(StageHUDTheme.hudStrokeStrong, lineWidth: 1)
                 )
-                .shadow(color: Color.black.opacity(0.26), radius: 13, x: 0, y: 7)
+                .shadow(color: StageHUDTheme.hudShadow.opacity(0.72), radius: 11, x: 0, y: 6)
         )
         .padding(actionSupervisionShadowMargin)
+    }
+
+    private var supervisionSignal: some View {
+        Circle()
+            .fill(StageHUDTheme.hudCoral)
+            .frame(width: 7, height: 7)
+            .overlay(
+                Circle()
+                    .stroke(StageHUDTheme.hudPaper.opacity(0.20), lineWidth: 1)
+            )
+            .accessibilityHidden(true)
+    }
+}
+
+private struct ActionSupervisionStopLabel: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 7, weight: .bold))
+            Text("STOP")
+                .lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
 struct ActionSupervisionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundStyle(StageHUDTheme.hudInk)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
             .background(
-                Capsule(style: .continuous)
-                    .fill(Color(red: 0.92, green: 0.20, blue: 0.19).opacity(configuration.isPressed ? 0.78 : 0.92))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(configuration.isPressed ? StageHUDTheme.hudCoral.opacity(0.76) : StageHUDTheme.hudCoral)
             )
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct ActionSupervisionIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(StageHUDTheme.hudPaper.opacity(configuration.isPressed ? 0.66 : 0.82))
+            .frame(width: 28, height: 28)
+            .background(
+                Circle()
+                    .fill(configuration.isPressed ? StageHUDTheme.hudPanel : StageHUDTheme.hudPanelRaised)
+            )
+            .overlay(
+                Circle()
+                    .stroke(StageHUDTheme.hudStrokeStrong, lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
@@ -151,9 +201,9 @@ final class ActionSupervisionOverlayController: NSObject {
         // Window sizes include the transparent shadow margin on every side; the
         // visible card is inset by `margin` and reads at its card size.
         static let margin = actionSupervisionShadowMargin
-        static let expandedSize = CGSize(width: 296 + margin * 2, height: 84 + margin * 2)
-        static let minimizedSize = CGSize(width: 206 + margin * 2, height: 44 + margin * 2)
-        static let edgeInset: CGFloat = 18
+        static let expandedSize = CGSize(width: 296 + margin * 2, height: 64 + margin * 2)
+        static let minimizedSize = CGSize(width: 178 + margin * 2, height: 40 + margin * 2)
+        static let edgeInset: CGFloat = 16
         static let frameDefaultsKey = "Action.SupervisionOverlay.Frame"
         static let minimizedDefaultsKey = "Action.SupervisionOverlay.Minimized"
     }
