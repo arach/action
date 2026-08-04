@@ -7,7 +7,6 @@ ROOT_DIR=$(cd "$SCRIPT_DIR/../../.." && pwd)
 PACKAGE_DIR="$ROOT_DIR/native/engine"
 APP_DIR="$ROOT_DIR/native/dist/Action.app"
 APP_EXECUTABLE="$ROOT_DIR/native/dist/Action.app/Contents/MacOS/Action"
-PLIST_TEMPLATE="$PACKAGE_DIR/App/Info.plist"
 COMMAND="${1:-status}"
 
 run_direct() {
@@ -45,11 +44,16 @@ run_via_open() {
 
 needs_build=0
 
+# Anything the bundle is built from counts: every .swift file under native/engine (Package.swift,
+# Sources, CoreSources, AgentSources, AgentCLISources, ProbeSources, and whatever gets added next)
+# plus every bundle plist template (App, AgentApp). Scanning by pattern instead of by directory
+# means a new source root never needs this check edited again.
 if [[ ! -x "$APP_EXECUTABLE" ]]; then
   needs_build=1
-elif [[ "$PACKAGE_DIR/Package.swift" -nt "$APP_EXECUTABLE" || "$PLIST_TEMPLATE" -nt "$APP_EXECUTABLE" ]]; then
-  needs_build=1
-elif find "$PACKAGE_DIR/Sources" -type f -newer "$APP_EXECUTABLE" -print -quit | grep -q .; then
+elif find "$PACKAGE_DIR" \
+  \( -name .build -o -name .git \) -prune -o \
+  \( -name '*.swift' -o -name 'Info.plist' \) -type f -newer "$APP_EXECUTABLE" -print -quit \
+  | grep -q .; then
   needs_build=1
 fi
 

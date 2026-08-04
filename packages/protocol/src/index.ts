@@ -290,6 +290,7 @@ export type ActionKind =
   | "focus-window"
   | "open-app"
   | "drag"
+  | "scroll"
   | "start-recording"
   | "stop-recording"
   | "show-cue"

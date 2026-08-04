@@ -148,9 +148,14 @@ export async function executeInteractionAction(
   }
 
   if (action.kind === "click") {
+    // A hold is a HID gesture; the accessibility press path cannot express it, so any
+    // requested holdMs forces the click through click-point.
+    const holdMs = numberFromInput(action.input?.holdMs) ?? numberFromInput(action.input?.pressDurationMs);
+    const wantsHold = holdMs !== undefined && holdMs > 0;
+
     const bundleId = targetBundleId(action, target, context);
     const label = targetLabel(action, target);
-    if (bundleId && label) {
+    if (bundleId && label && !wantsHold) {
       const args = [
         "press-accessibility-element",
         "--bundle-id", bundleId,
@@ -164,16 +169,20 @@ export async function executeInteractionAction(
       return;
     }
 
-    const point = action.target?.point;
+    const point = action.target?.point
+      ?? pointFromInput(action.input?.point)
+      ?? centerOfBounds(target?.bounds);
     if (point) {
-      await context.runHost(
-        "click-point",
-        "--x",
-        String(point.x),
-        "--y",
-        String(point.y),
-      );
+      const args = ["click-point", "--x", String(point.x), "--y", String(point.y)];
+      if (wantsHold) {
+        args.push("--hold-ms", String(Math.round(holdMs)));
+      }
+      await context.runHost(args[0], ...args.slice(1));
       return;
+    }
+
+    if (wantsHold) {
+      throw new Error("Press-and-hold requires a point (action.target.point or input.point)");
     }
 
     const buttonLabel = context.resolveCalculatorButton(
@@ -241,5 +250,80 @@ export async function executeInteractionAction(
     }
 
     await context.runHost(args[0], ...args.slice(1));
+    return;
   }
+
+  if (action.kind === "scroll") {
+    const point = action.target?.point
+      ?? pointFromInput(action.input?.point)
+      ?? pointFromInput(action.input?.at)
+      ?? centerOfBounds(target?.bounds);
+
+    if (!point) {
+      throw new Error("Scroll action requires a point (action.target.point or input.point)");
+    }
+
+    const deltaX = numberFromInput(action.input?.deltaX) ?? 0;
+    const deltaY = numberFromInput(action.input?.deltaY) ?? 0;
+    if (deltaX === 0 && deltaY === 0) {
+      throw new Error("Scroll action requires a non-zero deltaX or deltaY");
+    }
+
+    const durationMs = numberFromInput(action.input?.durationMs) ?? numberValue(action.input?.duration) ?? 0;
+
+    const args = [
+      "scroll",
+      "--x", String(point.x),
+      "--y", String(point.y),
+      "--delta-x", String(deltaX),
+      "--delta-y", String(deltaY),
+    ];
+    if (durationMs > 0) {
+      args.push("--duration-ms", String(Math.round(durationMs)));
+    }
+
+    await context.runHost(args[0], ...args.slice(1));
+    return;
+  }
+
+  if (action.kind === "open-app") {
+    const bundleId = targetBundleId(action, target, context);
+    if (!bundleId) {
+      throw new Error("open-app action requires a bundleId (input.bundleId or a resolved surface)");
+    }
+
+    const args = ["launch-app", "--bundle-id", bundleId];
+    const timeoutMs = numberFromInput(action.input?.timeoutMs);
+    if (timeoutMs !== undefined && timeoutMs > 0) {
+      args.push("--timeout-ms", String(Math.round(timeoutMs)));
+    }
+    await context.runHost(args[0], ...args.slice(1));
+    return;
+  }
+
+  if (action.kind === "focus-window") {
+    const bundleId = targetBundleId(action, target, context);
+    if (!bundleId) {
+      throw new Error("focus-window action requires a bundleId (input.bundleId or a resolved surface)");
+    }
+
+    const args = ["focus-window", "--bundle-id", bundleId];
+    const title = stringValue(action.input?.title) ?? stringValue(action.input?.windowTitle);
+    if (title) {
+      args.push("--title", title);
+    }
+    const timeoutMs = numberFromInput(action.input?.timeoutMs);
+    if (timeoutMs !== undefined && timeoutMs > 0) {
+      args.push("--timeout-ms", String(Math.round(timeoutMs)));
+    }
+    await context.runHost(args[0], ...args.slice(1));
+    return;
+  }
+
+  // Every kind this runtime can perform returns above. Falling through means the action was
+  // never dispatched, and reporting success for it would be a lie: callers derive
+  // status: "succeeded" from this function returning without throwing.
+  throw new Error(
+    `Unsupported action kind "${action.kind}" — the macOS runtime has no handler for it, so nothing was performed.`,
+  );
 }

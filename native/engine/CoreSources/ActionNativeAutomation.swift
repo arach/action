@@ -120,6 +120,46 @@ public enum ActionNativeAutomation {
         }
     }
 
+    /// Brings the window whose title matches `title` to the front of its application's
+    /// window order and marks it as the main window. Returns the title that matched so the
+    /// caller can report which window it actually landed on.
+    @discardableResult
+    public static func raiseWindow(bundleId: String, matching title: String) throws -> String {
+        let app = try runningApplication(bundleId: bundleId)
+        let application = AXUIElementCreateApplication(app.processIdentifier)
+
+        guard let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
+              !windows.isEmpty else {
+            throw ActionNativeAutomationError.accessibilityLookupFailed(
+                "No accessibility windows found for \(bundleId)"
+            )
+        }
+
+        let titles = windows.map { stringValue(axValue($0, attribute: kAXTitleAttribute)) ?? "" }
+        let needle = title.lowercased()
+        let match = titles.firstIndex(of: title)
+            ?? titles.firstIndex { $0.lowercased() == needle }
+            ?? titles.firstIndex { $0.lowercased().contains(needle) }
+
+        guard let match else {
+            let available = titles.filter { !$0.isEmpty }.map { "\"\($0)\"" }.joined(separator: ", ")
+            throw ActionNativeAutomationError.accessibilityLookupFailed(
+                "No window titled \"\(title)\" in \(bundleId); open windows: \(available.isEmpty ? "none" : available)"
+            )
+        }
+
+        let window = windows[match]
+        _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        let raise = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        guard raise == .success else {
+            throw ActionNativeAutomationError.accessibilityActionFailed(
+                "Failed to raise window \"\(titles[match])\" in \(bundleId): \(raise.rawValue)"
+            )
+        }
+
+        return titles[match]
+    }
+
     public static func typeText(_ text: String) throws {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")
@@ -410,6 +450,72 @@ public enum ActionNativeAutomation {
         }
 
         up.post(tap: .cghidEventTap)
+    }
+
+    /// Scrolls at a screen point using pixel-unit scroll wheel events.
+    ///
+    /// Deltas are the raw CGEvent scroll wheel values, not a screen direction: `deltaY` becomes
+    /// `wheel1` and `deltaX` becomes `wheel2`, with positive meaning up and left respectively.
+    /// Which way the content then moves is the target app's decision — an app that honours the
+    /// system's natural-scrolling preference inverts it — so callers that care should scroll once
+    /// and observe rather than reason from the sign. Pixel units keep the motion smooth, which
+    /// maps to trackpad gestures and — over a Simulator window — to Digital Crown rotation.
+    /// A `durationMs` above zero spreads the deltas across interpolated steps the way `drag` does;
+    /// zero posts the whole delta as a single event.
+    public static func scroll(
+        at point: CGPoint,
+        deltaX: Double,
+        deltaY: Double,
+        durationMs: Int = 0
+    ) throws {
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")
+        }
+
+        CGWarpMouseCursorPosition(point)
+        usleep(10000)
+
+        let steps = durationMs > 0 ? max(1, Int(Double(durationMs) / 16.0)) : 1
+        let stepDelayUs = durationMs > 0
+            ? UInt32((Double(durationMs) * 1000.0 / Double(steps)).rounded())
+            : 0
+
+        // Emit rounded prefix sums so the posted integer deltas always add up to the request.
+        var postedX = 0
+        var postedY = 0
+
+        for index in 1...steps {
+            let ratio = Double(index) / Double(steps)
+            let targetX = Int((deltaX * ratio).rounded())
+            let targetY = Int((deltaY * ratio).rounded())
+            let stepX = targetX - postedX
+            let stepY = targetY - postedY
+            postedX = targetX
+            postedY = targetY
+
+            if stepX == 0 && stepY == 0 && steps > 1 {
+                usleep(stepDelayUs)
+                continue
+            }
+
+            guard let event = CGEvent(
+                scrollWheelEvent2Source: source,
+                units: .pixel,
+                wheelCount: 2,
+                wheel1: Int32(stepY),
+                wheel2: Int32(stepX),
+                wheel3: 0
+            ) else {
+                throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create scroll events")
+            }
+
+            event.location = point
+            event.post(tap: .cghidEventTap)
+
+            if stepDelayUs > 0 {
+                usleep(stepDelayUs)
+            }
+        }
     }
 
     public static func dragFile(path: String, from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
