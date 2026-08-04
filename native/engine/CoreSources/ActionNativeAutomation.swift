@@ -454,9 +454,12 @@ public enum ActionNativeAutomation {
 
     /// Scrolls at a screen point using pixel-unit scroll wheel events.
     ///
-    /// Deltas follow CGEvent semantics: positive `deltaY` scrolls content down (finger up),
-    /// positive `deltaX` scrolls content right. Pixel units keep the motion smooth, which maps
-    /// to trackpad gestures and — over a Simulator window — to Digital Crown rotation.
+    /// Deltas are the raw CGEvent scroll wheel values, not a screen direction: `deltaY` becomes
+    /// `wheel1` and `deltaX` becomes `wheel2`, with positive meaning up and left respectively.
+    /// Which way the content then moves is the target app's decision — an app that honours the
+    /// system's natural-scrolling preference inverts it — so callers that care should scroll once
+    /// and observe rather than reason from the sign. Pixel units keep the motion smooth, which
+    /// maps to trackpad gestures and — over a Simulator window — to Digital Crown rotation.
     /// A `durationMs` above zero spreads the deltas across interpolated steps the way `drag` does;
     /// zero posts the whole delta as a single event.
     public static func scroll(

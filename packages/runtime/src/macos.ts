@@ -602,12 +602,21 @@ export class MacOSCommandEngine implements CaptureEngine {
     }
   }
 
+  /**
+   * Echoes the query back in ResolvedTarget shape. This engine performs no semantic lookup of its
+   * own — an accessibility search happens later, inside the action, against the app that is
+   * actually frontmost — so the only thing genuinely resolved here is a point the caller supplied.
+   *
+   * Confidence says exactly that and nothing more: a supplied point is the point, so 1; a label
+   * that has been matched against nothing is not resolution, so 0. Reporting a plausible-looking
+   * number for the second case would tell callers a lookup succeeded when none was attempted.
+   */
   async resolveTarget(query: TargetQuery): Promise<ResolvedTarget> {
     const surfaceId = query.surfaceId ?? this.focusedSurfaceId;
     return {
       id: query.semanticId ?? query.text ?? "target",
       mode: query.point ? "coordinate" : "semantic",
-      confidence: 0.92,
+      confidence: query.point ? 1 : 0,
       label: query.semanticId ?? query.text ?? "Resolved Target",
       surfaceId,
     };

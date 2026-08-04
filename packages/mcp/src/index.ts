@@ -534,9 +534,12 @@ const tools: Tool[] = [
     "Execute a deterministic runtime action. Prefer resolved targets over raw coordinates.",
     objectSchema({
       action: objectProperty(
-        "RuntimeAction object. kind is one of click, type, press-key, focus-window, open-app, drag, scroll, start-recording, stop-recording, show-cue, wait-for-condition. "
-        + "click accepts input.holdMs for press-and-hold (requires a point). "
-        + "scroll takes a point plus input.deltaX/deltaY in pixels and an optional input.durationMs; positive deltaY scrolls content down.",
+        "RuntimeAction object. kind is one of click, type, press-key, drag, scroll, focus-window, open-app. "
+        + "Any other kind declared in ActionKind has no handler in the macOS runtime and is rejected rather than silently skipped. "
+        + "focus-window and open-app need input.bundleId — an app name is not accepted; focus-window also takes an optional input.title to pick a window. "
+        + "click accepts input.holdMs for press-and-hold (requires a point); some controls, including SwiftUI Toggle, do not actuate on a plain click and need a hold. "
+        + "scroll takes a point plus input.deltaX/deltaY and an optional input.durationMs. Deltas are raw scroll wheel values, "
+        + "not a screen direction: which way the content moves is up to the target app, so scroll once and observe rather than reasoning from the sign.",
       ),
       target: objectProperty("Optional ResolvedTarget. If omitted, action.target is resolved first when present."),
     }, ["action"]),
@@ -829,6 +832,9 @@ const handlers: Record<string, ToolHandler> = {
         ? await engine.resolveTarget(action.target)
         : undefined;
 
+    // performAction throws for anything it could not carry out — including an action kind the
+    // runtime has no handler for — and the tool dispatcher turns a throw into an isError reply.
+    // Reaching this line is therefore the success signal; the literal below is not an assumption.
     await engine.performAction(action, target);
 
     return {
