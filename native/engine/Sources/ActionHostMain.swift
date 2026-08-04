@@ -57,6 +57,7 @@ enum ActionHostCommand: String {
     case pressAppKey = "press-app-key"
     case clickPoint = "click-point"
     case drag
+    case scroll
     case pressAccessibilityElement = "press-accessibility-element"
     case performAccessibilityAction = "perform-accessibility-action"
     case setAccessibilityValue = "set-accessibility-value"
@@ -474,7 +475,10 @@ func postKeyPressToApp(bundleId: String, key: String, modifiers: [String] = []) 
     keyUp.postToPid(app.processIdentifier)
 }
 
-func clickPoint(_ point: CGPoint) throws {
+/// Clicks at a screen point, holding the button down for `holdMs` before releasing.
+/// The 30ms default is a plain click; larger values produce a press-and-hold, which is how
+/// watch-face editing, context menus, and other long-press affordances are triggered.
+func clickPoint(_ point: CGPoint, holdMs: Int = 30) throws {
     CGWarpMouseCursorPosition(point)
     usleep(10000)
 
@@ -484,7 +488,7 @@ func clickPoint(_ point: CGPoint) throws {
     }
 
     down.post(tap: .cghidEventTap)
-    usleep(30000)
+    usleep(useconds_t(max(1, holdMs) * 1000))
     up.post(tap: .cghidEventTap)
 }
 
@@ -3507,8 +3511,10 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         guard x.isFinite, y.isFinite else {
             throw ActionHostError.missingOption("--x/--y")
         }
-        try clickPoint(CGPoint(x: x, y: y))
-        try writer.write(ActionHostResponse(status: "clicked", outputPath: nil, detail: "\(Int(x)),\(Int(y))"))
+        let holdMs = Int(options.double("hold-ms", default: 30))
+        try clickPoint(CGPoint(x: x, y: y), holdMs: holdMs)
+        let clickDetail = holdMs > 30 ? "\(Int(x)),\(Int(y)) hold=\(holdMs)ms" : "\(Int(x)),\(Int(y))"
+        try writer.write(ActionHostResponse(status: "clicked", outputPath: nil, detail: clickDetail))
     case .drag:
         let fromX = options.double("from-x", default: .nan)
         let fromY = options.double("from-y", default: .nan)
@@ -3530,6 +3536,33 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             try ActionNativeAutomation.drag(from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), durationMs: durationMs)
             try writer.write(ActionHostResponse(status: "dragged", outputPath: nil, detail: "\(Int(fromX)),\(Int(fromY))->\(Int(toX)),\(Int(toY))"))
         }
+    case .scroll:
+        let x = options.double("x", default: .nan)
+        let y = options.double("y", default: .nan)
+        let deltaX = options.double("delta-x", default: 0)
+        let deltaY = options.double("delta-y", default: 0)
+        let durationMs = Int(options.double("duration-ms", default: 0))
+
+        guard x.isFinite, y.isFinite else {
+            throw ActionHostError.missingOption("--x/--y")
+        }
+        guard deltaX != 0 || deltaY != 0 else {
+            throw ActionHostError.missingOption("--delta-x/--delta-y")
+        }
+
+        try ActionNativeAutomation.scroll(
+            at: CGPoint(x: x, y: y),
+            deltaX: deltaX,
+            deltaY: deltaY,
+            durationMs: durationMs
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: "scrolled",
+                outputPath: nil,
+                detail: "\(Int(x)),\(Int(y)) delta=\(Int(deltaX)),\(Int(deltaY))"
+            )
+        )
     case .pressAccessibilityElement:
         let bundleId = try options.required("bundle-id")
         let label = try options.required("label")

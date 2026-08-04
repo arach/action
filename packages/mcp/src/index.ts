@@ -533,7 +533,11 @@ const tools: Tool[] = [
     "Execute Action",
     "Execute a deterministic runtime action. Prefer resolved targets over raw coordinates.",
     objectSchema({
-      action: objectProperty("RuntimeAction object."),
+      action: objectProperty(
+        "RuntimeAction object. kind is one of click, type, press-key, focus-window, open-app, drag, scroll, start-recording, stop-recording, show-cue, wait-for-condition. "
+        + "click accepts input.holdMs for press-and-hold (requires a point). "
+        + "scroll takes a point plus input.deltaX/deltaY in pixels and an optional input.durationMs; positive deltaY scrolls content down.",
+      ),
       target: objectProperty("Optional ResolvedTarget. If omitted, action.target is resolved first when present."),
     }, ["action"]),
     { readOnlyHint: false, idempotentHint: false },

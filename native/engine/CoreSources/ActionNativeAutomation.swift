@@ -412,6 +412,69 @@ public enum ActionNativeAutomation {
         up.post(tap: .cghidEventTap)
     }
 
+    /// Scrolls at a screen point using pixel-unit scroll wheel events.
+    ///
+    /// Deltas follow CGEvent semantics: positive `deltaY` scrolls content down (finger up),
+    /// positive `deltaX` scrolls content right. Pixel units keep the motion smooth, which maps
+    /// to trackpad gestures and — over a Simulator window — to Digital Crown rotation.
+    /// A `durationMs` above zero spreads the deltas across interpolated steps the way `drag` does;
+    /// zero posts the whole delta as a single event.
+    public static func scroll(
+        at point: CGPoint,
+        deltaX: Double,
+        deltaY: Double,
+        durationMs: Int = 0
+    ) throws {
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")
+        }
+
+        CGWarpMouseCursorPosition(point)
+        usleep(10000)
+
+        let steps = durationMs > 0 ? max(1, Int(Double(durationMs) / 16.0)) : 1
+        let stepDelayUs = durationMs > 0
+            ? UInt32((Double(durationMs) * 1000.0 / Double(steps)).rounded())
+            : 0
+
+        // Emit rounded prefix sums so the posted integer deltas always add up to the request.
+        var postedX = 0
+        var postedY = 0
+
+        for index in 1...steps {
+            let ratio = Double(index) / Double(steps)
+            let targetX = Int((deltaX * ratio).rounded())
+            let targetY = Int((deltaY * ratio).rounded())
+            let stepX = targetX - postedX
+            let stepY = targetY - postedY
+            postedX = targetX
+            postedY = targetY
+
+            if stepX == 0 && stepY == 0 && steps > 1 {
+                usleep(stepDelayUs)
+                continue
+            }
+
+            guard let event = CGEvent(
+                scrollWheelEvent2Source: source,
+                units: .pixel,
+                wheelCount: 2,
+                wheel1: Int32(stepY),
+                wheel2: Int32(stepX),
+                wheel3: 0
+            ) else {
+                throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create scroll events")
+            }
+
+            event.location = point
+            event.post(tap: .cghidEventTap)
+
+            if stepDelayUs > 0 {
+                usleep(stepDelayUs)
+            }
+        }
+    }
+
     public static func dragFile(path: String, from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
         guard FileManager.default.fileExists(atPath: path) else {
             throw ActionNativeAutomationError.dragPathNotFound(path)
