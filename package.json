@@ -83,6 +83,7 @@
     "chrome:companion:install": "cd packages/chrome-companion && bun run install:self",
     "chrome:companion:launch:profile": "cd packages/chrome-companion && bun run launch:profile",
     "chrome:companion:profile": "cd packages/chrome-companion && bun run profile",
+    "chrome:profiles": "cd packages/chrome-companion && bun scripts/import-cookies.mjs --list-action-profiles",
     "native:midjourney:bg": "native/engine/scripts/test-midjourney-background-create.sh",
     "native:typing:sounds:install": "native/engine/scripts/install-typing-sounds.sh",
     "native:test:screenshot": "native/engine/scripts/test-screenshot.sh",

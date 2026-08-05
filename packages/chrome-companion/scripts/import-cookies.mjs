@@ -1,32 +1,44 @@
 #!/usr/bin/env bun
 
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+
 import {
-  profileName,
-  sleep,
-  stopMiraChrome,
-  launchMira,
-} from "./mira-chrome.mjs";
+  actionProfileUserDataDir,
+  ensureActionProfile,
+  listActionProfiles,
+  sanitizeProfileName,
+} from "./action-profiles.mjs";
 import {
-  copyCookiesToProfile,
+  importCookiesToActionProfile,
   listCookieEntries,
   listPersonalProfiles,
   parseCookieSelectors,
   readCookies,
   resolveSourceProfileDir,
   targetProfileDir,
+  targetUserDataDir,
 } from "./chrome-cookies.mjs";
 
+const rootPath = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
 
 function parseArgs(values) {
   const parsed = {
     command: "help",
+    into: process.env.ACTION_CHROME_COMPANION_PROFILE
+      || process.env.ACTION_BROWSER_PROFILE
+      || "agent-browser",
     sourceProfile: undefined,
     domains: [],
     only: [],
     confirm: false,
     json: false,
-    listProfiles: false,
+    listSourceProfiles: false,
+    listActionProfiles: false,
+    launch: false,
+    launchUrl: undefined,
   };
 
   for (let index = 0; index < values.length; index += 1) {
@@ -35,9 +47,12 @@ function parseArgs(values) {
       parsed.command = "list";
     } else if (value === "import") {
       parsed.command = "import";
+    } else if (value === "help" || value === "--help" || value === "-h") {
+      parsed.command = "help";
+    } else if (value === "--into" || value === "--profile" || value === "--to") {
+      parsed.into = values[++index];
     } else if (value === "--source") {
-      parsed.sourceProfile = values[index + 1];
-      index += 1;
+      parsed.sourceProfile = values[++index];
     } else if (value === "--domains") {
       parsed.domains = splitList(values[++index]);
     } else if (value === "--only" || value === "--names" || value === "--cookies") {
@@ -46,8 +61,15 @@ function parseArgs(values) {
       parsed.confirm = true;
     } else if (value === "--json") {
       parsed.json = true;
-    } else if (value === "--list-profiles") {
-      parsed.listProfiles = true;
+    } else if (value === "--list-profiles" || value === "--list-source-profiles") {
+      parsed.listSourceProfiles = true;
+    } else if (value === "--list-action-profiles") {
+      parsed.listActionProfiles = true;
+    } else if (value === "--launch") {
+      parsed.launch = true;
+    } else if (value === "--launch-url") {
+      parsed.launch = true;
+      parsed.launchUrl = values[++index];
     }
   }
 
@@ -56,22 +78,46 @@ function parseArgs(values) {
 }
 
 function splitList(raw) {
-  return raw.split(",").map((entry) => entry.trim()).filter(Boolean);
+  return String(raw || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function printHelp() {
-  console.log(`Copy cookies from personal Chrome into the ${profileName} profile.
+  console.log(`Copy selected cookies from personal Chrome into a named Action profile.
 
-  bun scripts/import-cookies.mjs list --domains midjourney.com
-  bun scripts/import-cookies.mjs import --domains midjourney.com --confirm
-  bun scripts/import-cookies.mjs import --domains midjourney.com --only cf_clearance,__Host-Midjourney.AuthUserTokenV3_r --confirm
+  # list personal Chrome profiles
+  bun scripts/import-cookies.mjs --list-profiles
+
+  # list Action-owned profiles
+  bun scripts/import-cookies.mjs --list-action-profiles
+
+  # dry-run against coding profile
+  bun scripts/import-cookies.mjs list --into coding --domains github.com
+
+  # import (requires --confirm)
+  bun scripts/import-cookies.mjs import --into coding --domains github.com --confirm
+
+  # narrow to specific cookie names
+  bun scripts/import-cookies.mjs import --into mira --domains midjourney.com \\
+    --only cf_clearance --confirm
 
 Options:
-  --source <profile>   Default, Profile 1, ... (default: most recently used)
-  --domains <sites>    Limit by site
-  --only <cookies>     Cookie names, or host:name for one exact cookie
-  --confirm            Actually copy them
-  --json               Machine-readable output
+  --into <name>          Action profile identity (default: agent-browser or env)
+  --source <profile>     Personal Chrome profile dir name (Default, Profile 1, ...)
+  --domains <sites>      Limit by host suffix (comma-separated)
+  --only <cookies>       Cookie names, or host:name for one exact cookie
+  --confirm              Actually write cookies (otherwise dry-run)
+  --launch               After import, launch the Action profile in Chrome
+  --launch-url <url>     Launch URL (implies --launch)
+  --json                 Machine-readable output
+  --list-profiles        List personal Chrome profiles
+  --list-action-profiles List Action ChromeProfiles/*
+
+Policy:
+  Prefer named Action profiles + selective domain seeds.
+  Do not attach automation to your daily Chrome user-data-dir.
 `);
 }
 
@@ -87,11 +133,44 @@ function printCookieList(cookies) {
   }
 }
 
+function stopActionChrome(userDataDir) {
+  const result = spawnSync("pgrep", ["-f", `--user-data-dir=${userDataDir}`], {
+    encoding: "utf8",
+  });
+  const pids = (result.stdout || "").trim().split("\n").filter(Boolean);
+  for (const pid of pids) {
+    spawnSync("kill", [pid]);
+  }
+  return pids;
+}
+
+function launchActionProfile(name, url) {
+  const launch = spawnSync("bun", [
+    "scripts/profile.mjs",
+    "launch",
+    name,
+    ...(url ? ["--url", url] : []),
+  ], {
+    cwd: rootPath,
+    stdio: "inherit",
+  });
+  if (launch.status !== 0) {
+    throw new Error(`Failed to launch Action profile ${name}`);
+  }
+}
+
 async function main() {
   const parsed = parseArgs(args);
 
-  if (parsed.listProfiles) {
-    console.log(JSON.stringify(listPersonalProfiles(), null, 2));
+  if (parsed.listSourceProfiles) {
+    const profiles = listPersonalProfiles();
+    console.log(parsed.json ? JSON.stringify(profiles, null, 2) : profiles.map((p) => `${p.dir}  ${p.name}`).join("\n"));
+    return;
+  }
+
+  if (parsed.listActionProfiles) {
+    const profiles = listActionProfiles();
+    console.log(parsed.json ? JSON.stringify(profiles, null, 2) : profiles.map((p) => `${p.name}\t${p.userDataDir}`).join("\n") || "(none)");
     return;
   }
 
@@ -100,8 +179,11 @@ async function main() {
     return;
   }
 
+  const into = sanitizeProfileName(parsed.into);
+  ensureActionProfile(into);
   const sourceProfilePath = resolveSourceProfileDir(parsed.sourceProfile);
-  const destProfilePath = targetProfileDir(profileName);
+  const destUserDataDir = targetUserDataDir(into);
+  const destProfilePath = targetProfileDir(into);
 
   if (parsed.command === "list") {
     ensureSelection(parsed);
@@ -110,11 +192,18 @@ async function main() {
       selectors: parsed.selectors,
     });
     if (parsed.json) {
-      console.log(JSON.stringify({ sourceProfilePath, cookies }, null, 2));
+      console.log(JSON.stringify({
+        into,
+        sourceProfilePath,
+        destUserDataDir,
+        destProfilePath,
+        cookies,
+      }, null, 2));
       return;
     }
     printCookieList(cookies);
-    console.log(`\n${cookies.length} cookies`);
+    console.log(`\n${cookies.length} cookies from ${sourceProfilePath}`);
+    console.log(`Would import into Action profile "${into}" (${destProfilePath})`);
     return;
   }
 
@@ -138,29 +227,45 @@ async function main() {
   if (!parsed.confirm) {
     if (parsed.json) {
       console.log(JSON.stringify({
+        into,
         sourceProfilePath,
+        destUserDataDir,
         count: matches.length,
         cookies: matches.map((cookie) => `${cookie.hostKey}:${cookie.name}`),
+        confirmRequired: true,
       }, null, 2));
     } else {
       printCookieList(matches);
-      console.log(`\n${matches.length} cookies ready. Re-run with --confirm to copy into ${profileName}.`);
+      console.log(`\n${matches.length} cookies ready. Re-run with --confirm to copy into "${into}".`);
     }
     return;
   }
 
-  const stoppedPid = stopMiraChrome();
-  if (stoppedPid) {
-    await sleep(1500);
+  const stopped = stopActionChrome(destUserDataDir);
+  if (stopped.length) {
+    await Bun.sleep(1500);
   }
 
-  const copied = copyCookiesToProfile(sourceProfilePath, destProfilePath, {
+  const result = importCookiesToActionProfile({
+    into,
+    sourceProfile: parsed.sourceProfile,
     domains: parsed.domains,
     selectors: parsed.selectors,
   });
 
-  await launchMira("https://www.midjourney.com/imagine");
-  console.log(`Copied ${copied.length} cookies into ${profileName}.`);
+  if (parsed.launch) {
+    launchActionProfile(into, parsed.launchUrl);
+  }
+
+  if (parsed.json) {
+    console.log(JSON.stringify({ ok: true, ...result, launched: parsed.launch }, null, 2));
+  } else {
+    console.log(`Copied ${result.count} cookies into Action profile "${into}".`);
+    console.log(`user-data-dir: ${result.destUserDataDir}`);
+    if (parsed.launch) {
+      console.log(`Launched profile "${into}".`);
+    }
+  }
 }
 
 main().catch((error) => {

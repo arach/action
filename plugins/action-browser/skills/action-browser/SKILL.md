@@ -5,40 +5,54 @@ description: Use Action Browser when the user wants an agent to open a URL in a 
 
 # Action Browser
 
-Action Browser is the short path from a URL to visible proof in a real Chrome
-runtime.
+Action Browser is the short path from a URL to visible proof in a **named
+Action-owned Chrome profile** (not the user's daily Chrome).
 
 ## Default workflow
 
-1. Call `browser_open` with the requested URL. Leave `background` set to `true`
+1. If the user names an identity (`coding`, `mira`, …), call `browser_use_profile`
+   or pass `profile` to `browser_open`.
+2. Call `browser_open` with the requested URL. Leave `background` set to `true`
    unless the user asks to see the Chrome window.
-2. Call `browser_screenshot` and show the returned image to the user.
-3. Call `browser_snapshot` before interacting with unfamiliar pages.
-4. Use selectors returned by the snapshot for `browser_click` and
+3. Call `browser_screenshot` and show the returned image to the user.
+4. Call `browser_snapshot` before interacting with unfamiliar pages.
+5. Use selectors returned by the snapshot for `browser_click` and
    `browser_fill`.
-5. Take another screenshot after an action when visual confirmation matters.
+6. Take another screenshot after an action when visual confirmation matters.
+
+## Identities and cookies
+
+- Profiles live under `~/Library/Application Support/Action/ChromeProfiles/<name>`.
+- Default blank profile is `agent-browser` unless `ACTION_BROWSER_PROFILE` is set.
+- `browser_profiles` lists Action identities; `browser_profile_info` shows the active one.
+- To reuse logins, seed with `browser_import_cookies` using **domain allowlists**:
+  1. dry-run (`confirm` omitted/false)
+  2. write (`confirm: true`) after the user approves
+- Never claim a page is authenticated without observing it after seed/login.
+- Do not attach to the user's personal Chrome user-data-dir.
+
+## Companion extension
+
+- `browser_companion_status` reports extension dist + localhost bridge health.
+- Richer DOM tooling lives in `packages/chrome-companion` (observe/resolve/act).
+- Load `packages/chrome-companion/dist` unpacked once per Action profile when
+  the user wants the companion path.
 
 ## Important behavior
 
-- The MCP starts a dedicated Chrome profile on demand. It does not use headless
-  Chrome and it does not take over the user's personal Chrome profile.
-- The isolated profile does not inherit personal logins, cookies, history, or
-  extensions. Never claim a page is authenticated without observing it.
-- `browser_screenshot` saves a PNG artifact and returns the image directly in
-  the tool response.
+- Real Chrome with CDP — not headless.
+- `browser_screenshot` saves a PNG artifact and returns the image in the tool response.
 - Prefer a stable CSS selector from `browser_snapshot` over text matching.
 - Use `browser_close` when a temporary tab is no longer useful.
 - Chrome belongs to the agent session that started it. It quits when that
   session ends, after fifteen idle minutes, or on `browser_close` with
-  `scope: "browser"` — whichever comes first. A later `browser_open` starts a
-  fresh Chrome, so never assume an earlier tab survived.
+  `scope: "browser"` — whichever comes first.
 - Call `browser_close` with `scope: "browser"` when a browsing task is finished
-  and nothing further is expected. Chrome stays up if another live agent
-  session still claims it.
+  and nothing further is expected.
 
 ## Safety
 
 Opening, inspecting, and capturing pages are ordinary read actions. Treat clicks
 and form fills according to their actual consequence. Do not submit purchases,
 publish content, delete data, or confirm other consequential actions without
-the user's authority.
+the user's authority. Cookie import requires an explicit `confirm: true`.

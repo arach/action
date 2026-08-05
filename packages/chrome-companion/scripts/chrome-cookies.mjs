@@ -1,10 +1,15 @@
 import crypto from "node:crypto";
-import { copyFileSync, mkdtempSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { Database } from "bun:sqlite";
+import {
+  actionProfileDefaultDir,
+  actionProfileUserDataDir,
+  sanitizeProfileName,
+} from "./action-profiles.mjs";
 
 const chromeEpochOffset = 11644473600;
 
@@ -332,21 +337,72 @@ const cookieColumns = [
   "has_cross_site_ancestor",
 ];
 
+/**
+ * Directory containing the Chrome Cookies SQLite file for an Action profile.
+ * Prefer actionProfileDefaultDir / actionProfileUserDataDir for new code.
+ */
 export function targetProfileDir(profileName = "mira") {
+  if (process.env.ACTION_CHROME_COMPANION_PROFILE_DIR) {
+    const override = process.env.ACTION_CHROME_COMPANION_PROFILE_DIR;
+    if (existsSync(join(override, "Cookies"))) return override;
+    return join(override, "Default");
+  }
+  return actionProfileDefaultDir(profileName);
+}
+
+export function targetUserDataDir(profileName = "mira") {
   if (process.env.ACTION_CHROME_COMPANION_PROFILE_DIR) {
     return process.env.ACTION_CHROME_COMPANION_PROFILE_DIR;
   }
-  return join(
-    process.env.HOME || "",
-    "Library/Application Support/Action/ChromeProfiles",
-    process.env.ACTION_CHROME_COMPANION_PROFILE || profileName,
-    "Default",
-  );
+  return actionProfileUserDataDir(profileName);
+}
+
+/** Ensure dest profile Default/ exists and has a cookies table matching source schema. */
+export function ensureCookiesDatabase(destProfileDir, sourceCookiesPath) {
+  mkdirSync(destProfileDir, { recursive: true });
+  const destPath = join(destProfileDir, "Cookies");
+  if (existsSync(destPath)) {
+    return destPath;
+  }
+  if (!sourceCookiesPath || !existsSync(sourceCookiesPath)) {
+    throw new Error(
+      `Destination cookies database missing at ${destPath}. ` +
+      "Launch the Action profile once (or run profile setup) so Chrome creates Default/, then retry.",
+    );
+  }
+  const sourceDb = new Database(sourceCookiesPath, { readonly: true });
+  try {
+    const createSql = sourceDb
+      .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'cookies'")
+      .get()?.sql;
+    if (!createSql) {
+      throw new Error("Source cookies database has no cookies table.");
+    }
+    const destDb = new Database(destPath);
+    try {
+      destDb.exec(createSql);
+      const indexes = sourceDb
+        .query("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'cookies' AND sql IS NOT NULL")
+        .all();
+      for (const index of indexes) {
+        try {
+          destDb.exec(index.sql);
+        } catch {
+          // Index names may collide; table is enough for INSERT OR REPLACE.
+        }
+      }
+    } finally {
+      destDb.close();
+    }
+  } finally {
+    sourceDb.close();
+  }
+  return destPath;
 }
 
 export function copyCookiesToProfile(sourceProfileDir, destProfileDir, { domains = [], selectors = [] } = {}) {
   const { copyPath } = copyCookiesDatabase(sourceProfileDir);
-  const destPath = join(destProfileDir, "Cookies");
+  const destPath = ensureCookiesDatabase(destProfileDir, copyPath);
   const sourceDb = new Database(copyPath, { readonly: true });
   const destDb = new Database(destPath);
   const columnList = cookieColumns.join(", ");
@@ -376,4 +432,28 @@ export function copyCookiesToProfile(sourceProfileDir, destProfileDir, { domains
   }
 
   return selected.map((row) => `${row.host_key}:${row.name}`);
+}
+
+export function importCookiesToActionProfile({
+  into,
+  sourceProfile,
+  domains = [],
+  selectors = [],
+} = {}) {
+  const name = sanitizeProfileName(into || process.env.ACTION_CHROME_COMPANION_PROFILE || "agent-browser");
+  const sourceProfilePath = resolveSourceProfileDir(sourceProfile);
+  const destProfilePath = targetProfileDir(name);
+  const destUserDataDir = targetUserDataDir(name);
+  const copied = copyCookiesToProfile(sourceProfilePath, destProfilePath, {
+    domains,
+    selectors,
+  });
+  return {
+    into: name,
+    sourceProfilePath,
+    destUserDataDir,
+    destProfilePath,
+    cookies: copied,
+    count: copied.length,
+  };
 }
