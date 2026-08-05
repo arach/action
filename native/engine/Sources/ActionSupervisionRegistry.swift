@@ -8,6 +8,7 @@ struct ActionSupervisionRegistration: Codable {
     let controlFile: String?
     let stopFile: String?
     let ownsVisibleControls: Bool?
+    let avoidedDisplayID: UInt32?
     let updatedAt: String
 }
 
@@ -41,7 +42,8 @@ enum ActionSupervisionRegistry {
         detail: String?,
         controlFile: String?,
         stopFile: String?,
-        ownsVisibleControls: Bool = false
+        ownsVisibleControls: Bool = false,
+        avoidedDisplayID: UInt32? = nil
     ) throws {
         let registration = ActionSupervisionRegistration(
             id: id,
@@ -50,6 +52,7 @@ enum ActionSupervisionRegistry {
             controlFile: controlFile,
             stopFile: stopFile,
             ownsVisibleControls: ownsVisibleControls,
+            avoidedDisplayID: avoidedDisplayID,
             updatedAt: ISO8601DateFormatter().string(from: Date())
         )
         try FileManager.default.createDirectory(at: registrationsDirectoryURL, withIntermediateDirectories: true)
@@ -118,8 +121,7 @@ enum ActionSupervisionRegistry {
     }
 
     static func overlayIsRunning() -> Bool {
-        guard let raw = try? String(contentsOf: overlayPIDURL, encoding: .utf8),
-              let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        guard let pid = overlayPID() else {
             return false
         }
 
@@ -128,6 +130,14 @@ enum ActionSupervisionRegistry {
         }
 
         return errno != ESRCH
+    }
+
+    static func overlayPID() -> pid_t? {
+        guard let raw = try? String(contentsOf: overlayPIDURL, encoding: .utf8),
+              let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        return pid
     }
 
     static func stopOverlay() {

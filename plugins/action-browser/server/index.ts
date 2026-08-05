@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { mkdir } from "node:fs/promises";
+import { mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -30,15 +31,43 @@ type ToolResult = {
   isError?: boolean;
 };
 
+type BrowserClaim = {
+  session: string;
+  pid: number;
+  ownerStartedAt: number;
+  profile: string;
+  profileDir: string;
+  debugPort: number;
+  claimedAt: string;
+};
+
+type ReleaseOutcome = {
+  reason: string;
+  closed: boolean;
+  liveOwners: number;
+};
+
 const debugPort = Number(process.env.ACTION_BROWSER_DEBUG_PORT ?? "9334");
 const profileName = process.env.ACTION_BROWSER_PROFILE ?? "agent-browser";
 const profileDir = process.env.ACTION_BROWSER_PROFILE_DIR
   ?? join(homedir(), "Library/Application Support/Action/ChromeProfiles", profileName);
 const artifactRoot = process.env.ACTION_BROWSER_ARTIFACT_DIR
   ?? join(homedir(), "Library/Application Support/Action/BrowserArtifacts");
+const sessionRoot = process.env.ACTION_BROWSER_SESSION_DIR
+  ?? join(homedir(), "Library/Application Support/Action/BrowserSessions");
+const sessionName = (process.env.ACTION_BROWSER_SESSION
+  ?? `action-${process.pid}-${Math.random().toString(36).slice(2, 8)}`)
+  .replace(/[^A-Za-z0-9._-]/g, "-");
+const idleTimeoutMs = Math.max(0, Number(process.env.ACTION_BROWSER_IDLE_TIMEOUT_MS ?? "900000") || 0);
+const shutdownBudgetMs = Math.max(500, Number(process.env.ACTION_BROWSER_SHUTDOWN_TIMEOUT_MS ?? "4000") || 4_000);
 const chromeAppName = process.env.ACTION_BROWSER_CHROME_APP ?? "Google Chrome";
 const chromeBaseURL = `http://127.0.0.1:${debugPort}`;
+const textDecoder = new TextDecoder();
 let currentTargetId: string | undefined;
+let claimHeld = false;
+let ownsBrowser = false;
+let shuttingDown = false;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
 
 const tools = [
   {
@@ -128,12 +157,17 @@ const tools = [
   },
   {
     name: "browser_close",
-    title: "Close Browser Tab",
-    description: "Close a tab in the isolated Action Chrome profile.",
+    title: "Close Browser Tab or Session",
+    description: "Close a tab in the isolated Action Chrome profile, or release this session's browser entirely.",
     inputSchema: {
       type: "object",
       properties: {
         tabId: { type: "string", description: "Optional tab id. Defaults to the current Action Browser tab." },
+        scope: {
+          type: "string",
+          enum: ["tab", "browser"],
+          description: "Close a single tab (default) or quit Chrome once no other live session still claims it.",
+        },
       },
       additionalProperties: false,
     },
@@ -228,8 +262,264 @@ async function chromeIsReady(): Promise<boolean> {
   }
 }
 
+function probe(command: string[]): string {
+  try {
+    const result = Bun.spawnSync(command, { stdout: "pipe", stderr: "ignore" });
+    return result.success ? textDecoder.decode(result.stdout).trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function note(event: string, detail: JsonObject = {}): void {
+  try {
+    process.stderr.write(`${JSON.stringify({ scope: "action-browser", session: sessionName, event, ...detail })}\n`);
+  } catch {
+    // A closed transport must never break shutdown.
+  }
+}
+
+function processIsRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as { code?: string }).code === "EPERM";
+  }
+}
+
+function processStartedAt(pid: number): number | undefined {
+  const started = Date.parse(probe(["/bin/ps", "-p", String(pid), "-o", "lstart="]));
+  return Number.isFinite(started) ? started : undefined;
+}
+
+function signalProcess(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // Already gone.
+  }
+}
+
+const ownerStartedAt = processStartedAt(process.pid) ?? Date.now();
+
+function pidFromSessionName(name: string): number {
+  const match = /^action-(\d+)(?:-|$)/.exec(name);
+  return match ? Number(match[1]) : 0;
+}
+
+function claimPath(session: string): string {
+  return join(sessionRoot, `${session}.json`);
+}
+
+function readClaims(): BrowserClaim[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(sessionRoot);
+  } catch {
+    return [];
+  }
+  const claims: BrowserClaim[] = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue;
+    const session = entry.slice(0, -".json".length);
+    try {
+      const claim = JSON.parse(readFileSync(join(sessionRoot, entry), "utf8")) as Partial<BrowserClaim>;
+      const pid = Number.isInteger(claim.pid) ? Number(claim.pid) : pidFromSessionName(session);
+      if (pid <= 0) throw new Error("Claim has no resolvable owner pid.");
+      claims.push({
+        session,
+        pid,
+        ownerStartedAt: Number(claim.ownerStartedAt),
+        profile: String(claim.profile ?? profileName),
+        profileDir: String(claim.profileDir ?? profileDir),
+        debugPort: Number(claim.debugPort ?? debugPort),
+        claimedAt: String(claim.claimedAt ?? ""),
+      });
+    } catch {
+      try {
+        unlinkSync(join(sessionRoot, entry));
+      } catch {
+        // Another session may have swept it already.
+      }
+    }
+  }
+  return claims;
+}
+
+function ownerIsAlive(claim: BrowserClaim): boolean {
+  if (!processIsRunning(claim.pid)) return false;
+  if (!Number.isFinite(claim.ownerStartedAt)) return true;
+  const startedAt = processStartedAt(claim.pid);
+  return startedAt === undefined || startedAt <= claim.ownerStartedAt + 2_000;
+}
+
+function claimTargetsThisBrowser(claim: BrowserClaim): boolean {
+  return claim.profileDir === profileDir && claim.debugPort === debugPort;
+}
+
+function claimBrowser(): void {
+  if (claimHeld || shuttingDown) return;
+  const claim: BrowserClaim = {
+    session: sessionName,
+    pid: process.pid,
+    ownerStartedAt,
+    profile: profileName,
+    profileDir,
+    debugPort,
+    claimedAt: new Date().toISOString(),
+  };
+  try {
+    mkdirSync(sessionRoot, { recursive: true });
+    const staging = join(sessionRoot, `.${sessionName}.tmp`);
+    writeFileSync(staging, `${JSON.stringify(claim, null, 2)}\n`);
+    renameSync(staging, claimPath(sessionName));
+    claimHeld = true;
+    ownsBrowser = true;
+    note("claim", { pid: process.pid, profileDir, debugPort });
+  } catch {
+    // Losing the registry must not block browser work.
+  }
+}
+
+function releaseClaim(): void {
+  claimHeld = false;
+  try {
+    unlinkSync(claimPath(sessionName));
+  } catch {
+    // Nothing to release.
+  }
+}
+
+function sweepClaims(): { liveOwners: number; staleOwners: number } {
+  let liveOwners = 0;
+  let staleOwners = 0;
+  for (const claim of readClaims()) {
+    if (claim.session === sessionName) continue;
+    if (ownerIsAlive(claim)) {
+      if (claimTargetsThisBrowser(claim)) liveOwners += 1;
+      continue;
+    }
+    if (claimTargetsThisBrowser(claim)) staleOwners += 1;
+    try {
+      unlinkSync(claimPath(claim.session));
+    } catch {
+      // Another session may have swept it already.
+    }
+  }
+  return { liveOwners, staleOwners };
+}
+
+function chromeProcessId(): number | undefined {
+  let link: string;
+  try {
+    link = readlinkSync(join(profileDir, "SingletonLock"));
+  } catch {
+    return undefined;
+  }
+  const pid = Number(link.slice(link.lastIndexOf("-") + 1));
+  if (!Number.isInteger(pid) || pid <= 1) return undefined;
+  return probe(["/bin/ps", "-p", String(pid), "-o", "command="]).includes(`--user-data-dir=${profileDir}`)
+    ? pid
+    : undefined;
+}
+
+async function closeChrome(): Promise<boolean> {
+  const chromePid = chromeProcessId();
+  try {
+    const version = await fetchJson<{ webSocketDebuggerUrl?: string }>("/json/version");
+    if (version.webSocketDebuggerUrl) {
+      const session = await CDPSession.connect(version.webSocketDebuggerUrl);
+      await Promise.race([session.call("Browser.close").catch(() => {}), Bun.sleep(1_500)]);
+      session.close();
+    }
+  } catch {
+    // Chrome is unreachable; fall through to the signal ladder.
+  }
+  if (chromePid === undefined) return !(await chromeIsReady());
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    if (!processIsRunning(chromePid)) return true;
+    if (attempt === 2) signalProcess(chromePid, "SIGTERM");
+    if (attempt === 16) signalProcess(chromePid, "SIGKILL");
+    await Bun.sleep(125);
+  }
+  return !processIsRunning(chromePid);
+}
+
+async function releaseBrowser(reason: string): Promise<ReleaseOutcome> {
+  releaseClaim();
+  const { liveOwners } = sweepClaims();
+  if (liveOwners > 0) {
+    ownsBrowser = false;
+    return { reason, closed: false, liveOwners };
+  }
+  const closed = await closeChrome();
+  if (closed) ownsBrowser = false;
+  return { reason, closed, liveOwners };
+}
+
+async function releaseOwnedBrowser(reason: string): Promise<ReleaseOutcome | undefined> {
+  return ownsBrowser ? await releaseBrowser(reason) : undefined;
+}
+
+function releaseBrowserSync(): void {
+  if (!ownsBrowser) return;
+  releaseClaim();
+  if (sweepClaims().liveOwners > 0) return;
+  const chromePid = chromeProcessId();
+  if (chromePid !== undefined) signalProcess(chromePid, "SIGTERM");
+}
+
+async function sweepOrphans(): Promise<void> {
+  const { liveOwners, staleOwners } = sweepClaims();
+  if (staleOwners === 0 || liveOwners > 0) return;
+  if (chromeProcessId() === undefined && !(await chromeIsReady())) return;
+  const closed = await closeChrome();
+  note("sweep", { staleOwners, closed });
+}
+
+function scheduleIdleRelease(): void {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = undefined;
+  if (idleTimeoutMs <= 0 || shuttingDown) return;
+  const timer = setTimeout(() => {
+    void releaseOwnedBrowser("idle").then((outcome) => {
+      if (outcome) note("idle", outcome);
+    });
+  }, idleTimeoutMs);
+  timer.unref();
+  idleTimer = timer;
+}
+
+async function shutdown(reason: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (idleTimer) clearTimeout(idleTimer);
+  const owned = ownsBrowser;
+  const outcome = await Promise.race([
+    releaseOwnedBrowser(reason),
+    Bun.sleep(shutdownBudgetMs).then(() => undefined),
+  ]);
+  note("shutdown", { reason, owned, closed: outcome?.closed ?? false, timedOut: owned && outcome === undefined });
+  process.exit(0);
+}
+
+function installLifecycleHooks(): void {
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    process.on(signal, () => {
+      void shutdown(signal);
+    });
+  }
+  process.on("exit", () => {
+    releaseBrowserSync();
+  });
+}
+
 async function ensureChrome(background = true): Promise<void> {
-  if (await chromeIsReady()) return;
+  if (await chromeIsReady()) {
+    claimBrowser();
+    return;
+  }
 
   await mkdir(profileDir, { recursive: true });
   const openArgs = [
@@ -263,7 +553,10 @@ async function ensureChrome(background = true): Promise<void> {
   }
 
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    if (await chromeIsReady()) return;
+    if (await chromeIsReady()) {
+      claimBrowser();
+      return;
+    }
     await Bun.sleep(250);
   }
 
@@ -377,7 +670,7 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
         return textResult({
           ok: true,
           tab: { id: target.id, title: page.title ?? target.title, url: page.url ?? url },
-          chrome: { profile: profileName, background, debugPort },
+          chrome: { profile: profileName, background, debugPort, session: sessionName },
         });
       } finally {
         session.close();
@@ -542,6 +835,17 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
       });
 
     case "browser_close": {
+      if (args.scope === "browser") {
+        const outcome = await releaseBrowser("browser_close");
+        currentTargetId = undefined;
+        return textResult({
+          ok: true,
+          scope: "browser",
+          session: sessionName,
+          closed: outcome.closed,
+          liveOwners: outcome.liveOwners,
+        });
+      }
       const target = await targetFor(args.tabId);
       const response = await fetch(`${chromeBaseURL}/json/close/${encodeURIComponent(target.id)}`);
       if (!response.ok) {
@@ -580,6 +884,7 @@ async function handleRequest(request: JsonRpcRequest): Promise<JsonObject | unde
       case "tools/list":
         return { jsonrpc: "2.0", id, result: { tools } };
       case "tools/call": {
+        scheduleIdleRelease();
         const params = request.params ?? {};
         const name = asString(params.name, "tool name");
         const args = params.arguments && typeof params.arguments === "object"
@@ -612,6 +917,9 @@ async function handleRequest(request: JsonRpcRequest): Promise<JsonObject | unde
 }
 
 async function main(): Promise<void> {
+  installLifecycleHooks();
+  await sweepOrphans();
+
   let buffer = "";
   const decoder = new TextDecoder();
 
@@ -627,6 +935,8 @@ async function main(): Promise<void> {
       if (response) process.stdout.write(`${JSON.stringify(response)}\n`);
     }
   }
+
+  await shutdown("stdin-eof");
 }
 
 main().catch((error) => {

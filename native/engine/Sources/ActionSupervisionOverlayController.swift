@@ -239,6 +239,7 @@ final class ActionSupervisionOverlayController: NSObject {
     private var lastEscapeTimestamp: Date?
     private var hasPositionedWindow = false
     private var isWindowPresented = false
+    private var positioningFingerprint = ""
 
     init(replyFile: String?, debugLogPath: String?) {
         self.writer = ResponseWriter(replyFile: replyFile)
@@ -256,6 +257,10 @@ final class ActionSupervisionOverlayController: NSObject {
         model.onToggleMinimized = { [weak self] in
             self?.toggleMinimized()
         }
+        createWindow()
+        startPolling()
+        startKeyboardMonitoring()
+        refresh()
         try writer.write(
             ActionHostResponse(
                 status: "supervision-overlay-running",
@@ -263,10 +268,6 @@ final class ActionSupervisionOverlayController: NSObject {
                 detail: String(ProcessInfo.processInfo.processIdentifier)
             )
         )
-        createWindow()
-        startPolling()
-        startKeyboardMonitoring()
-        refresh()
         app.run()
     }
 
@@ -309,7 +310,7 @@ final class ActionSupervisionOverlayController: NSObject {
                 self?.persistWindowFrame()
             }
         }
-        positionWindow()
+        positionWindow(registrations: ActionSupervisionRegistry.activeRegistrations())
     }
 
     private func startPolling() {
@@ -364,8 +365,17 @@ final class ActionSupervisionOverlayController: NSObject {
         if model.countLabel != countLabel {
             model.countLabel = countLabel
         }
+        let nextPositioningFingerprint = registrations
+            .compactMap(\.avoidedDisplayID)
+            .sorted()
+            .map(String.init)
+            .joined(separator: ",")
+        if positioningFingerprint != nextPositioningFingerprint {
+            positioningFingerprint = nextPositioningFingerprint
+            hasPositionedWindow = false
+        }
         if !hasPositionedWindow {
-            positionWindow()
+            positionWindow(registrations: registrations)
         }
 
         let ownsVisibleControls = registrations.contains { $0.ownsVisibleControls == true }
@@ -380,12 +390,22 @@ final class ActionSupervisionOverlayController: NSObject {
         }
     }
 
-    private func positionWindow() {
+    private func positionWindow(registrations: [ActionSupervisionRegistration]) {
         guard let window else {
             return
         }
 
-        let screen = NSScreen.main ?? NSScreen.screens.first
+        let avoidedDisplayIDs = Set(registrations.compactMap(\.avoidedDisplayID))
+        let availableScreens = NSScreen.screens.filter { screen in
+            guard let displayID = displayID(for: screen) else {
+                return true
+            }
+            return !avoidedDisplayIDs.contains(displayID)
+        }
+        let screen = availableScreens.first(where: { $0 == NSScreen.main })
+            ?? availableScreens.first
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
         let visibleFrame = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         let size = currentWindowSize
 
@@ -404,6 +424,11 @@ final class ActionSupervisionOverlayController: NSObject {
         window.setFrame(CGRect(origin: CGPoint(x: x, y: y), size: size), display: true)
         hasPositionedWindow = true
         persistWindowFrame()
+    }
+
+    private func displayID(for screen: NSScreen) -> UInt32? {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        return (screen.deviceDescription[key] as? NSNumber)?.uint32Value
     }
 
     private var currentWindowSize: CGSize {

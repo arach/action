@@ -153,10 +153,49 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
                 title: "Stop Recording",
                 detail: "Recording supervision",
                 controlFile: nil,
-                stopFile: stopSignalPath
+                stopFile: stopSignalPath,
+                avoidedDisplayID: fullDisplayID(for: configuration.target)
             )
         } catch {
             logger.error("Failed to register supervision stop: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func fullDisplayID(for target: Target) -> UInt32? {
+        guard case .region(let captureRect) = target else {
+            return nil
+        }
+
+        var displayCount: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success, displayCount > 0 else {
+            return nil
+        }
+
+        var displayIDs = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
+        guard CGGetActiveDisplayList(displayCount, &displayIDs, &displayCount) == .success else {
+            return nil
+        }
+
+        let captureArea = max(captureRect.width, 0) * max(captureRect.height, 0)
+        guard captureArea > 0 else {
+            return nil
+        }
+
+        return displayIDs.first { displayID in
+            let displayFrame = CGDisplayBounds(displayID)
+            let intersection = captureRect.intersection(displayFrame)
+            guard !intersection.isNull, !intersection.isEmpty else {
+                return false
+            }
+
+            let intersectionArea = intersection.width * intersection.height
+            let displayArea = displayFrame.width * displayFrame.height
+            guard displayArea > 0 else {
+                return false
+            }
+
+            return intersectionArea / displayArea >= 0.98
+                && intersectionArea / captureArea >= 0.98
         }
     }
 }
