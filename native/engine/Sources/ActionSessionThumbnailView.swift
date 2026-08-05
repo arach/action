@@ -3,6 +3,12 @@ import SwiftUI
 
 struct ActionSessionThumbnailView: View {
     let session: ActionSessionSummary
+    /// Fixed width. Pass `nil` to fill the parent width.
+    var width: CGFloat? = 150
+    var height: CGFloat = 94
+    var showCaption: Bool = true
+    var cornerRadius: CGFloat = 10
+    var showBorder: Bool = true
 
     @State private var image: NSImage?
 
@@ -34,24 +40,26 @@ struct ActionSessionThumbnailView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
 
-            Text(caption)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textPrimary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(StageHUDTheme.cardFill.opacity(0.92))
-                .clipShape(ActionChamferedShape(cornerCut: 4))
-                .padding(8)
+            if showCaption {
+                Text(caption)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(StageHUDTheme.textPrimary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                    .padding(8)
+            }
         }
-        .frame(width: 150, height: 94)
-        .background(
-            ActionChamferedShape(cornerCut: 6)
-                .fill(StageHUDTheme.appBackground)
-        )
-        .overlay(
-            ActionChamferedShape(cornerCut: 6)
-                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-        )
+        .frame(width: width, height: height)
+        .frame(maxWidth: width == nil ? .infinity : nil)
+        .background(StageHUDTheme.appBackground)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay {
+            if showBorder {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+            }
+        }
         .task(id: previewURL) {
             loadImage()
         }
@@ -62,11 +70,11 @@ struct ActionSessionThumbnailView: View {
             StageHUDTheme.appBackground
 
             VStack(spacing: 8) {
-                Image(systemName: "film.stack")
+                Image(systemName: "film")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(StageHUDTheme.textMuted)
                 Text(session.actualResult)
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
                     .foregroundStyle(StageHUDTheme.textSecondary)
             }
         }
@@ -77,7 +85,6 @@ struct ActionSessionThumbnailView: View {
             image = nil
             return
         }
-
         image = NSImage(contentsOf: previewURL)
     }
 }

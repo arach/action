@@ -2,90 +2,36 @@ import AppKit
 import SwiftUI
 
 struct ActionLatticeLogoMark: View {
-    var size: CGFloat = 36
+    var size: CGFloat = 28
     var accent: Color = StageHUDTheme.reviewAccent
 
     var body: some View {
-        Canvas { context, canvasSize in
-            let minSide = min(canvasSize.width, canvasSize.height)
-            let inset = minSide * 0.22
-            let nodeRadius = minSide * 0.035
-            let points = [
-                CGPoint(x: inset, y: inset),
-                CGPoint(x: canvasSize.width * 0.50, y: inset),
-                CGPoint(x: canvasSize.width - inset, y: inset),
-                CGPoint(x: inset, y: canvasSize.height * 0.50),
-                CGPoint(x: canvasSize.width * 0.50, y: canvasSize.height * 0.50),
-                CGPoint(x: canvasSize.width - inset, y: canvasSize.height * 0.50),
-                CGPoint(x: inset, y: canvasSize.height - inset),
-                CGPoint(x: canvasSize.width * 0.50, y: canvasSize.height - inset),
-                CGPoint(x: canvasSize.width - inset, y: canvasSize.height - inset),
-            ]
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                .fill(StageHUDTheme.reviewAccentMuted.opacity(0.75))
 
-            var lattice = Path()
-            let edges = [
-                (0, 1), (1, 2), (3, 4), (4, 5), (6, 7), (7, 8),
-                (0, 3), (3, 6), (1, 4), (4, 7), (2, 5), (5, 8),
-                (0, 4), (4, 8), (2, 4), (4, 6),
-            ]
-            for edge in edges {
-                lattice.move(to: points[edge.0])
-                lattice.addLine(to: points[edge.1])
-            }
-            context.stroke(lattice, with: .color(accent.opacity(0.24)), lineWidth: max(1, minSide * 0.018))
-
-            var route = Path()
-            route.move(to: points[6])
-            route.addLine(to: points[4])
-            route.addLine(to: points[2])
-            route.move(to: points[3])
-            route.addLine(to: points[4])
-            route.addLine(to: points[5])
-            context.stroke(
-                route,
-                with: .color(StageHUDTheme.textPrimary.opacity(0.92)),
-                style: StrokeStyle(lineWidth: max(2, minSide * 0.07), lineCap: .round, lineJoin: .round)
-            )
-
-            for (index, point) in points.enumerated() {
-                let isRouteNode = [2, 3, 4, 5, 6].contains(index)
-                let rect = CGRect(
-                    x: point.x - nodeRadius,
-                    y: point.y - nodeRadius,
-                    width: nodeRadius * 2,
-                    height: nodeRadius * 2
-                )
-                context.fill(
-                    Path(ellipseIn: rect),
-                    with: .color(isRouteNode ? accent : StageHUDTheme.textMuted.opacity(0.34))
-                )
-            }
+            Image(systemName: "play.fill")
+                .font(.system(size: size * 0.38, weight: .semibold))
+                .foregroundStyle(accent)
+                .offset(x: size * 0.02)
         }
         .frame(width: size, height: size)
-        .background(
-            ActionChamferedShape(cornerCut: max(4, size * 0.14))
-                .fill(StageHUDTheme.reviewAccentMuted.opacity(0.58))
-        )
         .overlay(
-            ActionChamferedShape(cornerCut: max(4, size * 0.14))
-                .stroke(StageHUDTheme.reviewAccent.opacity(0.34), lineWidth: 1)
+            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                .stroke(StageHUDTheme.reviewAccent.opacity(0.2), lineWidth: 1)
         )
+        .accessibilityHidden(true)
     }
 }
 
 struct ActionBrandLockup: View {
     var body: some View {
-        HStack(spacing: 10) {
-            ActionLatticeLogoMark(size: 38)
+        HStack(spacing: 9) {
+            ActionLatticeLogoMark(size: 26)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Action")
-                    .font(.system(size: 18, weight: .bold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textPrimary)
-                Text("Capture workstation")
-                    .font(.system(size: 11, weight: .regular, design: .default))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-            }
+            Text("Action")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(StageHUDTheme.textPrimary)
         }
     }
 }
@@ -131,33 +77,27 @@ struct ActionCharacterSpriteView: View {
 struct MiraCompanionBadge: View {
     var body: some View {
         HStack(spacing: 10) {
-            ZStack {
-                ActionLatticeLogoMark(size: 46)
-                    .opacity(0.58)
-                MiraSpriteView(state: "idle", width: 44, height: 48)
-                    .offset(y: 3)
-            }
-            .frame(width: 50, height: 50)
+            MiraSpriteView(state: "idle", width: 36, height: 40)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Mira")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textPrimary)
-                Text("Lattice guide")
-                    .font(.system(size: 11, weight: .regular, design: .default))
+                Text("Companion")
+                    .font(.system(size: 11))
                     .foregroundStyle(StageHUDTheme.textMuted)
             }
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 9)
+        .padding(.vertical, 8)
         .background(
-            ActionChamferedShape(cornerCut: 6)
-                .fill(StageHUDTheme.cardFill.opacity(0.76))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(StageHUDTheme.cardFill.opacity(0.7))
         )
         .overlay(
-            ActionChamferedShape(cornerCut: 6)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
         )
     }

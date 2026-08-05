@@ -85,8 +85,8 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var screenRecordingStatus: String = "Unknown"
     @Published var notes: [String] = []
     @Published var consoleURL: URL
-    @Published var consoleStatus: String = "Local console ready"
-    @Published var consoleDetail: String = "Use the local HUD console without leaving Action."
+    @Published var consoleStatus: String = "Ready"
+    @Published var consoleDetail: String = "Optional local HUD for diagnostics."
     @Published var consoleIsReachable: Bool = false
     @Published var consoleIsManagedByAction: Bool = false
     @Published var consoleAutoEnsureEnabled: Bool = true
@@ -143,13 +143,14 @@ final class ActionLauncherViewModel: ObservableObject {
         consoleAutoEnsureEnabled = true
 
         if consoleIsReachable && localConsoleProcess == nil {
-            consoleStatus = "Local console already running"
+            consoleStatus = "Ready"
             consoleDetail = localConsoleURL.absoluteString
             return
         }
 
         if let localConsoleProcess, localConsoleProcess.isRunning {
-            consoleStatus = "Local console already running on \(localConsoleURL.absoluteString)"
+            consoleStatus = "Ready"
+            consoleDetail = localConsoleURL.absoluteString
             return
         }
 
@@ -167,8 +168,8 @@ final class ActionLauncherViewModel: ObservableObject {
                 guard let self else { return }
                 self.localConsoleProcess = nil
                 self.consoleIsManagedByAction = false
-                self.consoleStatus = "Local console exited (\(proc.terminationStatus))"
-                self.consoleDetail = "Inspect logs if it exited unexpectedly."
+                self.consoleStatus = "Off"
+                self.consoleDetail = "HUD stopped."
                 self.refreshConsoleState()
             }
         }
@@ -177,13 +178,13 @@ final class ActionLauncherViewModel: ObservableObject {
             try process.run()
             localConsoleProcess = process
             consoleIsManagedByAction = true
-            consoleStatus = "Starting local console…"
-            consoleDetail = "Launching `bun run hud` and waiting for \(localConsoleURL.absoluteString)"
+            consoleStatus = "Starting…"
+            consoleDetail = "Opening the local HUD."
             logger.notice("Started local console process (pid=\(process.processIdentifier, privacy: .public))")
             scheduleConsoleProbeBurst()
         } catch {
-            consoleStatus = "Failed to start local console: \(error.localizedDescription)"
-            consoleDetail = "Could not spawn the local HUD process."
+            consoleStatus = "Failed"
+            consoleDetail = error.localizedDescription
             logger.error("Failed to start local console: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -193,11 +194,11 @@ final class ActionLauncherViewModel: ObservableObject {
 
         guard let localConsoleProcess, localConsoleProcess.isRunning else {
             if consoleIsReachable {
-                consoleStatus = "Auto-start paused"
-                consoleDetail = "The console is reachable from another process. Action will not auto-start it until you start or restart it here."
+                consoleStatus = "Ready"
+                consoleDetail = "HUD is running outside Action. Auto-start is off."
             } else {
-                consoleStatus = "Auto-start paused"
-                consoleDetail = "The local console will stay offline until you start it again."
+                consoleStatus = "Off"
+                consoleDetail = "HUD is stopped."
             }
             return
         }
@@ -205,8 +206,8 @@ final class ActionLauncherViewModel: ObservableObject {
         localConsoleProcess.terminate()
         self.localConsoleProcess = nil
         consoleIsManagedByAction = false
-        consoleStatus = "Stopping local console…"
-        consoleDetail = "Auto-start is paused until you start or restart the console again."
+        consoleStatus = "Stopping…"
+        consoleDetail = "HUD is shutting down."
         scheduleConsoleProbeBurst()
     }
 
@@ -217,8 +218,8 @@ final class ActionLauncherViewModel: ObservableObject {
             self.localConsoleProcess = nil
         }
         consoleIsManagedByAction = false
-        consoleStatus = "Restarting local console…"
-        consoleDetail = "Re-launching `bun run hud`."
+        consoleStatus = "Restarting…"
+        consoleDetail = "Restarting the local HUD."
         startLocalConsole()
     }
 
@@ -234,15 +235,15 @@ final class ActionLauncherViewModel: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(command, forType: .string)
-        consoleStatus = "Copied console launch command"
-        consoleDetail = command
+        consoleStatus = "Ready"
+        consoleDetail = "Copied launch command."
     }
 
     func openConsoleLog() {
         let logURL = consoleLogURL()
         guard FileManager.default.fileExists(atPath: logURL.path) else {
-            consoleStatus = "No console log yet"
-            consoleDetail = "Start the console from Action to generate a log."
+            consoleStatus = "Off"
+            consoleDetail = "No HUD log yet."
             return
         }
         NSWorkspace.shared.open(logURL)
@@ -522,24 +523,24 @@ final class ActionLauncherViewModel: ObservableObject {
 
         if reachable {
             if let localConsoleProcess, localConsoleProcess.isRunning {
-                consoleStatus = "Local console running"
-                consoleDetail = "Managed by Action at \(localConsoleURL.absoluteString)"
+                consoleStatus = "Ready"
+                consoleDetail = localConsoleURL.absoluteString
                 consoleIsManagedByAction = true
             } else {
-                consoleStatus = "Local console reachable"
-                consoleDetail = "Another process is already serving \(localConsoleURL.absoluteString)"
+                consoleStatus = "Ready"
+                consoleDetail = localConsoleURL.absoluteString
             }
         } else if let localConsoleProcess, localConsoleProcess.isRunning {
-            consoleStatus = "Waiting for local console…"
-            consoleDetail = "The process is running, but the web surface has not responded yet."
+            consoleStatus = "Starting…"
+            consoleDetail = "Waiting for the HUD to answer."
             consoleIsManagedByAction = true
         } else if !consoleAutoEnsureEnabled {
-            consoleStatus = "Auto-start paused"
-            consoleDetail = "The local console is offline and Action is not auto-starting it right now."
+            consoleStatus = "Off"
+            consoleDetail = "HUD is stopped."
             consoleIsManagedByAction = false
         } else {
-            consoleStatus = "Local console offline"
-            consoleDetail = "Start it here, then open it embedded or in your browser."
+            consoleStatus = "Off"
+            consoleDetail = "Start the HUD when you need diagnostics."
             consoleIsManagedByAction = false
         }
     }
@@ -554,8 +555,8 @@ final class ActionLauncherViewModel: ObservableObject {
                 self.consoleIsReachable = reachable
 
                 if !reachable, self.consoleAutoEnsureEnabled, (self.localConsoleProcess?.isRunning != true) {
-                    self.consoleStatus = "Bootstrapping local console…"
-                    self.consoleDetail = "Action is starting the HUD automatically because it was not reachable."
+                    self.consoleStatus = "Starting…"
+                    self.consoleDetail = "Opening the local HUD."
                     self.startLocalConsole()
                 } else {
                     await self.updateConsoleReachability()
@@ -681,7 +682,7 @@ final class ActionLauncherViewModel: ObservableObject {
         pasteboard.setString(value, forType: .string)
     }
 
-    private func loadRecentSessions(limit: Int = 8) -> [ActionSessionSummary] {
+    private func loadRecentSessions(limit: Int = 48) -> [ActionSessionSummary] {
         let sessionsURL = sessionsDirectoryURL()
 
         guard let urls = try? FileManager.default.contentsOfDirectory(

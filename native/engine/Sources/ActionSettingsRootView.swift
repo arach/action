@@ -1,36 +1,39 @@
 import SwiftUI
 
+/// Lightweight preferences window (menu bar / separate window path).
+/// The in-app Settings pane lives in `ActionLauncherRootView`.
 struct ActionSettingsRootView: View {
     @Binding var appearanceMode: ActionAppearanceMode
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Settings")
-                .font(.system(size: 20, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textPrimary)
+        VStack(alignment: .leading, spacing: 20) {
+            ActionSettingsPageHeader(
+                icon: "paintpalette",
+                title: "Appearance",
+                subtitle: "How Action looks on this Mac."
+            )
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Appearance")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-
-                Picker("Appearance", selection: $appearanceMode) {
-                    ForEach(ActionAppearanceMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+            ActionSettingsSection(title: "Theme") {
+                ActionSettingsControlRow(
+                    title: "Appearance",
+                    subtitle: "System follows macOS. Light and Dark force the theme.",
+                    icon: "circle.lefthalf.filled"
+                ) {
+                    Picker("Appearance", selection: $appearanceMode) {
+                        ForEach(ActionAppearanceMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 220)
                 }
-                .pickerStyle(.segmented)
-
-                Text("System follows macOS. Light and Dark force a high-contrast app theme.")
-                    .font(.system(size: 12, weight: .regular, design: .default))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(20)
-        .frame(width: 460, height: 220, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .padding(24)
+        .frame(width: 480, height: 260, alignment: .topLeading)
+        .background(StageHUDTheme.appBackground)
     }
 }

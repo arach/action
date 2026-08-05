@@ -1,25 +1,19 @@
 import SwiftUI
 
+/// Continuous rounded rectangle used across Action surfaces.
+///
+/// The type name is historical (`ActionChamferedShape`); the path is a standard
+/// continuous corner radius so call sites stay stable while the visual system
+/// drops cut corners.
 struct ActionChamferedShape: InsettableShape {
-    var cornerCut: CGFloat = 6
+    /// Corner radius. Named `cornerCut` for call-site compatibility.
+    var cornerCut: CGFloat = 10
     var insetAmount: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
         let insetRect = rect.insetBy(dx: insetAmount, dy: insetAmount)
-        let cut = max(0, min(cornerCut, min(insetRect.width, insetRect.height) / 2))
-        var path = Path()
-
-        path.move(to: CGPoint(x: insetRect.minX + cut, y: insetRect.minY))
-        path.addLine(to: CGPoint(x: insetRect.maxX - cut, y: insetRect.minY))
-        path.addLine(to: CGPoint(x: insetRect.maxX, y: insetRect.minY + cut))
-        path.addLine(to: CGPoint(x: insetRect.maxX, y: insetRect.maxY - cut))
-        path.addLine(to: CGPoint(x: insetRect.maxX - cut, y: insetRect.maxY))
-        path.addLine(to: CGPoint(x: insetRect.minX + cut, y: insetRect.maxY))
-        path.addLine(to: CGPoint(x: insetRect.minX, y: insetRect.maxY - cut))
-        path.addLine(to: CGPoint(x: insetRect.minX, y: insetRect.minY + cut))
-        path.closeSubpath()
-
-        return path
+        let radius = max(0, min(cornerCut, min(insetRect.width, insetRect.height) / 2))
+        return Path(roundedRect: insetRect, cornerRadius: radius, style: .continuous)
     }
 
     func inset(by amount: CGFloat) -> some InsettableShape {
