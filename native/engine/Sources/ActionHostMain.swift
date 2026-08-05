@@ -1088,7 +1088,16 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         }
 
         logger.log("record-region: display frame=\(selection.display.frame) sourceRect=\(selection.sourceRect)")
-        let filter = SCContentFilter(display: selection.display, excludingWindows: [])
+        let supervisionWindows: [SCWindow]
+        if let overlayPID = ActionSupervisionRegistry.overlayPID() {
+            supervisionWindows = content.windows.filter {
+                $0.owningApplication?.processID == overlayPID
+            }
+        } else {
+            supervisionWindows = []
+        }
+        logger.log("record-region: excluding supervision windows=\(supervisionWindows.count)")
+        let filter = SCContentFilter(display: selection.display, excludingWindows: supervisionWindows)
         let configuration = SCStreamConfiguration()
         configuration.width = max(Int(selection.sourceRect.width * scale), 1)
         configuration.height = max(Int(selection.sourceRect.height * scale), 1)
@@ -1767,6 +1776,29 @@ final class StageOverlayView: NSView {
 
 }
 
+/// Controls whether a beat renders a synthetic pointer at all.
+///
+/// - `auto`: the pointer appears only for deliberate mouse interactions. Keyboard
+///   beats (`--key-label`) render captions and key caps with no cursor.
+/// - `pointer`: always draw the pointer, even on keyboard beats.
+/// - `hidden`: never draw a pointer or caret — captions only.
+enum DemoCursorPresentation: String {
+    case auto
+    case pointer
+    case hidden
+
+    static func parse(_ raw: String?) -> DemoCursorPresentation {
+        switch raw?.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "none", "hidden", "off", "caption", "captions", "caption-only":
+            return .hidden
+        case "pointer", "cursor", "arrow", "always":
+            return .pointer
+        default:
+            return .auto
+        }
+    }
+}
+
 @MainActor
 final class DemoCursorOverlayController: NSObject {
     private let writer: ResponseWriter
@@ -1780,6 +1812,7 @@ final class DemoCursorOverlayController: NSObject {
     private let typingText: String?
     private let playsTimedTypingSound: Bool
     private let statusOnly: Bool
+    private let presentation: DemoCursorPresentation
     private let traceFile: String?
     private let traceTitle: String
     private let previewImagePath: String?
@@ -1805,6 +1838,7 @@ final class DemoCursorOverlayController: NSObject {
         typingText: String?,
         playsTimedTypingSound: Bool,
         statusOnly: Bool,
+        presentation: DemoCursorPresentation,
         traceFile: String?,
         traceTitle: String,
         previewImagePath: String?
@@ -1820,6 +1854,7 @@ final class DemoCursorOverlayController: NSObject {
         self.typingText = typingText
         self.playsTimedTypingSound = playsTimedTypingSound
         self.statusOnly = statusOnly
+        self.presentation = presentation
         self.traceFile = traceFile
         self.traceTitle = traceTitle
         self.previewImagePath = previewImagePath
@@ -1828,7 +1863,7 @@ final class DemoCursorOverlayController: NSObject {
     func run() throws {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else {
+        guard let screen = Self.resolveScreen(startPoint: startPoint, endPoint: endPoint) else {
             throw ActionHostError.unsupportedOS("Could not resolve a screen for demo cursor overlay")
         }
 
@@ -1909,6 +1944,19 @@ final class DemoCursorOverlayController: NSObject {
     }
 
     private var shouldPlayClickSound: Bool {
+        // Keep the audio cue in lockstep with the click affordance: if no pointer is
+        // drawn there is nothing on screen for the click to belong to.
+        switch presentation {
+        case .hidden:
+            return false
+        case .auto:
+            // Keyboard beats never draw a pointer under auto, so no click tick.
+            if !(keyLabel?.isEmpty ?? true) || !(typingText?.isEmpty ?? true) {
+                return false
+            }
+        case .pointer:
+            break
+        }
         guard keyLabel?.isEmpty != false, typingText?.isEmpty != false else {
             return false
         }
@@ -1918,14 +1966,46 @@ final class DemoCursorOverlayController: NSObject {
         return label.contains("click") || label.contains("tap") || label.contains("press")
     }
 
+    /// Prefer the display that contains the beat points; fall back to the main screen.
+    /// Callers pass start/end in global AppKit coordinates (primary origin at (0,0)).
+    static func resolveScreen(startPoint: CGPoint?, endPoint: CGPoint?) -> NSScreen? {
+        if let startPoint,
+           let screen = NSScreen.screens.first(where: { $0.frame.contains(startPoint) }) {
+            return screen
+        }
+        if let endPoint,
+           let screen = NSScreen.screens.first(where: { $0.frame.contains(endPoint) }) {
+            return screen
+        }
+        return NSScreen.main ?? NSScreen.screens.first
+    }
+
+    /// `NSWindow(contentRect:…:screen:)` treats `contentRect` as **screen-local**
+    /// (origin at the screen's bottom-left). Passing `screen.frame` (global) therefore
+    /// double-applies the display origin — e.g. origin.x=3440 becomes window.x=6880.
+    /// Content rect must be origin-zero sized to the screen; pin with `setFrame` after.
+    static func panelContentRect(for screen: NSScreen) -> CGRect {
+        CGRect(origin: .zero, size: screen.frame.size)
+    }
+
+    /// Convert a global AppKit point into the overlay view's local coordinates.
+    static func localPoint(_ global: CGPoint, on screen: NSScreen) -> CGPoint {
+        let origin = screen.frame.origin
+        return CGPoint(x: global.x - origin.x, y: global.y - origin.y)
+    }
+
     private func createWindow(screen: NSScreen) {
+        let screenFrame = screen.frame
         let overlayWindow = NSPanel(
-            contentRect: screen.frame,
+            contentRect: Self.panelContentRect(for: screen),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false,
             screen: screen
         )
+        // Pin in global coordinates so the panel fills this display exactly —
+        // including when `NSScreen.main` is not the zero-origin primary.
+        overlayWindow.setFrame(screenFrame, display: false)
         overlayWindow.level = .screenSaver
         overlayWindow.isOpaque = false
         overlayWindow.backgroundColor = .clear
@@ -1933,14 +2013,17 @@ final class DemoCursorOverlayController: NSObject {
         overlayWindow.ignoresMouseEvents = true
         overlayWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
-        let size = screen.frame.size
-        let resolvedStart = startPoint ?? CGPoint(x: size.width * 0.58, y: size.height * 0.74)
-        let resolvedEnd = endPoint ?? CGPoint(x: size.width * 0.93, y: size.height * 0.40)
+        let size = screenFrame.size
+        let resolvedStart = startPoint.map { Self.localPoint($0, on: screen) }
+            ?? CGPoint(x: size.width * 0.58, y: size.height * 0.74)
+        let resolvedEnd = endPoint.map { Self.localPoint($0, on: screen) }
+            ?? CGPoint(x: size.width * 0.93, y: size.height * 0.40)
         let previewImage = previewImagePath.flatMap { NSImage(contentsOfFile: $0) }
         let overlayView = DemoCursorOverlayView(
             frame: CGRect(origin: .zero, size: size),
             startPoint: resolvedStart,
             endPoint: resolvedEnd,
+            duration: duration,
             clickProgress: clickProgress,
             labelOverride: labelOverride,
             statusDetail: statusDetail,
@@ -1948,6 +2031,7 @@ final class DemoCursorOverlayController: NSObject {
             typingText: typingText,
             playsTimedTypingSound: playsTimedTypingSound,
             statusOnly: statusOnly,
+            presentation: presentation,
             traceLines: [],
             traceTitle: traceTitle,
             previewImage: previewImage
@@ -2167,8 +2251,25 @@ final class DemoCueSoundPlayer {
 }
 
 final class DemoCursorOverlayView: NSView {
+    /// Drawn height of the pointer glyph in points. Sized to read as a real macOS
+    /// pointer at recording scale rather than as a prop: precise, not a focal point.
+    private static let pointerHeight: CGFloat = 23
+
+    /// Pointer silhouette normalised to a 1.0-tall bounding box with the hotspot at
+    /// the origin and the body extending down-right (view coordinates are y-up).
+    private static let pointerUnitPath: [CGPoint] = [
+        CGPoint(x: 0.000, y: 0.000),
+        CGPoint(x: 0.000, y: -0.735),
+        CGPoint(x: 0.180, y: -0.560),
+        CGPoint(x: 0.300, y: -0.955),
+        CGPoint(x: 0.436, y: -0.900),
+        CGPoint(x: 0.318, y: -0.512),
+        CGPoint(x: 0.620, y: -0.512),
+    ]
+
     private let startPoint: CGPoint
     private let endPoint: CGPoint
+    private let duration: TimeInterval
     private let clickProgress: Double
     private let labelOverride: String?
     private let statusDetail: String?
@@ -2176,6 +2277,7 @@ final class DemoCursorOverlayView: NSView {
     private let typingText: String?
     private let playsTimedTypingSound: Bool
     private let statusOnly: Bool
+    private let presentation: DemoCursorPresentation
     private let traceTitle: String
     private let previewImage: NSImage?
     var traceLines: [String] {
@@ -2193,6 +2295,7 @@ final class DemoCursorOverlayView: NSView {
         frame frameRect: CGRect,
         startPoint: CGPoint,
         endPoint: CGPoint,
+        duration: TimeInterval,
         clickProgress: Double,
         labelOverride: String?,
         statusDetail: String?,
@@ -2200,12 +2303,14 @@ final class DemoCursorOverlayView: NSView {
         typingText: String?,
         playsTimedTypingSound: Bool,
         statusOnly: Bool,
+        presentation: DemoCursorPresentation,
         traceLines: [String],
         traceTitle: String,
         previewImage: NSImage?
     ) {
         self.startPoint = startPoint
         self.endPoint = endPoint
+        self.duration = max(0.05, duration)
         self.clickProgress = clickProgress
         self.labelOverride = labelOverride
         self.statusDetail = statusDetail
@@ -2213,6 +2318,7 @@ final class DemoCursorOverlayView: NSView {
         self.typingText = typingText
         self.playsTimedTypingSound = playsTimedTypingSound
         self.statusOnly = statusOnly
+        self.presentation = presentation
         self.traceLines = traceLines
         self.traceTitle = traceTitle
         self.previewImage = previewImage
@@ -2237,12 +2343,14 @@ final class DemoCursorOverlayView: NSView {
 
         let point = cursorPoint(for: progress)
 
-        drawTrail(progress: progress)
-        drawClickFeedback(at: point)
-        if isTypingCue {
-            drawTypingCaret(at: point)
-        } else {
-            drawCursor(at: point, scale: cursorScale())
+        if showsPointer {
+            drawTrail(progress: progress)
+            drawClickFeedback(at: point)
+            if isTypingCue {
+                drawTypingCaret(at: point)
+            } else {
+                drawCursor(at: point, scale: cursorScale())
+            }
         }
         drawKeyChordCue(at: point)
         drawTypingCue(at: point)
@@ -2252,13 +2360,31 @@ final class DemoCursorOverlayView: NSView {
         drawTraceStrip()
     }
 
+    /// True when this beat is a deliberate mouse interaction that deserves a synthetic
+    /// pointer. Keyboard beats (key chords and typing) resolve to `false` under `.auto`
+    /// so captions and key caps stand alone with no cursor or caret on screen.
+    private var showsPointer: Bool {
+        switch presentation {
+        case .hidden:
+            return false
+        case .pointer:
+            return true
+        case .auto:
+            let hasKeyChord = !(keyLabel?.isEmpty ?? true)
+            let hasTyping = !(typingText?.isEmpty ?? true)
+            return !hasKeyChord && !hasTyping
+        }
+    }
+
     private func cursorPoint(for rawProgress: Double) -> CGPoint {
-        if isTypingCue {
+        // With no pointer on screen the cue panels anchor on a fixed point rather than
+        // tracking an invisible one.
+        if isTypingCue || !showsPointer {
             return startPoint
         }
 
         let clipped = min(1, max(0, rawProgress))
-        let eased = playfulEase(clipped)
+        let eased = pointerEase(clipped)
         let base = CGPoint(
             x: startPoint.x + (endPoint.x - startPoint.x) * eased,
             y: startPoint.y + (endPoint.y - startPoint.y) * eased
@@ -2266,13 +2392,22 @@ final class DemoCursorOverlayView: NSView {
         let dx = endPoint.x - startPoint.x
         let dy = endPoint.y - startPoint.y
         let distance = max(1, hypot(dx, dy))
-        let arc = sin(.pi * clipped) * min(62, distance * 0.09)
-        let bob = sin(.pi * clipped * 5.0) * (1 - clipped) * min(12, distance * 0.018)
+        // A shallow bow reads as a hand moving a mouse; anything larger reads as a cartoon.
+        let arc = sin(.pi * clipped) * min(14, distance * 0.035)
 
         return CGPoint(
             x: base.x + (-dy / distance) * arc,
-            y: base.y + (dx / distance) * arc + bob
+            y: base.y + (dx / distance) * arc
         )
+    }
+
+    /// Instantaneous pointer speed in points per second, sampled across one frame.
+    private func pointerSpeed(at rawProgress: Double) -> Double {
+        let frame = 1.0 / 60.0
+        let step = frame / duration
+        let head = cursorPoint(for: rawProgress)
+        let tail = cursorPoint(for: max(0, rawProgress - step))
+        return hypot(head.x - tail.x, head.y - tail.y) / frame
     }
 
     private func drawTrail(progress: Double) {
@@ -2280,20 +2415,42 @@ final class DemoCursorOverlayView: NSView {
             return
         }
 
-        let steps = 10
-        for index in 0..<steps {
-            let t = max(0, progress - Double(index + 1) * 0.028)
-            let p = cursorPoint(for: t)
-            let alpha = max(0, 0.09 - Double(index) * 0.009)
-            let radius = CGFloat(max(1.8, 5.8 - Double(index) * 0.38))
-            let warmth = CGFloat(index) / CGFloat(max(1, steps - 1))
-            NSColor(
-                calibratedRed: 0.48 + 0.12 * warmth,
-                green: 0.60 + 0.08 * (1 - warmth),
-                blue: 0.74,
-                alpha: alpha
-            ).setFill()
-            NSBezierPath(ovalIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)).fill()
+        // The trail is a speed readout, not decoration: it fades out as the pointer
+        // settles, so arrival always looks precise.
+        let speed = pointerSpeed(at: progress)
+        let intensity = min(1.0, max(0.0, (speed - 240) / 1500))
+        guard intensity > 0.03 else {
+            return
+        }
+
+        let tailSeconds = 0.13
+        let segments = 11
+        let span = tailSeconds / duration
+        let points = (0...segments).map { index -> CGPoint in
+            cursorPoint(for: max(0, progress - span * Double(index) / Double(segments)))
+        }
+
+        for index in 0..<segments {
+            let fade = 1 - Double(index) / Double(segments)
+            let alpha = CGFloat(intensity * 0.30 * fade * fade)
+            guard alpha > 0.004 else {
+                continue
+            }
+            let width = CGFloat(0.6 + 1.9 * fade)
+            let segment = NSBezierPath()
+            segment.move(to: points[index])
+            segment.line(to: points[index + 1])
+            segment.lineCapStyle = .round
+
+            // Dual contrast: a dark outer pass keeps the trail visible on light
+            // desktops, the light inner pass keeps it visible on dark ones.
+            segment.lineWidth = width + 1.3
+            NSColor(calibratedWhite: 0.05, alpha: alpha * 0.42).setStroke()
+            segment.stroke()
+
+            segment.lineWidth = width
+            NSColor(calibratedWhite: 1, alpha: alpha).setStroke()
+            segment.stroke()
         }
     }
 
@@ -2302,78 +2459,115 @@ final class DemoCursorOverlayView: NSView {
             return
         }
 
-        let distance = abs(progress - clickProgress)
-        guard distance < 0.30 else {
+        // Timed in seconds rather than progress so the affordance reads identically
+        // whether the beat is 900ms or 2600ms long.
+        let elapsedSinceClick = (progress - clickProgress) * duration
+        let leadIn = 0.04
+        let ringLife = 0.26
+        guard elapsedSinceClick > -leadIn, elapsedSinceClick < ringLife else {
             return
         }
 
-        let normalized = max(0, 1 - (distance / 0.30))
-        let alpha = CGFloat(0.32 * normalized)
-        for index in 0..<3 {
-            let spread = CGFloat(index) * 18
-            let radius = CGFloat(24 + (1 - normalized) * 54) + spread
-            let ring = NSBezierPath(
-                ovalIn: CGRect(
-                    x: point.x - radius,
-                    y: point.y - radius,
-                    width: radius * 2,
-                    height: radius * 2
-                )
+        let t = max(0, elapsedSinceClick / ringLife)
+        let ease = 1 - pow(1 - t, 2.4)
+        let radius = CGFloat(8.5 + 21 * ease)
+        let alpha = CGFloat(0.52 * pow(1 - t, 1.6))
+
+        let ring = NSBezierPath(
+            ovalIn: CGRect(
+                x: point.x - radius,
+                y: point.y - radius,
+                width: radius * 2,
+                height: radius * 2
             )
-            NSColor(calibratedRed: 0.45, green: 0.62, blue: 0.76, alpha: alpha * (1 - CGFloat(index) * 0.22))
-                .setStroke()
-            ring.lineWidth = 2.4
-            ring.stroke()
-        }
-
-        NSColor(calibratedRed: 0.66, green: 0.78, blue: 0.86, alpha: alpha * 0.24).setFill()
-        NSBezierPath(ovalIn: CGRect(x: point.x - 13, y: point.y - 13, width: 26, height: 26)).fill()
-
-        let font = NSFont.systemFont(ofSize: 16, weight: .bold)
-        let text = "CLICK"
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor(calibratedRed: 0.88, green: 0.92, blue: 0.93, alpha: alpha * 0.84),
-        ]
-        let size = (text as NSString).size(withAttributes: attrs)
-        (text as NSString).draw(
-            in: CGRect(x: point.x - size.width / 2, y: point.y + 38, width: size.width, height: size.height),
-            withAttributes: attrs
         )
+        ring.lineWidth = CGFloat(1.9 - 1.1 * t) + 1.1
+        NSColor(calibratedWhite: 0.05, alpha: alpha * 0.34).setStroke()
+        ring.stroke()
+        ring.lineWidth = CGFloat(1.9 - 1.1 * t)
+        NSColor(calibratedWhite: 1, alpha: alpha).setStroke()
+        ring.stroke()
+
+        // A tight flash at the hotspot marks the exact contact point.
+        let flash = CGFloat(max(0, 1 - abs(elapsedSinceClick) / 0.09))
+        guard flash > 0 else {
+            return
+        }
+        let dotRadius: CGFloat = 3.4
+        NSColor(calibratedWhite: 1, alpha: 0.62 * flash * flash).setFill()
+        NSBezierPath(
+            ovalIn: CGRect(
+                x: point.x - dotRadius,
+                y: point.y - dotRadius,
+                width: dotRadius * 2,
+                height: dotRadius * 2
+            )
+        ).fill()
     }
 
     private func drawCursor(at point: CGPoint, scale: CGFloat) {
-        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: point.x + (x * scale), y: point.y + (y * scale))
+        let height = DemoCursorOverlayView.pointerHeight * scale
+        let path = NSBezierPath()
+        for (index, unit) in DemoCursorOverlayView.pointerUnitPath.enumerated() {
+            let resolved = CGPoint(x: point.x + unit.x * height, y: point.y + unit.y * height)
+            if index == 0 {
+                path.move(to: resolved)
+            } else {
+                path.line(to: resolved)
+            }
+        }
+        path.close()
+        path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+
+        // Wide, faint ambient pass: separates the silhouette from bright desktops
+        // without reading as a glow.
+        NSGraphicsContext.saveGraphicsState()
+        let ambient = NSShadow()
+        ambient.shadowBlurRadius = 10
+        ambient.shadowOffset = CGSize(width: 0, height: -2)
+        ambient.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.18)
+        ambient.set()
+        NSColor(calibratedWhite: 0, alpha: 0.001).setFill()
+        path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        // Contact shadow rides a real path fill so AppKit actually casts it.
+        NSGraphicsContext.saveGraphicsState()
+        let contact = NSShadow()
+        contact.shadowBlurRadius = 3.2
+        contact.shadowOffset = CGSize(width: 0, height: -1.1)
+        contact.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.36)
+        contact.set()
+        NSColor(calibratedWhite: 0.97, alpha: 0.99).setFill()
+        path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        // Soft vertical shading on top of the filled body — physical, not painted.
+        if let body = NSGradient(colors: [
+            NSColor(calibratedWhite: 1.00, alpha: 0.99),
+            NSColor(calibratedWhite: 0.93, alpha: 0.99),
+        ]) {
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            body.draw(in: path.bounds, angle: 270)
+            NSGraphicsContext.restoreGraphicsState()
         }
 
-        let path = NSBezierPath()
-        path.move(to: p(0, 0))
-        path.line(to: p(0, -43))
-        path.line(to: p(12, -32))
-        path.line(to: p(20, -52))
-        path.line(to: p(29, -48))
-        path.line(to: p(21, -29))
-        path.line(to: p(38, -29))
-        path.close()
-
-        let shadow = NSShadow()
-        shadow.shadowBlurRadius = 12
-        shadow.shadowOffset = CGSize(width: 0, height: -5)
-        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.30)
-        shadow.set()
-
-        NSColor(calibratedWhite: 1, alpha: 0.98).setFill()
-        path.fill()
-        NSColor(calibratedWhite: 0.04, alpha: 0.96).setStroke()
-        path.lineWidth = 2.2
+        // Hairline outline for light desktops; scaled so it never thickens into a
+        // cartoon border as the press dip changes size. Dual shadows above keep
+        // the glyph readable on near-black wallpapers without a second outline.
+        NSColor(calibratedWhite: 0.07, alpha: 0.94).setStroke()
+        path.lineWidth = max(0.9, height * 0.046)
         path.stroke()
     }
 
     private func drawTypingCaret(at point: CGPoint) {
-        let pulse = 0.76 + 0.24 * abs(sin(progress * .pi * 7.0))
-        let height: CGFloat = 44
-        let width: CGFloat = 4
+        // Blink on a wall-clock period so short and long beats pulse at the same rate.
+        let elapsed = progress * duration
+        let pulse = 0.78 + 0.22 * abs(sin(elapsed * .pi / 0.45))
+        let height: CGFloat = 30
+        let width: CGFloat = 3
         let caretRect = CGRect(
             x: point.x - width / 2,
             y: point.y - height * 0.46,
@@ -2416,6 +2610,9 @@ final class DemoCursorOverlayView: NSView {
     }
 
     private var showsClickFeedback: Bool {
+        guard showsPointer else {
+            return false
+        }
         guard keyLabel?.isEmpty != false, typingText?.isEmpty != false else {
             return false
         }
@@ -2430,16 +2627,18 @@ final class DemoCursorOverlayView: NSView {
     }
 
     private func cursorScale() -> CGFloat {
-        if isTypingCue {
-            return CGFloat(1.08 + sin(progress * .pi * 10.0) * 0.035)
+        // The only scale change is a shallow press dip at the click instant. Travel
+        // bounce reads as playful; a press dip reads as mechanical and deliberate.
+        guard showsClickFeedback else {
+            return 1
         }
-
-        let travelBounce = sin(.pi * progress * 2.4) * max(0, 1 - progress) * 0.075
-        let clickDistance = abs(progress - clickProgress)
-        let clickBounce = showsClickFeedback
-            ? max(0, 1 - clickDistance / 0.12) * 0.13
-            : 0
-        return CGFloat(1.08 + travelBounce + clickBounce)
+        let elapsedSinceClick = abs(progress - clickProgress) * duration
+        let window = 0.11
+        guard elapsedSinceClick < window else {
+            return 1
+        }
+        let press = 1 - elapsedSinceClick / window
+        return CGFloat(1 - 0.085 * press * press)
     }
 
     private func drawActionPill(at point: CGPoint) {
@@ -2863,10 +3062,12 @@ final class DemoCursorOverlayView: NSView {
         text.draw(in: rect, withAttributes: attrs)
     }
 
-    private func playfulEase(_ value: Double) -> Double {
+    /// Restrained ease-in-out: starts deliberate, arrives without overshoot.
+    /// Replaces the older playful cubic that overshot and read as cartoon motion.
+    private func pointerEase(_ value: Double) -> Double {
         let clipped = min(1, max(0, value))
-        let shifted = clipped - 1
-        return 1 + 2.18 * shifted * shifted * shifted + 1.18 * shifted * shifted
+        // Smoothstep (Hermite): 3t² − 2t³ — no overshoot, no bounce.
+        return clipped * clipped * (3 - 2 * clipped)
     }
 }
 
@@ -3788,6 +3989,11 @@ struct ActionHostMain {
             let typingSoundMode = options.options["typing-sound"]?.lowercased() ?? "actual"
             let playsTimedTypingSound = typingSoundMode == "timed"
             let statusOnly = ["1", "true", "yes"].contains(options.options["status-only"]?.lowercased() ?? "")
+            // `--cursor auto|pointer|hidden` (aliases: caption-only, none, always, …).
+            // Defaults to auto: mouse beats get the pointer; keyboard beats are captions only.
+            let presentation = DemoCursorPresentation.parse(
+                options.options["cursor"] ?? options.options["presentation"]
+            )
             let traceFile = options.options["trace-file"]
             let traceTitle = options.options["trace-title"] ?? "Action trace"
             let previewImagePath = options.options["preview-image"]
@@ -3810,6 +4016,7 @@ struct ActionHostMain {
                     typingText: typingText,
                     playsTimedTypingSound: playsTimedTypingSound,
                     statusOnly: statusOnly,
+                    presentation: presentation,
                     traceFile: traceFile,
                     traceTitle: traceTitle,
                     previewImagePath: previewImagePath

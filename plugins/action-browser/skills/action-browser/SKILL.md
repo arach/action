@@ -28,6 +28,13 @@ runtime.
   the tool response.
 - Prefer a stable CSS selector from `browser_snapshot` over text matching.
 - Use `browser_close` when a temporary tab is no longer useful.
+- Chrome belongs to the agent session that started it. It quits when that
+  session ends, after fifteen idle minutes, or on `browser_close` with
+  `scope: "browser"` — whichever comes first. A later `browser_open` starts a
+  fresh Chrome, so never assume an earlier tab survived.
+- Call `browser_close` with `scope: "browser"` when a browsing task is finished
+  and nothing further is expected. Chrome stays up if another live agent
+  session still claims it.
 
 ## Safety
 
