@@ -13,16 +13,16 @@ enum StageHUDTheme {
     }
 
     static let appBackground = dynamic(
-        light: NSColor(calibratedWhite: 0.98, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.05, alpha: 1)
+        light: NSColor(calibratedWhite: 0.965, alpha: 1),
+        dark: NSColor(calibratedWhite: 0.09, alpha: 1)
     )
     static let railBackground = dynamic(
-        light: NSColor(calibratedRed: 0.95, green: 0.95, blue: 0.93, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.07, alpha: 1)
+        light: NSColor(calibratedWhite: 0.94, alpha: 1),
+        dark: NSColor(calibratedWhite: 0.075, alpha: 1)
     )
     static let footerBackground = dynamic(
-        light: NSColor(calibratedWhite: 0.985, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.075, alpha: 1)
+        light: NSColor(calibratedWhite: 0.955, alpha: 1),
+        dark: NSColor(calibratedWhite: 0.07, alpha: 1)
     )
     static let panelBackgroundTop = dynamic(
         light: NSColor.white,
@@ -54,11 +54,11 @@ enum StageHUDTheme {
     )
     static let cardFill = dynamic(
         light: NSColor.white,
-        dark: NSColor(calibratedWhite: 0.09, alpha: 1)
+        dark: NSColor(calibratedWhite: 0.12, alpha: 1)
     )
     static let cardBorder = dynamic(
-        light: NSColor(calibratedWhite: 0.05, alpha: 0.10),
-        dark: NSColor(calibratedWhite: 1.0, alpha: 0.10)
+        light: NSColor(calibratedWhite: 0.0, alpha: 0.08),
+        dark: NSColor(calibratedWhite: 1.0, alpha: 0.08)
     )
     static let accentIdle = dynamic(
         light: NSColor(calibratedWhite: 0.14, alpha: 1),

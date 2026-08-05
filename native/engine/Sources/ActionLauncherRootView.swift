@@ -3,30 +3,79 @@ import SwiftUI
 
 struct ActionLauncherRootView: View {
     private enum LauncherSection: String, CaseIterable, Identifiable, Hashable {
-        case review = "Review"
+        case takes = "Takes"
         case library = "Library"
-        case console = "Console"
         case settings = "Settings"
 
         var id: String { rawValue }
 
         var subtitle: String {
             switch self {
-            case .review:
-                return "Playback and feedback"
+            case .takes:
+                return "Latest session"
             case .library:
-                return "Recorded sessions"
-            case .console:
-                return "Local web surface"
+                return "All sessions"
             case .settings:
-                return "Environment and appearance"
+                return "Permissions and preferences"
+            }
+        }
+    }
+
+    private enum LibraryLayout: String {
+        case gallery
+        case list
+    }
+
+    private enum SettingsPane: String, CaseIterable, Identifiable {
+        case permissions
+        case appearance
+        case agent
+        case advanced
+        case about
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .permissions: return "Permissions"
+            case .appearance: return "Appearance"
+            case .agent: return "Agent"
+            case .advanced: return "Advanced"
+            case .about: return "About"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .permissions: return "lock.shield"
+            case .appearance: return "paintpalette"
+            case .agent: return "cpu"
+            case .advanced: return "wrench.and.screwdriver"
+            case .about: return "info.circle"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .permissions:
+                return "macOS access Action needs for capture and automation."
+            case .appearance:
+                return "Theme and how the app looks on this Mac."
+            case .agent:
+                return "Local automation runtime that drives capture."
+            case .advanced:
+                return "Optional diagnostics and developer tools."
+            case .about:
+                return "Build details for this install."
             }
         }
     }
 
     @ObservedObject var model: ActionLauncherViewModel
-    @State private var selectedSection: LauncherSection? = .review
+    @State private var selectedSection: LauncherSection? = .takes
     @AppStorage("Action.LauncherSidebarIconsOnly") private var sidebarIconsOnly = false
+    @AppStorage("Action.LibraryLayout") private var libraryLayoutRaw = LibraryLayout.gallery.rawValue
+    @AppStorage("Action.SettingsPane") private var settingsPaneRaw = SettingsPane.permissions.rawValue
     @StateObject private var consoleBridge = ActionEmbeddedWebConsoleBridge()
     private let sessionDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -34,11 +83,22 @@ struct ActionLauncherRootView: View {
         return formatter
     }()
 
-    private var sidebarWidth: (min: CGFloat, ideal: CGFloat, max: CGFloat) {
-        if sidebarIconsOnly {
-            return (52, 52, 52)
-        }
-        return (188, 208, 232)
+    private var sidebarWidth: CGFloat {
+        sidebarIconsOnly ? 56 : 200
+    }
+
+    private var activeSection: LauncherSection {
+        selectedSection ?? .takes
+    }
+
+    private var libraryLayout: LibraryLayout {
+        get { LibraryLayout(rawValue: libraryLayoutRaw) ?? .gallery }
+        nonmutating set { libraryLayoutRaw = newValue.rawValue }
+    }
+
+    private var settingsPane: SettingsPane {
+        get { SettingsPane(rawValue: settingsPaneRaw) ?? .permissions }
+        nonmutating set { settingsPaneRaw = newValue.rawValue }
     }
 
     var body: some View {
@@ -52,43 +112,44 @@ struct ActionLauncherRootView: View {
 
                 mainPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(StageHUDTheme.appBackground)
             }
 
             footerBar
         }
-        .frame(minWidth: 1180, minHeight: 760)
+        .frame(minWidth: 1100, minHeight: 720)
         .background(StageHUDTheme.appBackground)
         .onChange(of: model.reviewSelectionRequestID) { _, _ in
-            selectedSection = .review
+            selectedSection = .takes
         }
     }
+
+    // MARK: - Sidebar
 
     private var sidebar: some View {
         VStack(spacing: 0) {
             sidebarHeader
 
-            List(selection: $selectedSection) {
-                Section(sidebarIconsOnly ? "" : "Workspace") {
-                    ForEach([LauncherSection.review, .library, .console], id: \.self) { section in
-                        sidebarRow(for: section)
-                            .tag(Optional(section))
-                    }
+            VStack(spacing: 2) {
+                ForEach([LauncherSection.takes, .library], id: \.self) { section in
+                    sidebarItem(section)
                 }
             }
-            .background(StageHUDTheme.railBackground)
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
+            .padding(.horizontal, sidebarIconsOnly ? 8 : 10)
+            .padding(.top, 8)
 
             Spacer(minLength: 0)
 
-            miraSidebarSlot
+            if !sidebarIconsOnly {
+                MiraCompanionBadge()
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+            }
 
-            settingsRow
-                .padding(.horizontal, sidebarIconsOnly ? 4 : 8)
-                .padding(.bottom, 8)
+            sidebarItem(.settings)
+                .padding(.horizontal, sidebarIconsOnly ? 8 : 10)
+                .padding(.bottom, 12)
         }
-        .frame(width: sidebarWidth.ideal)
+        .frame(width: sidebarWidth)
         .background(StageHUDTheme.railBackground)
     }
 
@@ -96,144 +157,208 @@ struct ActionLauncherRootView: View {
         HStack(spacing: 8) {
             if sidebarIconsOnly {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.16)) {
+                    withAnimation(.easeInOut(duration: 0.15)) {
                         sidebarIconsOnly = false
                     }
                 } label: {
                     Image(systemName: "sidebar.left")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(StageHUDTheme.textSecondary)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
                 .help("Expand Sidebar")
-                .frame(width: 28, height: 28)
-
-                Spacer(minLength: 0)
             } else {
                 ActionBrandLockup()
 
                 Spacer(minLength: 0)
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.16)) {
+                    withAnimation(.easeInOut(duration: 0.15)) {
                         sidebarIconsOnly = true
                     }
                 } label: {
-                    Image(systemName: "sidebar.squares.left")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(StageHUDTheme.textMuted)
                         .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Collapse Sidebar")
             }
         }
-        .padding(.horizontal, sidebarIconsOnly ? 6 : 12)
-        .padding(.top, 14)
+        .padding(.horizontal, sidebarIconsOnly ? 12 : 14)
+        .padding(.top, 16)
         .padding(.bottom, 10)
     }
 
-    @ViewBuilder
-    private var miraSidebarSlot: some View {
-        if sidebarIconsOnly {
-            MiraSpriteView(state: "idle", width: 30, height: 34)
-                .frame(width: 36, height: 38)
-                .padding(.bottom, 8)
-                .help("Mira")
-        } else {
-            MiraCompanionBadge()
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
+    private func sidebarItem(_ section: LauncherSection) -> some View {
+        let selected = activeSection == section
+        return Button {
+            selectedSection = section
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: iconName(for: section))
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 18)
+
+                if !sidebarIconsOnly {
+                    Text(section.rawValue)
+                        .font(.system(size: 13, weight: selected ? .semibold : .medium))
+                    Spacer(minLength: 0)
+                }
+            }
+            .foregroundStyle(selected ? StageHUDTheme.textPrimary : StageHUDTheme.textSecondary)
+            .frame(maxWidth: .infinity, minHeight: 34, alignment: sidebarIconsOnly ? .center : .leading)
+            .padding(.horizontal, sidebarIconsOnly ? 0 : 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(selected ? StageHUDTheme.buttonSecondaryHover : Color.clear)
+            )
         }
+        .buttonStyle(.plain)
+        .help(sidebarIconsOnly ? section.rawValue : "")
     }
+
+    // MARK: - Main
 
     private var mainPane: some View {
-        VStack(spacing: 0) {
-            if (selectedSection ?? .review) != .review {
-                appHeader
-                    .padding(.horizontal, 30)
-                    .padding(.top, 20)
-                    .padding(.bottom, 12)
+        Group {
+            if activeSection == .settings {
+                settingsShell
             } else {
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(height: 18)
-            }
+                VStack(spacing: 0) {
+                    pageHeader
+                        .padding(.horizontal, 28)
+                        .padding(.top, 20)
+                        .padding(.bottom, 16)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    switch selectedSection ?? .review {
-                    case .review:
-                        reviewSection
-                    case .library:
-                        librarySection
-                    case .console:
-                        consoleSection
-                    case .settings:
-                        settingsSection
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            switch activeSection {
+                            case .takes:
+                                takesSection
+                            case .library:
+                                librarySection
+                            case .settings:
+                                EmptyView()
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 28)
                     }
+                    .scrollIndicators(.hidden)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, (selectedSection ?? .review) == .review ? 18 : 30)
-                .padding(.top, (selectedSection ?? .review) == .review ? 8 : 0)
-                .padding(.bottom, 30)
             }
-            .scrollIndicators(.hidden)
         }
-        .background(mainPaneBackground)
+        .background(StageHUDTheme.appBackground)
     }
 
-    @ViewBuilder
-    private var mainPaneBackground: some View {
-        if (selectedSection ?? .review) == .review {
-            LinearGradient(
-                colors: [
-                    StageHUDTheme.reviewCanvas,
-                    StageHUDTheme.reviewPanel.opacity(0.92),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        } else {
-            StageHUDTheme.appBackground
+    private var pageHeader: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(activeSection.rawValue)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(StageHUDTheme.textPrimary)
+                Text(headerSubtitle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+            }
+
+            Spacer(minLength: 0)
+
+            if activeSection == .library, !model.recentSessions.isEmpty {
+                libraryLayoutPicker
+            }
+
+            if activeSection == .takes || activeSection == .library {
+                launcherButton(
+                    model.isRunningGuidedDemo ? "Recording…" : "New take",
+                    tone: .primary,
+                    action: model.runGuidedCalculatorDemo
+                )
+                .disabled(model.isRunningGuidedDemo)
+            }
         }
     }
+
+    private var libraryLayoutPicker: some View {
+        HStack(spacing: 0) {
+            layoutToggle(icon: "square.grid.2x2", layout: .gallery, help: "Gallery")
+            layoutToggle(icon: "list.bullet", layout: .list, help: "List")
+        }
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(StageHUDTheme.buttonSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+        )
+    }
+
+    private func layoutToggle(icon: String, layout: LibraryLayout, help: String) -> some View {
+        let selected = libraryLayout == layout
+        return Button {
+            libraryLayout = layout
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(selected ? StageHUDTheme.textPrimary : StageHUDTheme.textMuted)
+                .frame(width: 30, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(selected ? StageHUDTheme.buttonSecondaryHover : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private var headerSubtitle: String {
+        switch activeSection {
+        case .takes:
+            if model.selectedSession != nil {
+                return "Playback and notes"
+            }
+            return "Record a demo, then review it here"
+        case .library:
+            let count = model.recentSessions.count
+            if count == 0 {
+                return "No sessions yet"
+            }
+            return "\(count) session\(count == 1 ? "" : "s")"
+        case .settings:
+            return activeSection.subtitle
+        }
+    }
+
+    // MARK: - Footer
 
     private var footerBar: some View {
         HStack(spacing: 16) {
-            footerSlot(
-                icon: model.consoleIsReachable ? "dot.radiowaves.left.and.right" : "bolt.slash",
-                label: "Console",
-                value: footerConsoleValue
-            )
-
-            footerDivider
-
-            footerSlot(
-                icon: "brain",
+            footerChip(
                 label: "Agent",
-                value: model.agentStatus
+                value: humanAgentStatus,
+                ok: agentIsHealthy
             )
-
-            footerDivider
-
-            footerSlot(
-                icon: "hand.raised",
+            footerChip(
                 label: "Permissions",
-                value: permissionSummary
+                value: permissionSummary,
+                ok: permissionsReady
             )
+
+            if model.isRunningGuidedDemo {
+                footerChip(label: "Capture", value: "Running", ok: true)
+            }
 
             Spacer()
-
-            footerSlot(
-                icon: "rectangle.stack",
-                label: "View",
-                value: selectedSection?.rawValue ?? LauncherSection.review.rawValue
-            )
         }
-        .padding(.horizontal, 14)
-        .frame(height: 32)
+        .padding(.horizontal, 20)
+        .frame(height: 36)
         .background(StageHUDTheme.footerBackground)
         .overlay(alignment: .top) {
             Rectangle()
@@ -242,528 +367,711 @@ struct ActionLauncherRootView: View {
         }
     }
 
-    private var appHeader: some View {
+    private func footerChip(label: String, value: String, ok: Bool) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(ok ? Color(nsColor: NSColor.systemGreen) : StageHUDTheme.textMuted.opacity(0.5))
+                .frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(StageHUDTheme.textMuted)
+            Text(value)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(StageHUDTheme.textPrimary)
+        }
+    }
+
+    private var agentIsHealthy: Bool {
+        model.agentStatus.lowercased() == "connected"
+    }
+
+    private var humanAgentStatus: String {
+        switch model.agentStatus.lowercased() {
+        case "connected":
+            return "Connected"
+        case "offline", "disconnected":
+            return "Offline"
+        default:
+            return model.agentStatus
+        }
+    }
+
+    private var permissionsReady: Bool {
+        model.accessibilityStatus.lowercased() == "granted"
+            && model.screenRecordingStatus.lowercased() == "granted"
+    }
+
+    private var permissionSummary: String {
+        if permissionsReady {
+            return "Ready"
+        }
+        return "AX \(shortPermission(model.accessibilityStatus)) · Screen \(shortPermission(model.screenRecordingStatus))"
+    }
+
+    // MARK: - Takes
+
+    private var takesSection: some View {
+        Group {
+            if let session = model.selectedSession {
+                VStack(alignment: .leading, spacing: 14) {
+                    takeBanner(for: session)
+                    takeStage(for: session)
+                }
+            } else {
+                takesEmptyState
+            }
+        }
+    }
+
+    private var takesEmptyState: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("No takes yet")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(StageHUDTheme.textPrimary)
+
+            Text("Run a short Calculator capture. When it finishes, the take opens here for playback and notes.")
+                .font(.system(size: 13))
+                .foregroundStyle(StageHUDTheme.textSecondary)
+                .frame(maxWidth: 420, alignment: .leading)
+
+            launcherButton(
+                model.isRunningGuidedDemo ? "Recording…" : "New take",
+                tone: .primary,
+                action: model.runGuidedCalculatorDemo
+            )
+            .disabled(model.isRunningGuidedDemo)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
+    }
+
+    private func takeBanner(for session: ActionSessionSummary) -> some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(selectedSection?.rawValue ?? LauncherSection.review.rawValue)
-                    .font(.system(size: 19, weight: .bold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textPrimary)
-                Text(selectedSection?.subtitle ?? LauncherSection.review.subtitle)
-                    .font(.system(size: 12, weight: .regular, design: .default))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(sessionTimestamp(session))
+                    .font(.system(size: 12))
+                    .foregroundStyle(StageHUDTheme.textMuted)
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
+                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textPrimary)
+                    Text("= \(session.actualResult)")
+                        .font(.system(size: 18, weight: .medium, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                }
+
+                Text("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")")
+                    .font(.system(size: 12))
                     .foregroundStyle(StageHUDTheme.textSecondary)
             }
 
             Spacer(minLength: 0)
 
-            headerActions
-        }
-    }
-
-    @ViewBuilder
-    private var headerActions: some View {
-        switch selectedSection ?? .review {
-        case .review:
-            HStack(spacing: 10) {
-                if let session = model.selectedSession {
-                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                }
-
-                launcherButton(
-                    model.isRunningGuidedDemo ? "Running Guided Demo..." : "Run Guided Demo",
-                    tone: .primary,
-                    action: model.runGuidedCalculatorDemo
-                )
-                .disabled(model.isRunningGuidedDemo)
-            }
-        case .library:
-            EmptyView()
-        case .console:
-            HStack(spacing: 10) {
-                launcherButton("Restart Console", tone: .primary, action: model.restartLocalConsole)
-                launcherButton("Browser", action: model.openWebConsoleInBrowser)
-            }
-        case .settings:
-            HStack(spacing: 10) {
-                launcherButton("Refresh Permissions", action: model.refreshPermissions)
+            HStack(spacing: 8) {
+                launcherButton("Replay", tone: .primary, action: { model.replaySession(session) })
+                launcherButton("Show in Finder", action: { model.revealSession(session) })
+                launcherButton("Trace", action: { model.openSessionTrace(session) })
+                launcherButton("Notes", action: { model.openSessionFeedback(session) })
             }
         }
+        .padding(18)
+        .background(cardBackground)
     }
 
-    @ViewBuilder
-    private func sidebarRow(for section: LauncherSection) -> some View {
-        if sidebarIconsOnly {
-            Image(systemName: iconName(for: section))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(StageHUDTheme.textPrimary)
-                .frame(maxWidth: .infinity, minHeight: 30)
-                .help(section.rawValue)
-        } else {
-            Label(section.rawValue, systemImage: iconName(for: section))
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textPrimary)
-        }
+    private func takeStage(for session: ActionSessionSummary) -> some View {
+        ActionSessionPreviewView(session: session, model: model)
+            .padding(12)
+            .background(cardBackground)
     }
 
-    private var settingsRow: some View {
-        Button {
-            selectedSection = .settings
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: iconName(for: .settings))
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: sidebarIconsOnly ? nil : 18)
+    // MARK: - Library
 
-                if !sidebarIconsOnly {
-                    Text(LauncherSection.settings.rawValue)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    Spacer()
-                }
-            }
-            .foregroundStyle(selectedSection == .settings ? StageHUDTheme.textPrimary : StageHUDTheme.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: 30, alignment: sidebarIconsOnly ? .center : .leading)
-            .padding(.horizontal, sidebarIconsOnly ? 0 : 10)
-            .background(selectedSection == .settings ? StageHUDTheme.buttonSecondaryHover : Color.clear)
-            .clipShape(ActionChamferedShape(cornerCut: 4))
-        }
-        .buttonStyle(.plain)
-        .help(sidebarIconsOnly ? LauncherSection.settings.rawValue : "")
-    }
-
-    private var footerConsoleValue: String {
-        if model.consoleAutoEnsureEnabled {
-            return model.consoleIsReachable ? "Watchdog online" : "Bootstrapping"
-        }
-        return model.consoleIsReachable ? "Manual online" : "Paused"
-    }
-
-    private var permissionSummary: String {
-        "\(shortPermission(model.accessibilityStatus)) / \(shortPermission(model.screenRecordingStatus))"
-    }
-
-    private var reviewSection: some View {
+    private var librarySection: some View {
         Group {
-            if let latest = model.selectedSession {
-                VStack(alignment: .leading, spacing: 12) {
-                    reviewDeck(for: latest)
-                    reviewStage(for: latest)
-                }
+            if model.recentSessions.isEmpty {
+                libraryEmptyState
+            } else if libraryLayout == .gallery {
+                libraryGallery
             } else {
-                reviewEmptyState
+                libraryList
             }
         }
     }
 
-    private var reviewEmptyState: some View {
-        surfaceCard(title: "Review") {
-            HStack(alignment: .center, spacing: 24) {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 9) {
-                        ActionLatticeLogoMark(size: 34)
-                        Text("Ready for a take")
-                            .font(.system(size: 17, weight: .bold, design: .monospaced))
-                            .foregroundStyle(StageHUDTheme.textPrimary)
+    private var libraryEmptyState: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("No sessions yet")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(StageHUDTheme.textPrimary)
+            Text("New takes appear here after you record them.")
+                .font(.system(size: 13))
+                .foregroundStyle(StageHUDTheme.textSecondary)
+            launcherButton(
+                model.isRunningGuidedDemo ? "Recording…" : "New take",
+                tone: .primary,
+                action: model.runGuidedCalculatorDemo
+            )
+            .disabled(model.isRunningGuidedDemo)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
+    }
+
+    private var libraryGallery: some View {
+        let columns = [
+            GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 14, alignment: .top),
+        ]
+
+        return LazyVGrid(columns: columns, spacing: 14) {
+            ForEach(model.recentSessions) { session in
+                libraryGalleryCard(session)
+            }
+        }
+    }
+
+    private func libraryGalleryCard(_ session: ActionSessionSummary) -> some View {
+        let selected = model.selectedSession?.id == session.id
+
+        return Button {
+            openSession(session)
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                ActionSessionThumbnailView(
+                    session: session,
+                    width: nil,
+                    height: 132,
+                    showCaption: false,
+                    cornerRadius: 0,
+                    showBorder: false
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: 132)
+                .clipped()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textPrimary)
+                        .lineLimit(1)
+
+                    HStack(spacing: 6) {
+                        Text("= \(session.actualResult)")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textSecondary)
+                        Text("·")
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                        Text(sessionTimestamp(session))
+                            .font(.system(size: 12))
+                            .foregroundStyle(StageHUDTheme.textMuted)
                     }
 
-                    Text("Run the guided calculator capture to seed the review loop.")
-                        .font(.system(size: 12, weight: .regular, design: .default))
+                    if session.feedbackCount > 0 {
+                        Text("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")")
+                            .font(.system(size: 11))
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(StageHUDTheme.cardFill)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        selected ? StageHUDTheme.reviewAccent.opacity(0.55) : StageHUDTheme.cardBorder,
+                        lineWidth: selected ? 1.5 : 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            sessionContextMenu(session)
+        }
+    }
+
+    private var libraryList: some View {
+        VStack(spacing: 6) {
+            ForEach(model.recentSessions) { session in
+                libraryListRow(session)
+            }
+        }
+    }
+
+    private func libraryListRow(_ session: ActionSessionSummary) -> some View {
+        let selected = model.selectedSession?.id == session.id
+
+        return Button {
+            openSession(session)
+        } label: {
+            HStack(spacing: 14) {
+                ActionSessionThumbnailView(
+                    session: session,
+                    width: 112,
+                    height: 70,
+                    showCaption: false,
+                    cornerRadius: 8
+                )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(StageHUDTheme.textPrimary)
+                        .lineLimit(1)
+
+                    Text("Result \(session.actualResult)")
+                        .font(.system(size: 12))
                         .foregroundStyle(StageHUDTheme.textSecondary)
+
+                    HStack(spacing: 8) {
+                        Text(sessionTimestamp(session))
+                            .font(.system(size: 11))
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                        if session.feedbackCount > 0 {
+                            Text("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")")
+                                .font(.system(size: 11))
+                                .foregroundStyle(StageHUDTheme.textMuted)
+                        }
+                    }
                 }
 
                 Spacer(minLength: 0)
 
-                ZStack {
-                    ActionLatticeLogoMark(size: 118)
-                        .opacity(0.42)
-                    MiraSpriteView(state: "thinking", width: 96, height: 104)
-                        .offset(y: 8)
-                }
-                .frame(width: 128, height: 118)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(StageHUDTheme.textMuted)
             }
-        }
-    }
-
-    private func reviewDeck(for session: ActionSessionSummary) -> some View {
-        HStack(alignment: .top, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("REVIEW DECK")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.6))
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
-                        .font(.system(size: 28, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color.white)
-                    Text("=\(session.actualResult)")
-                        .font(.system(size: 20, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Color.white.opacity(0.72))
-                }
-                Text("Playback, annotate, and export from a single stage.")
-                    .font(.system(size: 13, weight: .regular, design: .default))
-                    .foregroundStyle(Color.white.opacity(0.78))
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 10) {
-                HStack(spacing: 10) {
-                    MiraSpriteView(state: "success", width: 48, height: 52)
-                    ActionLatticeLogoMark(size: 42)
-                }
-                HStack(spacing: 8) {
-                    darkStatusBadge(sessionTimestamp(session))
-                    darkStatusBadge("Feedback \(session.feedbackCount)")
-                }
-                HStack(spacing: 8) {
-                    launcherButton("Replay", tone: .primary, action: { model.replaySession(session) })
-                    launcherButton("Reveal", action: { model.revealSession(session) })
-                    launcherButton("Trace", action: { model.openSessionTrace(session) })
-                    launcherButton("Files", action: { model.openSessionFeedback(session) })
-                }
-            }
-        }
-        .padding(22)
-        .background(reviewDeckBackground)
-        .overlay(
-            ActionChamferedShape(cornerCut: 7)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
-    }
-
-    private func reviewStage(for session: ActionSessionSummary) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ActionSessionPreviewView(session: session, model: model)
-        }
-        .padding(12)
-        .background(
-            ActionChamferedShape(cornerCut: 8)
-                .fill(StageHUDTheme.reviewPanel.opacity(0.9))
-        )
-        .overlay(
-            ActionChamferedShape(cornerCut: 8)
-                .stroke(StageHUDTheme.reviewStrokeStrong, lineWidth: 1)
-        )
-        .shadow(color: StageHUDTheme.panelShadow.opacity(0.12), radius: 18, x: 0, y: 8)
-    }
-
-    private func statusBadge(_ value: String) -> some View {
-        Text(value)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundStyle(StageHUDTheme.textMuted)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(10)
             .background(
-                Capsule(style: .continuous)
-                    .fill(StageHUDTheme.buttonSecondary)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selected ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.cardFill)
             )
             .overlay(
-                Capsule(style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        selected ? StageHUDTheme.reviewAccent.opacity(0.45) : StageHUDTheme.cardBorder,
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            sessionContextMenu(session)
+        }
+    }
+
+    @ViewBuilder
+    private func sessionContextMenu(_ session: ActionSessionSummary) -> some View {
+        Button("Open") { openSession(session) }
+        Button("Replay") { model.replaySession(session) }
+        Divider()
+        Button("Show in Finder") { model.revealSession(session) }
+        Button("Open Trace") { model.openSessionTrace(session) }
+        Button("Open Notes") { model.openSessionFeedback(session) }
+    }
+
+    private func openSession(_ session: ActionSessionSummary) {
+        model.selectSession(session)
+        selectedSection = .takes
+    }
+
+    // MARK: - Settings
+
+    private var settingsShell: some View {
+        HStack(spacing: 0) {
+            settingsSubnav
+                .frame(width: 200)
+
+            Rectangle()
+                .fill(StageHUDTheme.cardBorder)
+                .frame(width: 1)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    ActionSettingsPageHeader(
+                        icon: settingsPane.icon,
+                        title: settingsPane.title,
+                        subtitle: settingsPane.subtitle
+                    )
+
+                    settingsPaneContent
+                }
+                .frame(maxWidth: 720, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 24)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    private var settingsSubnav: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Settings")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(StageHUDTheme.textPrimary)
+                .padding(.horizontal, 16)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+
+            VStack(spacing: 2) {
+                ForEach(SettingsPane.allCases) { pane in
+                    settingsSubnavItem(pane)
+                }
+            }
+            .padding(.horizontal, 10)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(StageHUDTheme.railBackground.opacity(0.55))
+    }
+
+    private func settingsSubnavItem(_ pane: SettingsPane) -> some View {
+        let selected = settingsPane == pane
+        return Button {
+            settingsPane = pane
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: pane.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(selected ? StageHUDTheme.reviewAccent : StageHUDTheme.textMuted)
+                    .frame(width: 18)
+                Text(pane.title)
+                    .font(.system(size: 13, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? StageHUDTheme.textPrimary : StageHUDTheme.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(selected ? StageHUDTheme.buttonSecondaryHover : Color.clear)
+            )
+            .overlay(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(selected ? StageHUDTheme.reviewAccent : Color.clear)
+                    .frame(width: 3)
+                    .padding(.vertical, 8)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(pane.title)
+    }
+
+    @ViewBuilder
+    private var settingsPaneContent: some View {
+        switch settingsPane {
+        case .permissions:
+            settingsPermissionsPage
+        case .appearance:
+            settingsAppearancePage
+        case .agent:
+            settingsAgentPage
+        case .advanced:
+            settingsAdvancedPage
+        case .about:
+            settingsAboutPage
+        }
+    }
+
+    private var settingsPermissionsPage: some View {
+        let axGranted = model.accessibilityStatus.lowercased() == "granted"
+        let screenGranted = model.screenRecordingStatus.lowercased() == "granted"
+
+        return VStack(alignment: .leading, spacing: 18) {
+            if !permissionsReady {
+                ActionSettingsSection(title: "Needs attention") {
+                    ActionSettingsRow(
+                        icon: "exclamationmark.triangle.fill",
+                        iconColor: Color(nsColor: .systemOrange),
+                        title: "Some permissions are missing",
+                        subtitle: "Capture and automation will be limited until both Accessibility and Screen Recording are granted."
+                    ) {
+                        Button("Request access") {
+                            model.requestPermissions()
+                        }
+                        .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
+                    }
+                }
+            }
+
+            ActionSettingsSection(title: "macOS privacy") {
+                ActionSettingsPermissionRow(
+                    title: "Accessibility",
+                    detail: "Required to focus apps, click, type, and read UI structure.",
+                    granted: axGranted,
+                    statusLabel: permissionStatusLabel(model.accessibilityStatus),
+                    primaryActionTitle: "Grant",
+                    onPrimary: model.requestPermissions,
+                    onOpenSettings: model.openAccessibilitySettings
+                )
+
+                ActionSettingsDivider()
+
+                ActionSettingsPermissionRow(
+                    title: "Screen Recording",
+                    detail: "Required for screenshots and ScreenCaptureKit recording.",
+                    granted: screenGranted,
+                    statusLabel: permissionStatusLabel(model.screenRecordingStatus),
+                    primaryActionTitle: "Grant",
+                    onPrimary: model.requestPermissions,
+                    onOpenSettings: model.openScreenRecordingSettings
+                )
+            }
+
+            HStack(spacing: 8) {
+                Button("Check again", action: model.refreshPermissions)
+                    .buttonStyle(ActionSettingsPillButtonStyle())
+                if !permissionsReady {
+                    Button("Request all", action: model.requestPermissions)
+                        .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
+                }
+            }
+        }
+    }
+
+    private var settingsAppearancePage: some View {
+        ActionSettingsSection(title: "Theme") {
+            ActionSettingsControlRow(
+                title: "Appearance",
+                subtitle: "System follows macOS. Light and Dark force the theme.",
+                icon: "circle.lefthalf.filled"
+            ) {
+                Picker("Appearance", selection: Binding(
+                    get: { model.appearanceMode },
+                    set: { model.setAppearanceMode($0) }
+                )) {
+                    ForEach(ActionAppearanceMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 220)
+            }
+        }
+    }
+
+    private var settingsAgentPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ActionSettingsSection(title: "Runtime") {
+                ActionSettingsRow(
+                    icon: "cpu",
+                    iconColor: agentIsHealthy ? Color(nsColor: .systemGreen) : StageHUDTheme.textMuted,
+                    title: "Local agent",
+                    subtitle: "Handles automation methods and capture orchestration over a local WebSocket."
+                ) {
+                    ActionSettingsStatusBadge(
+                        text: humanAgentStatus,
+                        kind: agentIsHealthy ? .ok : .offline
+                    )
+                }
+
+                ActionSettingsDivider()
+
+                ActionSettingsRow(
+                    icon: "network",
+                    title: "Endpoint",
+                    subtitle: "ws://127.0.0.1:4319"
+                ) {
+                    EmptyView()
+                }
+            }
+
+            Text("The agent starts with Action. If it shows Offline, restart the app.")
+                .font(.system(size: 12))
+                .foregroundStyle(StageHUDTheme.textMuted)
+        }
+    }
+
+    private var settingsAdvancedPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ActionSettingsSection(title: "Local HUD") {
+                ActionSettingsRow(
+                    icon: "safari",
+                    title: "Web diagnostics",
+                    subtitle: "Optional local page for deeper operator tools. Day-to-day work stays in Takes."
+                ) {
+                    ActionSettingsStatusBadge(
+                        text: humanConsoleStatus,
+                        kind: model.consoleIsReachable ? .ok : .neutral
+                    )
+                }
+
+                ActionSettingsDivider()
+
+                ActionSettingsControlRow(
+                    title: "Controls",
+                    subtitle: model.consoleURL.absoluteString,
+                    icon: "slider.horizontal.3"
+                ) {
+                    HStack(spacing: 8) {
+                        Button(model.consoleIsReachable ? "Open" : "Start") {
+                            if model.consoleIsReachable {
+                                model.openWebConsoleInBrowser()
+                            } else {
+                                model.startLocalConsole()
+                            }
+                        }
+                        .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
+
+                        if model.consoleIsReachable {
+                            Button("Restart", action: model.restartLocalConsole)
+                                .buttonStyle(ActionSettingsPillButtonStyle())
+                            Button("Stop", action: model.stopLocalConsole)
+                                .buttonStyle(ActionSettingsPillButtonStyle())
+                        }
+
+                        Button("Pop out", action: model.openEmbeddedConsole)
+                            .buttonStyle(ActionSettingsPillButtonStyle())
+                    }
+                }
+
+                if model.consoleIsReachable {
+                    ActionSettingsDivider()
+
+                    DisclosureGroup("Embedded preview") {
+                        ActionEmbeddedWebConsoleView(
+                            url: model.consoleURL,
+                            bridge: consoleBridge,
+                            onStatusChange: { status in
+                                model.setConsoleStatus(status)
+                            },
+                            onCommand: { command in
+                                model.handleWebViewCommand(command)
+                            }
+                        )
+                        .frame(minHeight: 360)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+                        )
+                        .padding(.top, 10)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 14)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                }
+            }
+
+            ActionSettingsSection(title: "Files") {
+                ActionSettingsRow(
+                    icon: "folder",
+                    title: "Scenarios folder",
+                    subtitle: "Open the on-disk scenarios directory.",
+                    onTap: model.openScenariosFolder
+                )
+            }
+        }
+    }
+
+    private var settingsAboutPage: some View {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        let bundleId = Bundle.main.bundleIdentifier ?? "dev.action.Action"
+
+        return VStack(alignment: .leading, spacing: 18) {
+            ActionSettingsSection(title: "Action") {
+                ActionSettingsRow(
+                    icon: "play.fill",
+                    iconColor: StageHUDTheme.reviewAccent,
+                    title: "Action",
+                    subtitle: "Native-first capture workstation for macOS."
+                ) {
+                    EmptyView()
+                }
+
+                ActionSettingsDivider()
+
+                ActionSettingsRow(
+                    icon: "number",
+                    title: "Version",
+                    subtitle: "\(version) (\(build))"
+                ) {
+                    EmptyView()
+                }
+
+                ActionSettingsDivider()
+
+                ActionSettingsRow(
+                    icon: "app.badge",
+                    title: "Bundle ID",
+                    subtitle: bundleId
+                ) {
+                    EmptyView()
+                }
+            }
+        }
+    }
+
+    private var humanConsoleStatus: String {
+        if model.consoleIsReachable {
+            return "Ready"
+        }
+        if model.consoleAutoEnsureEnabled {
+            return "Starting…"
+        }
+        return "Off"
+    }
+
+    private func permissionStatusLabel(_ status: String) -> String {
+        switch status.lowercased() {
+        case "granted":
+            return "Granted"
+        case "denied":
+            return "Denied"
+        case "unknown":
+            return "Unknown"
+        default:
+            return status.capitalized
+        }
+    }
+
+    // MARK: - Shared
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(StageHUDTheme.cardFill)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
             )
     }
 
-    private func darkStatusBadge(_ value: String) -> some View {
-        Text(value)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundStyle(Color.white.opacity(0.82))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.08))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
-            )
-    }
-
-    private var reviewDeckBackground: some View {
-        ActionChamferedShape(cornerCut: 7)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1)),
-                        Color(nsColor: NSColor(calibratedRed: 0.16, green: 0.18, blue: 0.22, alpha: 1)),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-    }
-
-    private var librarySection: some View {
-        surfaceCard(title: "Sessions") {
-            if model.recentSessions.isEmpty {
-                Text("Generated runs will appear here.")
-                    .font(.system(size: 12, weight: .regular, design: .default))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
-            } else {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(model.recentSessions) { session in
-                        sessionRow(session)
-                    }
-                }
-            }
-        }
-    }
-
-    private var consoleSection: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            surfaceCard(title: "Runtime") {
-                HStack(alignment: .center, spacing: 18) {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(model.consoleIsReachable ? Color.green : Color.gray.opacity(0.6))
-                            .frame(width: 8, height: 8)
-                        Text(model.consoleStatus)
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(StageHUDTheme.textPrimary)
-                    }
-
-                    Text(model.consoleDetail)
-                        .font(.system(size: 11, weight: .regular, design: .default))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                        .lineLimit(1)
-
-                    Spacer()
-
-                    metric(label: "Reachable", value: model.consoleIsReachable ? "Yes" : "No")
-                    metric(label: "Managed", value: model.consoleIsManagedByAction ? "Action" : "External")
-                }
-            }
-
-            surfaceCard(title: "Console Surface") {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 10) {
-                        launcherButton("Start", tone: .primary, action: model.startLocalConsole)
-                        launcherButton("Stop", action: model.stopLocalConsole)
-                        launcherButton("Restart", action: model.restartLocalConsole)
-                        launcherButton("Reload", action: {
-                            consoleBridge.reload()
-                            model.refreshConsoleState()
-                        })
-                        launcherButton("Inspector", action: consoleBridge.showInspector)
-                        Spacer()
-                        launcherButton("Browser", action: model.openWebConsoleInBrowser)
-                        launcherButton("Pop Out", action: model.openEmbeddedConsole)
-                    }
-
-                    ActionEmbeddedWebConsoleView(
-                        url: model.consoleURL,
-                        bridge: consoleBridge,
-                        onStatusChange: { status in
-                            model.setConsoleStatus(status)
-                        },
-                        onCommand: { command in
-                            model.handleWebViewCommand(command)
-                        }
-                    )
-                    .frame(minHeight: 540)
-                    .clipShape(ActionChamferedShape(cornerCut: 6))
-                    .overlay(
-                        ActionChamferedShape(cornerCut: 6)
-                            .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-                    )
-
-                    HStack(spacing: 10) {
-                        Text(model.consoleURL.absoluteString)
-                            .font(.system(size: 11, weight: .regular, design: .monospaced))
-                            .foregroundStyle(StageHUDTheme.textMuted)
-                            .textSelection(.enabled)
-
-                        Spacer()
-
-                        launcherButton("Copy Launch Command", action: model.copyLocalConsoleCommand)
-                        launcherButton("Open Log", action: model.openConsoleLog)
-                    }
-                }
-            }
-        }
-    }
-
-    private var settingsSection: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            surfaceCard(title: "Appearance") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("Appearance", selection: Binding(
-                        get: { model.appearanceMode },
-                        set: { model.setAppearanceMode($0) }
-                    )) {
-                        ForEach(ActionAppearanceMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    Text("Switch between system, light, and dark.")
-                        .font(.system(size: 12, weight: .regular, design: .default))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                }
-            }
-
-            surfaceCard(title: "Environment") {
-                VStack(alignment: .leading, spacing: 12) {
-                    statusRow(label: "Agent", value: model.agentStatus)
-                    statusRow(label: "Accessibility", value: model.accessibilityStatus)
-                    statusRow(label: "Screen Recording", value: model.screenRecordingStatus)
-                }
-            }
-
-            surfaceCard(title: "Utilities") {
-                VStack(spacing: 10) {
-                    launcherButton("Refresh Permissions", action: model.refreshPermissions)
-                    launcherButton("Request Permissions", action: model.requestPermissions)
-                    launcherButton("Open Accessibility", action: model.openAccessibilitySettings)
-                    launcherButton("Open Screen Recording", action: model.openScreenRecordingSettings)
-                    launcherButton("Open Scenarios Folder", action: model.openScenariosFolder)
-                }
-            }
-
-            if !model.notes.isEmpty {
-                surfaceCard(title: "Notes") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(model.notes, id: \.self) { note in
-                            Text(note)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                .foregroundStyle(StageHUDTheme.textMuted)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private func iconName(for section: LauncherSection) -> String {
         switch section {
-        case .review:
-            return "play.square"
+        case .takes:
+            return "play.rectangle"
         case .library:
             return "square.stack"
-        case .console:
-            return "terminal"
         case .settings:
-            return "slider.horizontal.3"
-        }
-    }
-
-    private var footerDivider: some View {
-        Rectangle()
-            .fill(StageHUDTheme.cardBorder)
-            .frame(width: 1, height: 14)
-    }
-
-    private func footerSlot(icon: String, label: String, value: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(StageHUDTheme.textMuted)
-                .frame(width: 12)
-
-            Text(label)
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textMuted)
-
-            Text(value)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textPrimary)
-                .lineLimit(1)
+            return "gearshape"
         }
     }
 
     private func shortPermission(_ status: String) -> String {
         switch status.lowercased() {
         case "granted":
-            return "Ready"
+            return "OK"
         case "denied":
             return "Denied"
         case "unknown":
             return "Unknown"
         default:
             return status
-        }
-    }
-
-    private func surfaceCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textMuted)
-            content()
-        }
-        .padding(18)
-        .background(
-            ActionChamferedShape(cornerCut: 6)
-                .fill(StageHUDTheme.cardFill)
-        )
-        .overlay(
-            ActionChamferedShape(cornerCut: 6)
-                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-        )
-    }
-
-    private func metric(label: String, value: String) -> some View {
-        VStack(alignment: .trailing, spacing: 3) {
-            Text(label)
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textMuted)
-            Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textPrimary)
-        }
-    }
-
-    private func sessionRow(_ session: ActionSessionSummary) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            ActionSessionThumbnailView(session: session)
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(session.expression)
-                            .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(StageHUDTheme.textPrimary)
-                        Text("Expected \(session.expectedResult)  Actual \(session.actualResult)")
-                            .font(.system(size: 12, weight: .regular, design: .default))
-                            .foregroundStyle(StageHUDTheme.textSecondary)
-                    }
-                    Spacer()
-                    Text(sessionTimestamp(session))
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(StageHUDTheme.textMuted)
-                }
-
-                HStack(spacing: 10) {
-                    launcherButton("Select", tone: .primary, action: { model.selectSession(session) })
-                    launcherButton("Replay", action: { model.replaySession(session) })
-                    launcherButton("Reveal", action: { model.revealSession(session) })
-                    launcherButton("Trace", action: { model.openSessionTrace(session) })
-                    launcherButton("Feedback", action: { model.openSessionFeedback(session) })
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(14)
-        .background(
-            ActionChamferedShape(cornerCut: 6)
-                .fill(model.selectedSession?.id == session.id ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.appBackground)
-        )
-        .overlay(
-            ActionChamferedShape(cornerCut: 6)
-                .stroke(model.selectedSession?.id == session.id ? StageHUDTheme.panelBorder : StageHUDTheme.cardBorder, lineWidth: 1)
-        )
-    }
-
-    private func statusRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 12, weight: .regular, design: .default))
-                .foregroundStyle(StageHUDTheme.textSecondary)
-            Spacer()
-            Text(value)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.textPrimary)
         }
     }
 
@@ -789,49 +1097,51 @@ private struct ActionLauncherButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundStyle(foregroundColor(configuration: configuration))
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(foreground(configuration: configuration))
             .padding(.horizontal, 12)
-            .frame(height: 30)
-            .background(background(configuration: configuration))
-            .overlay(
-                ActionChamferedShape(cornerCut: 5)
-                    .stroke(borderColor(configuration: configuration), lineWidth: 1)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(fill(configuration: configuration))
             )
-            .clipShape(ActionChamferedShape(cornerCut: 5))
-            .opacity(configuration.isPressed ? 0.9 : 1)
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(border(configuration: configuration), lineWidth: 1)
+            )
+            .opacity(configuration.isPressed ? 0.88 : 1)
     }
 
-    private func background(configuration: Configuration) -> some View {
-        Group {
-            switch tone {
-            case .primary:
-                Color(configuration.isPressed ? StageHUDTheme.buttonPrimaryBottom : StageHUDTheme.buttonPrimaryTop)
-            case .secondary:
-                Color(configuration.isPressed ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.buttonSecondary)
-            case .destructive:
-                Color(StageHUDTheme.accentRecording.opacity(configuration.isPressed ? 0.76 : 0.86))
-            }
+    private func fill(configuration: Configuration) -> Color {
+        switch tone {
+        case .primary:
+            return configuration.isPressed
+                ? StageHUDTheme.buttonPrimaryBottom
+                : StageHUDTheme.buttonPrimaryTop
+        case .secondary:
+            return configuration.isPressed
+                ? StageHUDTheme.buttonSecondaryHover
+                : StageHUDTheme.buttonSecondary
+        case .destructive:
+            return StageHUDTheme.accentRecording.opacity(configuration.isPressed ? 0.75 : 0.9)
         }
     }
 
-    private func foregroundColor(configuration: Configuration) -> Color {
+    private func foreground(configuration: Configuration) -> Color {
         switch tone {
         case .primary:
-            return StageHUDTheme.buttonPrimaryText.opacity(configuration.isPressed ? 0.88 : 1)
+            return StageHUDTheme.buttonPrimaryText
         case .secondary, .destructive:
-            return StageHUDTheme.textPrimary.opacity(configuration.isPressed ? 0.88 : 1)
+            return StageHUDTheme.textPrimary.opacity(configuration.isPressed ? 0.85 : 1)
         }
     }
 
-    private func borderColor(configuration: Configuration) -> Color {
+    private func border(configuration: Configuration) -> Color {
         switch tone {
         case .primary:
-            return StageHUDTheme.panelBorder.opacity(configuration.isPressed ? 1 : 0.9)
+            return Color.clear
         case .secondary, .destructive:
-            return StageHUDTheme.cardBorder.opacity(configuration.isPressed ? 1 : 0.95)
+            return StageHUDTheme.cardBorder
         }
     }
 }
