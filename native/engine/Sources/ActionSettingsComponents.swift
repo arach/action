@@ -332,12 +332,20 @@ struct ActionKeyboardCheatSheetView: View {
         (
             "App",
             [
-                ("⌘1", "Takes"),
+                ("⌘1", "Loop"),
                 ("⌘2", "Library"),
                 ("⌘3", "Settings"),
                 ("⌘,", "Settings window"),
                 ("⌘/", "This cheat sheet"),
                 ("?", "This cheat sheet"),
+            ]
+        ),
+        (
+            "Loop",
+            [
+                ("1 · 2 · 3", "Start · Edit · Review phases"),
+                ("New loop", "Draft Calculator scenario"),
+                ("Approve & run", "Capture from Edit"),
             ]
         ),
         (
@@ -349,7 +357,7 @@ struct ActionKeyboardCheatSheetView: View {
             ]
         ),
         (
-            "Takes review",
+            "Review (media notes)",
             [
                 ("N", "Open note composer"),
                 ("1 / 2 / 3 / 4", "Point · Range · Region · Draw"),
