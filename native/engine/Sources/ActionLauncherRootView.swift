@@ -73,6 +73,9 @@ struct ActionLauncherRootView: View {
 
     @ObservedObject var model: ActionLauncherViewModel
     @State private var selectedSection: LauncherSection? = .takes
+    @State private var librarySearch = ""
+    @State private var hoveredLibrarySessionID: String?
+    @State private var sessionPendingDelete: ActionSessionSummary?
     @AppStorage("Action.LauncherSidebarIconsOnly") private var sidebarIconsOnly = false
     @AppStorage("Action.LibraryLayout") private var libraryLayoutRaw = LibraryLayout.gallery.rawValue
     @AppStorage("Action.SettingsPane") private var settingsPaneRaw = SettingsPane.permissions.rawValue
@@ -101,6 +104,19 @@ struct ActionLauncherRootView: View {
         nonmutating set { settingsPaneRaw = newValue.rawValue }
     }
 
+    private var filteredLibrarySessions: [ActionSessionSummary] {
+        let query = librarySearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return model.recentSessions
+        }
+        return model.recentSessions.filter { session in
+            session.displayTitle.localizedCaseInsensitiveContains(query)
+                || session.actualResult.localizedCaseInsensitiveContains(query)
+                || session.sessionId.localizedCaseInsensitiveContains(query)
+                || session.expression.localizedCaseInsensitiveContains(query)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -120,6 +136,25 @@ struct ActionLauncherRootView: View {
         .background(StageHUDTheme.appBackground)
         .onChange(of: model.reviewSelectionRequestID) { _, _ in
             selectedSection = .takes
+        }
+        .confirmationDialog(
+            "Delete this take?",
+            isPresented: Binding(
+                get: { sessionPendingDelete != nil },
+                set: { if !$0 { sessionPendingDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: sessionPendingDelete
+        ) { session in
+            Button("Delete", role: .destructive) {
+                try? model.deleteSession(session)
+                sessionPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                sessionPendingDelete = nil
+            }
+        } message: { session in
+            Text("“\(session.displayTitle)” and its files will be removed from disk. This cannot be undone.")
         }
     }
 
@@ -270,6 +305,9 @@ struct ActionLauncherRootView: View {
             Spacer(minLength: 0)
 
             if activeSection == .library, !model.recentSessions.isEmpty {
+                librarySearchField
+                    .frame(maxWidth: 240)
+
                 libraryLayoutPicker
             }
 
@@ -282,6 +320,37 @@ struct ActionLauncherRootView: View {
                 .disabled(model.isRunningGuidedDemo)
             }
         }
+    }
+
+    private var librarySearchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(StageHUDTheme.textMuted)
+            TextField("Search takes", text: $librarySearch)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+            if !librarySearch.isEmpty {
+                Button {
+                    librarySearch = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(StageHUDTheme.buttonSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+        )
     }
 
     private var libraryLayoutPicker: some View {
@@ -326,11 +395,15 @@ struct ActionLauncherRootView: View {
             }
             return "Record a demo, then review it here"
         case .library:
-            let count = model.recentSessions.count
-            if count == 0 {
+            let total = model.recentSessions.count
+            if total == 0 {
                 return "No sessions yet"
             }
-            return "\(count) session\(count == 1 ? "" : "s")"
+            let shown = filteredLibrarySessions.count
+            if !librarySearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "\(shown) of \(total) take\(total == 1 ? "" : "s")"
+            }
+            return "\(total) take\(total == 1 ? "" : "s")"
         case .settings:
             return activeSection.subtitle
         }
@@ -449,12 +522,21 @@ struct ActionLauncherRootView: View {
     private func takeBanner(for session: ActionSessionSummary) -> some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(sessionTimestamp(session))
-                    .font(.system(size: 12))
-                    .foregroundStyle(StageHUDTheme.textMuted)
+                HStack(spacing: 8) {
+                    Text(sessionTimestamp(session))
+                        .font(.system(size: 12))
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                    if let duration = session.formattedDuration {
+                        Text("·")
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                        Text(duration)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                    }
+                }
 
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
+                    Text(session.displayTitle)
                         .font(.system(size: 22, weight: .semibold, design: .monospaced))
                         .foregroundStyle(StageHUDTheme.textPrimary)
                     Text("= \(session.actualResult)")
@@ -462,28 +544,29 @@ struct ActionLauncherRootView: View {
                         .foregroundStyle(StageHUDTheme.textSecondary)
                 }
 
-                Text("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")")
-                    .font(.system(size: 12))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
+                Text("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")  ·  N note · 1/2/3 anchors · ⌘↩ save")
+                    .font(.system(size: 11))
+                    .foregroundStyle(StageHUDTheme.textMuted)
             }
 
             Spacer(minLength: 0)
 
             HStack(spacing: 8) {
-                launcherButton("Replay", tone: .primary, action: { model.replaySession(session) })
                 launcherButton("Show in Finder", action: { model.revealSession(session) })
                 launcherButton("Trace", action: { model.openSessionTrace(session) })
-                launcherButton("Notes", action: { model.openSessionFeedback(session) })
             }
         }
-        .padding(18)
+        .padding(16)
         .background(cardBackground)
     }
 
     private func takeStage(for session: ActionSessionSummary) -> some View {
         ActionSessionPreviewView(session: session, model: model)
-            .padding(12)
-            .background(cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+            )
     }
 
     // MARK: - Library
@@ -492,6 +575,8 @@ struct ActionLauncherRootView: View {
         Group {
             if model.recentSessions.isEmpty {
                 libraryEmptyState
+            } else if filteredLibrarySessions.isEmpty {
+                libraryNoResultsState
             } else if libraryLayout == .gallery {
                 libraryGallery
             } else {
@@ -520,13 +605,29 @@ struct ActionLauncherRootView: View {
         .background(cardBackground)
     }
 
+    private var libraryNoResultsState: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("No matches")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(StageHUDTheme.textPrimary)
+            Text("Nothing matched “\(librarySearch)”.")
+                .font(.system(size: 13))
+                .foregroundStyle(StageHUDTheme.textSecondary)
+            Button("Clear search") { librarySearch = "" }
+                .buttonStyle(ActionSettingsPillButtonStyle())
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
+    }
+
     private var libraryGallery: some View {
         let columns = [
             GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 14, alignment: .top),
         ]
 
         return LazyVGrid(columns: columns, spacing: 14) {
-            ForEach(model.recentSessions) { session in
+            ForEach(filteredLibrarySessions) { session in
                 libraryGalleryCard(session)
             }
         }
@@ -534,25 +635,40 @@ struct ActionLauncherRootView: View {
 
     private func libraryGalleryCard(_ session: ActionSessionSummary) -> some View {
         let selected = model.selectedSession?.id == session.id
+        let hovered = hoveredLibrarySessionID == session.id
 
         return Button {
             openSession(session)
         } label: {
             VStack(alignment: .leading, spacing: 0) {
-                ActionSessionThumbnailView(
-                    session: session,
-                    width: nil,
-                    height: 132,
-                    showCaption: false,
-                    cornerRadius: 0,
-                    showBorder: false
-                )
-                .frame(maxWidth: .infinity)
-                .frame(height: 132)
-                .clipped()
+                ZStack(alignment: .topTrailing) {
+                    ActionSessionThumbnailView(
+                        session: session,
+                        width: nil,
+                        height: 132,
+                        showCaption: false,
+                        showDuration: true,
+                        showNoteCount: true,
+                        cornerRadius: 0,
+                        showBorder: false
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 132)
+                    .clipped()
+
+                    if hovered {
+                        HStack(spacing: 6) {
+                            libraryHoverChip("Open") { openSession(session) }
+                            libraryHoverChip("Replay") { model.replaySession(session) }
+                            libraryHoverChip("Finder") { model.revealSession(session) }
+                        }
+                        .padding(8)
+                        .transition(.opacity)
+                    }
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
+                    Text(session.displayTitle)
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundStyle(StageHUDTheme.textPrimary)
                         .lineLimit(1)
@@ -565,12 +681,6 @@ struct ActionLauncherRootView: View {
                             .foregroundStyle(StageHUDTheme.textMuted)
                         Text(sessionTimestamp(session))
                             .font(.system(size: 12))
-                            .foregroundStyle(StageHUDTheme.textMuted)
-                    }
-
-                    if session.feedbackCount > 0 {
-                        Text("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")")
-                            .font(.system(size: 11))
                             .foregroundStyle(StageHUDTheme.textMuted)
                     }
                 }
@@ -590,14 +700,29 @@ struct ActionLauncherRootView: View {
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            hoveredLibrarySessionID = hovering ? session.id : (hoveredLibrarySessionID == session.id ? nil : hoveredLibrarySessionID)
+        }
         .contextMenu {
             sessionContextMenu(session)
         }
     }
 
+    private func libraryHoverChip(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.black.opacity(0.62), in: Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var libraryList: some View {
         VStack(spacing: 6) {
-            ForEach(model.recentSessions) { session in
+            ForEach(filteredLibrarySessions) { session in
                 libraryListRow(session)
             }
         }
@@ -605,6 +730,7 @@ struct ActionLauncherRootView: View {
 
     private func libraryListRow(_ session: ActionSessionSummary) -> some View {
         let selected = model.selectedSession?.id == session.id
+        let hovered = hoveredLibrarySessionID == session.id
 
         return Button {
             openSession(session)
@@ -615,11 +741,13 @@ struct ActionLauncherRootView: View {
                     width: 112,
                     height: 70,
                     showCaption: false,
+                    showDuration: true,
+                    showNoteCount: false,
                     cornerRadius: 8
                 )
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(session.expression.replacingOccurrences(of: " ", with: ""))
+                    Text(session.displayTitle)
                         .font(.system(size: 14, weight: .semibold, design: .monospaced))
                         .foregroundStyle(StageHUDTheme.textPrimary)
                         .lineLimit(1)
@@ -632,6 +760,11 @@ struct ActionLauncherRootView: View {
                         Text(sessionTimestamp(session))
                             .font(.system(size: 11))
                             .foregroundStyle(StageHUDTheme.textMuted)
+                        if let duration = session.formattedDuration {
+                            Text(duration)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(StageHUDTheme.textMuted)
+                        }
                         if session.feedbackCount > 0 {
                             Text("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")")
                                 .font(.system(size: 11))
@@ -642,14 +775,21 @@ struct ActionLauncherRootView: View {
 
                 Spacer(minLength: 0)
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(StageHUDTheme.textMuted)
+                if hovered {
+                    HStack(spacing: 6) {
+                        launcherButton("Replay", action: { model.replaySession(session) })
+                        launcherButton("Delete", tone: .destructive, action: { sessionPendingDelete = session })
+                    }
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                }
             }
             .padding(10)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(selected ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.cardFill)
+                    .fill(selected || hovered ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.cardFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -661,6 +801,9 @@ struct ActionLauncherRootView: View {
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            hoveredLibrarySessionID = hovering ? session.id : (hoveredLibrarySessionID == session.id ? nil : hoveredLibrarySessionID)
+        }
         .contextMenu {
             sessionContextMenu(session)
         }
@@ -674,6 +817,10 @@ struct ActionLauncherRootView: View {
         Button("Show in Finder") { model.revealSession(session) }
         Button("Open Trace") { model.openSessionTrace(session) }
         Button("Open Notes") { model.openSessionFeedback(session) }
+        Divider()
+        Button("Delete…", role: .destructive) {
+            sessionPendingDelete = session
+        }
     }
 
     private func openSession(_ session: ActionSessionSummary) {

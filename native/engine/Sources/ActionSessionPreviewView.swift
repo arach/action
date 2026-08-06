@@ -48,8 +48,8 @@ struct ActionSessionPreviewView: View {
     @State private var inspectorTab: InspectorTab = .compose
     @State private var inspectorExpanded = false
     @FocusState private var noteEditorFocused: Bool
-    private let largeSurfaceCornerCut: CGFloat = 5
-    private let cardCornerCut: CGFloat = 5
+    private let surfaceRadius: CGFloat = 12
+    private let cardRadius: CGFloat = 10
 
     init(session: ActionSessionSummary, model: ActionLauncherViewModel) {
         self.session = session
@@ -59,7 +59,7 @@ struct ActionSessionPreviewView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: 14) {
             playbackSurface
                 .frame(maxWidth: .infinity, alignment: .topLeading)
 
@@ -67,16 +67,6 @@ struct ActionSessionPreviewView: View {
         }
         .padding(12)
         .background(StageHUDTheme.reviewCanvas)
-        .background(
-            LinearGradient(
-                colors: [
-                    StageHUDTheme.reviewCanvas,
-                    StageHUDTheme.reviewCanvas.opacity(0.96),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
         .onDisappear {
             playback.pause()
         }
@@ -102,12 +92,79 @@ struct ActionSessionPreviewView: View {
             applyFocusedFeedbackIfNeeded()
         }
         .onExitCommand {
-            isComposingFeedback = false
+            handleEscape()
+        }
+        .focusable()
+        .onKeyPress(characters: CharacterSet(charactersIn: "nN"), phases: .down) { _ in
+            guard !noteEditorFocused else { return .ignored }
+            openComposerFromKeyboard()
+            return .handled
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: "1234"), phases: .down) { press in
+            guard !noteEditorFocused else { return .ignored }
+            guard isComposingFeedback || inspectorExpanded else { return .ignored }
+            switch press.characters {
+            case "1":
+                ensureComposerOpen()
+                setAnchorMode(.point)
+                return .handled
+            case "2":
+                ensureComposerOpen()
+                setAnchorMode(.range)
+                return .handled
+            case "3":
+                ensureComposerOpen()
+                setAnchorMode(.region)
+                return .handled
+            case "4":
+                ensureComposerOpen()
+                setAnchorMode(.draw)
+                return .handled
+            default:
+                return .ignored
+            }
+        }
+        .onKeyPress(.return, phases: .down) { press in
+            guard press.modifiers.contains(.command) else { return .ignored }
+            saveFeedback()
+            return .handled
+        }
+        .onKeyPress(characters: CharacterSet(charactersIn: " "), phases: .down) { _ in
+            guard !noteEditorFocused else { return .ignored }
+            playback.togglePlayback()
+            return .handled
+        }
+    }
+
+    private func handleEscape() {
+        if isSelectingRegion || dragStartPoint != nil || !drawingPreviewPoints.isEmpty {
             isSelectingRegion = false
             dragStartPoint = nil
             dragCurrentPoint = nil
+            drawingPreviewPoints = []
+            if anchorMode == .region || anchorMode == .draw {
+                feedbackStatus = "Selection cancelled"
+            }
+            return
+        }
+        if isComposingFeedback {
+            isComposingFeedback = false
             noteEditorFocused = false
             feedbackStatus = "Composer closed"
+            return
+        }
+        if inspectorExpanded {
+            inspectorExpanded = false
+        }
+    }
+
+    private func openComposerFromKeyboard() {
+        inspectorTab = .compose
+        inspectorExpanded = true
+        if !isComposingFeedback {
+            toggleFeedbackComposer()
+        } else {
+            noteEditorFocused = true
         }
     }
 
@@ -118,9 +175,9 @@ struct ActionSessionPreviewView: View {
             ZStack(alignment: .topLeading) {
                 ActionInlinePlayerView(player: playback.player)
                     .allowsHitTesting(false)
-                    .clipShape(ActionChamferedShape(cornerCut: largeSurfaceCornerCut))
+                    .clipShape(RoundedRectangle(cornerRadius: surfaceRadius, style: .continuous))
                     .overlay(
-                        ActionChamferedShape(cornerCut: largeSurfaceCornerCut)
+                        RoundedRectangle(cornerRadius: surfaceRadius, style: .continuous)
                             .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
                     )
 
@@ -135,7 +192,7 @@ struct ActionSessionPreviewView: View {
             playbackControlBar
             timelinePanel
         }
-        .padding(16)
+        .padding(14)
         .background(mainSurfaceBackground)
     }
 
@@ -153,7 +210,7 @@ struct ActionSessionPreviewView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text(inspectorTab.rawValue)
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(StageHUDTheme.textMuted)
                         Spacer()
                         feedbackButton("Close", systemImage: "xmark", tone: .secondary) {
@@ -185,24 +242,26 @@ struct ActionSessionPreviewView: View {
 
     private var playerUtilityBar: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(session.videoURL.lastPathComponent)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(session.displayTitle)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textPrimary)
                     .lineLimit(1)
-                Text("Review asset")
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
+                HStack(spacing: 6) {
+                    if isComposingFeedback {
+                        statusPill(anchorMode.rawValue, accent: true)
+                        Text(draftAnchorSummary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(StageHUDTheme.textSecondary)
+                            .lineLimit(1)
+                    } else {
+                        Text("Space play  ·  N note  ·  1–4 anchors")
+                            .font(.system(size: 11))
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                    }
+                }
             }
-            Spacer()
-            if isComposingFeedback {
-                statusPill(anchorMode.rawValue, accent: true)
-                Text(draftAnchorSummary)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
-                    .lineLimit(1)
-            }
-            Spacer()
+            Spacer(minLength: 8)
             HStack(spacing: 8) {
                 topToolButton(
                     isComposingFeedback ? "Commenting" : "Comment",
@@ -214,6 +273,7 @@ struct ActionSessionPreviewView: View {
                         toggleFeedbackComposer()
                     }
                 }
+                .keyboardShortcut("n", modifiers: [])
                 topToolButton(
                     "Notes",
                     systemImage: "text.bubble",
@@ -230,11 +290,11 @@ struct ActionSessionPreviewView: View {
                     inspectorTab = .exports
                     inspectorExpanded = true
                 }
-                metadataChip("Notes \(feedbackDocument.items.count)", emphasized: feedbackDocument.items.isEmpty == false)
+                metadataChip("\(feedbackDocument.items.count)", emphasized: feedbackDocument.items.isEmpty == false)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(connectedBarBackground)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -246,7 +306,7 @@ struct ActionSessionPreviewView: View {
     private var playbackControlBar: some View {
         HStack(spacing: 18) {
             Text(playbackTimeSummary)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(StageHUDTheme.textPrimary)
 
             Spacer()
@@ -529,7 +589,7 @@ struct ActionSessionPreviewView: View {
             .contentShape(Rectangle())
             .gesture(annotationDragGesture(in: geometry.size))
         }
-        .clipShape(ActionChamferedShape(cornerCut: cardCornerCut))
+        .clipShape(RoundedRectangle(cornerRadius: cardRadius, style: .continuous))
     }
 
     private var draftAnchorSummary: String {
@@ -564,33 +624,31 @@ struct ActionSessionPreviewView: View {
     }
 
     private var reviewCardBackground: some View {
-        ActionChamferedShape(cornerCut: cardCornerCut)
+        RoundedRectangle(cornerRadius: cardRadius, style: .continuous)
             .fill(StageHUDTheme.reviewPanel)
             .overlay(
-                ActionChamferedShape(cornerCut: cardCornerCut)
+                RoundedRectangle(cornerRadius: cardRadius, style: .continuous)
                     .stroke(StageHUDTheme.reviewStrokeSoft, lineWidth: 1)
             )
-            .shadow(color: StageHUDTheme.panelShadow.opacity(0.55), radius: 8, x: 0, y: 3)
     }
 
     private var mainSurfaceBackground: some View {
-        ActionChamferedShape(cornerCut: largeSurfaceCornerCut)
+        RoundedRectangle(cornerRadius: surfaceRadius, style: .continuous)
             .fill(StageHUDTheme.reviewPanelRaised)
             .overlay(
-                ActionChamferedShape(cornerCut: largeSurfaceCornerCut)
+                RoundedRectangle(cornerRadius: surfaceRadius, style: .continuous)
                     .stroke(StageHUDTheme.reviewStrokeSoft, lineWidth: 1)
             )
-            .shadow(color: StageHUDTheme.panelShadow.opacity(0.65), radius: 12, x: 0, y: 4)
     }
 
     private var composerCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
                 Text("Compose")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textMuted)
                 Spacer()
-                statusPill(isComposingFeedback ? "OPEN" : "CLOSED", accent: isComposingFeedback)
+                statusPill(isComposingFeedback ? "Open" : "Closed", accent: isComposingFeedback)
                 feedbackButton(
                     isComposingFeedback ? "Close" : "Open",
                     systemImage: isComposingFeedback ? "xmark.circle" : "plus.circle",
@@ -621,7 +679,7 @@ struct ActionSessionPreviewView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .background(
-                    ActionChamferedShape(cornerCut: 6)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(StageHUDTheme.reviewAccentMuted)
                 )
             }
@@ -632,11 +690,11 @@ struct ActionSessionPreviewView: View {
                 .focused($noteEditorFocused)
                 .padding(12)
                 .background(
-                    ActionChamferedShape(cornerCut: 6)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(StageHUDTheme.reviewPanelRaised)
                 )
                 .overlay(
-                    ActionChamferedShape(cornerCut: 6)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(StageHUDTheme.reviewStrokeStrong, lineWidth: 1)
                 )
                 .opacity(isComposingFeedback ? 1 : 0.65)
@@ -644,6 +702,7 @@ struct ActionSessionPreviewView: View {
 
             HStack(spacing: 10) {
                 feedbackButton("Save Note", systemImage: "square.and.arrow.down", tone: .primary, action: saveFeedback)
+                    .keyboardShortcut(.return, modifiers: .command)
                 feedbackButton("Clear Anchors", systemImage: "eraser", action: clearDraftAnchors)
                 Spacer()
             }
@@ -719,11 +778,11 @@ struct ActionSessionPreviewView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .background(
-                    ActionChamferedShape(cornerCut: 6)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(StageHUDTheme.reviewPanelRaised)
                 )
                 .overlay(
-                    ActionChamferedShape(cornerCut: 6)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(StageHUDTheme.reviewStrokeStrong, lineWidth: 1)
                 )
 
@@ -748,7 +807,7 @@ struct ActionSessionPreviewView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .background(
-                        ActionChamferedShape(cornerCut: 6)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(StageHUDTheme.reviewAccentMuted)
                     )
                 }
@@ -799,11 +858,11 @@ struct ActionSessionPreviewView: View {
         }
         .padding(12)
         .background(
-            ActionChamferedShape(cornerCut: 6)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(StageHUDTheme.reviewPanelRaised)
         )
         .overlay(
-            ActionChamferedShape(cornerCut: 6)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .stroke(StageHUDTheme.reviewStrokeStrong, lineWidth: 1)
         )
     }
@@ -990,11 +1049,11 @@ struct ActionSessionPreviewView: View {
         }
         .padding(12)
         .background(
-            ActionChamferedShape(cornerCut: 6)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(model.focusedFeedbackItemID == item.id ? StageHUDTheme.reviewAccentMuted : StageHUDTheme.reviewPanelRaised)
         )
         .overlay(
-            ActionChamferedShape(cornerCut: 6)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .stroke(model.focusedFeedbackItemID == item.id ? StageHUDTheme.reviewAccent.opacity(0.55) : StageHUDTheme.reviewStrokeStrong, lineWidth: 1)
         )
         .contentShape(Rectangle())
@@ -1490,19 +1549,19 @@ struct ActionSessionPreviewView: View {
                 .mask {
                     Rectangle()
                         .overlay(alignment: .center) {
-                            ActionChamferedShape(cornerCut: 6)
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .frame(width: frame.width, height: frame.height)
                                 .position(x: frame.midX, y: frame.midY)
                                 .blendMode(.destinationOut)
                         }
                 }
 
-            ActionChamferedShape(cornerCut: 6)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(tint.opacity(fillOpacity))
                 .frame(width: frame.width, height: frame.height)
                 .position(x: frame.midX, y: frame.midY)
 
-            ActionChamferedShape(cornerCut: 6)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .stroke(tint.opacity(borderOpacity), style: StrokeStyle(lineWidth: 2, dash: [7, 4]))
                 .frame(width: frame.width, height: frame.height)
                 .position(x: frame.midX, y: frame.midY)
@@ -1607,10 +1666,10 @@ private struct ReviewSurfaceButtonStyle: ButtonStyle {
             .frame(minHeight: 32)
             .background(background(configuration: configuration))
             .overlay(
-                ActionChamferedShape(cornerCut: 5)
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .stroke(borderColor(configuration: configuration), lineWidth: 1)
             )
-            .clipShape(ActionChamferedShape(cornerCut: 5))
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .opacity(configuration.isPressed ? 0.93 : 1)
             .shadow(color: StageHUDTheme.panelShadow.opacity(configuration.isPressed ? 0.22 : 0.34), radius: 3, x: 0, y: 1)

@@ -7,6 +7,8 @@ struct ActionSessionThumbnailView: View {
     var width: CGFloat? = 150
     var height: CGFloat = 94
     var showCaption: Bool = true
+    var showDuration: Bool = true
+    var showNoteCount: Bool = false
     var cornerRadius: CGFloat = 10
     var showBorder: Bool = true
 
@@ -49,6 +51,20 @@ struct ActionSessionThumbnailView: View {
                     .background(.ultraThinMaterial, in: Capsule(style: .continuous))
                     .padding(8)
             }
+
+            VStack {
+                Spacer()
+                HStack(spacing: 6) {
+                    if showDuration, let duration = session.formattedDuration {
+                        badge(duration)
+                    }
+                    if showNoteCount, session.feedbackCount > 0 {
+                        badge("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")")
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(8)
+            }
         }
         .frame(width: width, height: height)
         .frame(maxWidth: width == nil ? .infinity : nil)
@@ -63,6 +79,15 @@ struct ActionSessionThumbnailView: View {
         .task(id: previewURL) {
             loadImage()
         }
+    }
+
+    private func badge(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Color.white.opacity(0.95))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.black.opacity(0.55), in: Capsule(style: .continuous))
     }
 
     private var thumbnailPlaceholder: some View {
