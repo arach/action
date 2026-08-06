@@ -332,7 +332,7 @@ struct ActionKeyboardCheatSheetView: View {
         (
             "App",
             [
-                ("⌘1", "Loop"),
+                ("⌘1", "Home"),
                 ("⌘2", "Library"),
                 ("⌘3", "Settings"),
                 ("⌘,", "Settings window"),
@@ -341,10 +341,10 @@ struct ActionKeyboardCheatSheetView: View {
             ]
         ),
         (
-            "Loop",
+            "Home",
             [
-                ("1 · 2 · 3", "Start · Edit · Review phases"),
-                ("New loop", "Draft Calculator scenario"),
+                ("1 · 2 · 3", "Start · Edit · Review"),
+                ("Start", "Draft a Calculator scenario"),
                 ("Approve & run", "Capture from Edit"),
             ]
         ),
