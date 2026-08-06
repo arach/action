@@ -4,27 +4,45 @@ import Foundation
 // The cycle is inherent to the product — not a named "loop" object.
 // Users work with a scenario (plan) and takes (runs).
 
-enum ActionFlowPhase: String, Codable, CaseIterable, Identifiable {
-    case start
+/// What you're looking at for a scenario — plan vs last take.
+/// Start is not a mode; it's creating a scenario.
+enum ActionFlowPhase: String, CaseIterable, Identifiable {
     case edit
     case review
 
     var id: String { rawValue }
 
+    /// User-facing labels (not wizard chrome).
     var title: String {
         switch self {
-        case .start: return "Start"
-        case .edit: return "Edit"
-        case .review: return "Review"
+        case .edit: return "Plan"
+        case .review: return "Take"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .start: return "Set a goal and draft a scenario"
-        case .edit: return "Inspect the plan and leave feedback"
-        case .review: return "Watch the take and mark truth on media"
+        case .edit: return "Steps the next run will follow"
+        case .review: return "Last capture for this scenario"
         }
+    }
+}
+
+extension ActionFlowPhase: Codable {
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "review":
+            self = .review
+        default:
+            // edit, start, plan, unknown → plan
+            self = .edit
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }
 
@@ -91,7 +109,7 @@ enum ActionScenarioPresets {
             id: id,
             title: "Calculator demo",
             goal: resolvedGoal,
-            phase: .edit,
+            phase: .edit, // plan
             scenarioId: "calculator-demo",
             targetAppName: "Calculator",
             targetBundleId: "com.apple.calculator",
