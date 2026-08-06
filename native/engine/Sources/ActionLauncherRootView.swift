@@ -76,6 +76,7 @@ struct ActionLauncherRootView: View {
     @State private var librarySearch = ""
     @State private var hoveredLibrarySessionID: String?
     @State private var sessionPendingDelete: ActionSessionSummary?
+    @State private var showKeyboardCheatSheet = false
     @AppStorage("Action.LauncherSidebarIconsOnly") private var sidebarIconsOnly = false
     @AppStorage("Action.LibraryLayout") private var libraryLayoutRaw = LibraryLayout.gallery.rawValue
     @AppStorage("Action.SettingsPane") private var settingsPaneRaw = SettingsPane.permissions.rawValue
@@ -137,6 +138,39 @@ struct ActionLauncherRootView: View {
         .onChange(of: model.reviewSelectionRequestID) { _, _ in
             selectedSection = .takes
         }
+        .onReceive(NotificationCenter.default.publisher(for: .actionShowKeyboardCheatSheet)) { _ in
+            showKeyboardCheatSheet = true
+        }
+        .sheet(isPresented: $showKeyboardCheatSheet) {
+            ActionKeyboardCheatSheetView(
+                onOpenDocs: openDocumentation,
+                onClose: { showKeyboardCheatSheet = false }
+            )
+        }
+        .background(
+            Group {
+                Button("") { selectedSection = .takes }
+                    .keyboardShortcut("1", modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                Button("") { selectedSection = .library }
+                    .keyboardShortcut("2", modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                Button("") { selectedSection = .settings }
+                    .keyboardShortcut("3", modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                Button("") { showKeyboardCheatSheet = true }
+                    .keyboardShortcut("?", modifiers: [])
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                Button("") { showKeyboardCheatSheet = true }
+                    .keyboardShortcut("/", modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+            }
+        )
         .confirmationDialog(
             "Delete this take?",
             isPresented: Binding(
@@ -429,6 +463,26 @@ struct ActionLauncherRootView: View {
             }
 
             Spacer()
+
+            Button {
+                showKeyboardCheatSheet = true
+            } label: {
+                Label("Keyboard", systemImage: "keyboard")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("Keyboard shortcuts (⌘/)")
+
+            Button {
+                openDocumentation()
+            } label: {
+                Label("Docs", systemImage: "book")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help(ActionDocs.siteHostLabel)
         }
         .padding(.horizontal, 20)
         .frame(height: 36)
@@ -438,6 +492,10 @@ struct ActionLauncherRootView: View {
                 .fill(StageHUDTheme.cardBorder)
                 .frame(height: 1)
         }
+    }
+
+    private func openDocumentation() {
+        NSWorkspace.shared.open(ActionDocs.siteURL)
     }
 
     private func footerChip(label: String, value: String, ok: Bool) -> some View {
@@ -1160,6 +1218,25 @@ struct ActionLauncherRootView: View {
                 ) {
                     EmptyView()
                 }
+            }
+
+            ActionSettingsSection(title: "Help") {
+                ActionSettingsRow(
+                    icon: "book",
+                    iconColor: StageHUDTheme.reviewAccent,
+                    title: "Documentation",
+                    subtitle: ActionDocs.siteHostLabel,
+                    onTap: openDocumentation
+                )
+
+                ActionSettingsDivider()
+
+                ActionSettingsRow(
+                    icon: "keyboard",
+                    title: "Keyboard shortcuts",
+                    subtitle: "App navigation, library, and Takes review.",
+                    onTap: { showKeyboardCheatSheet = true }
+                )
             }
         }
     }

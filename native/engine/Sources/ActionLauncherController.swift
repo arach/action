@@ -179,10 +179,40 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         windowItem.submenu = windowMenu
         mainMenu.addItem(windowItem)
 
+        let helpItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
+        let helpMenu = NSMenu(title: "Help")
+        let keyboardItem = NSMenuItem(
+            title: "Keyboard Shortcuts",
+            action: #selector(showKeyboardShortcuts),
+            keyEquivalent: "/"
+        )
+        keyboardItem.keyEquivalentModifierMask = [.command]
+        helpMenu.addItem(keyboardItem)
+        helpMenu.addItem(
+            withTitle: "Action Documentation",
+            action: #selector(openDocumentation),
+            keyEquivalent: ""
+        )
+        helpItem.submenu = helpMenu
+        mainMenu.addItem(helpItem)
+
         let app = NSApplication.shared
         app.mainMenu = mainMenu
         app.windowsMenu = windowMenu
         app.servicesMenu = NSMenu(title: "Services")
+        app.helpMenu = helpMenu
+    }
+
+    @objc
+    private func showKeyboardShortcuts() {
+        NotificationCenter.default.post(name: .actionShowKeyboardCheatSheet, object: nil)
+        showWindow()
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    @objc
+    private func openDocumentation() {
+        NSWorkspace.shared.open(ActionDocs.siteURL)
     }
 
     @objc
