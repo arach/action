@@ -119,10 +119,36 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var appearanceMode: ActionAppearanceMode
     @Published private(set) var reviewSelectionRequestID = UUID()
 
+    /// Agentic loop documents (Start → Edit → Review).
+    @Published var loops: [ActionLoopDocument] = []
+    @Published var selectedLoopID: String?
+    @Published var selectedLoopStepID: String?
+    @Published var loopDraftGoal: String = "Show a short Calculator demo with keyboard and click input"
+    @Published var loopStepFeedbackDraft: String = ""
+    @Published private(set) var loopNavigationRequestID = UUID()
+
+    var selectedLoop: ActionLoopDocument? {
+        if let selectedLoopID,
+           let loop = loops.first(where: { $0.id == selectedLoopID }) {
+            return loop
+        }
+        return loops.first
+    }
+
+    var selectedLoopStep: ActionLoopScenarioStep? {
+        guard let loop = selectedLoop else { return nil }
+        if let selectedLoopStepID,
+           let step = loop.steps.first(where: { $0.id == selectedLoopStepID }) {
+            return step
+        }
+        return loop.steps.first
+    }
+
     init() {
         self.consoleURL = localConsoleURL
         self.appearanceMode = ActionAppearanceStore.shared.mode
         refreshSessions()
+        refreshLoops()
         refreshConsoleState()
         startConsoleWatchdog()
     }
@@ -319,6 +345,130 @@ final class ActionLauncherViewModel: ObservableObject {
     }
 
     func runGuidedCalculatorDemo() {
+        runGuidedCalculatorDemo(forLoopID: nil)
+    }
+
+    /// Creates a Calculator loop, drafts the scenario, and opens Edit.
+    func startCalculatorLoop(goal: String? = nil) {
+        let loop = ActionLoopPresets.makeCalculatorLoop(goal: goal ?? loopDraftGoal)
+        do {
+            try ActionLoopStore.shared.save(loop)
+            refreshLoops()
+            selectedLoopID = loop.id
+            selectedLoopStepID = loop.steps.first?.id
+            setLoopPhase(.edit)
+            loopNavigationRequestID = UUID()
+            guidedDemoStatus = "Scenario drafted — review steps, then run"
+        } catch {
+            guidedDemoStatus = "Failed to create loop: \(error.localizedDescription)"
+            logger.error("Create loop failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func selectLoop(_ loop: ActionLoopDocument) {
+        selectedLoopID = loop.id
+        selectedLoopStepID = loop.steps.first?.id
+        if let latest = loop.latestSessionId {
+            selectedSessionID = latest
+        }
+    }
+
+    func setLoopPhase(_ phase: ActionLoopPhase) {
+        guard var loop = selectedLoop else { return }
+        loop.phase = phase
+        persistLoop(loop)
+
+        if phase == .review, let sessionId = loop.latestSessionId {
+            selectedSessionID = sessionId
+            reviewSelectionRequestID = UUID()
+        }
+    }
+
+    func selectLoopStep(_ step: ActionLoopScenarioStep) {
+        selectedLoopStepID = step.id
+    }
+
+    func toggleSkipLoopStep(_ stepID: String) {
+        guard var loop = selectedLoop,
+              let index = loop.steps.firstIndex(where: { $0.id == stepID }) else { return }
+        let current = loop.steps[index].status
+        loop.steps[index].status = current == "skipped" ? "pending" : "skipped"
+        persistLoop(loop)
+    }
+
+    func addFeedbackToSelectedLoopStep() {
+        let text = loopStepFeedbackDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty,
+              var loop = selectedLoop,
+              let stepID = selectedLoopStepID,
+              let index = loop.steps.firstIndex(where: { $0.id == stepID }) else { return }
+
+        let item = ActionLoopStepFeedback(
+            id: UUID().uuidString,
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            instruction: text
+        )
+        loop.steps[index].feedback.append(item)
+        if loop.steps[index].status == "pending" {
+            loop.steps[index].status = "flagged"
+        }
+        loopStepFeedbackDraft = ""
+        persistLoop(loop)
+        guidedDemoStatus = "Feedback saved on step \(loop.steps[index].index)"
+    }
+
+    func approveAndRunSelectedLoop() {
+        guard let loop = selectedLoop else {
+            runGuidedCalculatorDemo(forLoopID: nil)
+            return
+        }
+        setLoopPhase(.edit)
+        runGuidedCalculatorDemo(forLoopID: loop.id)
+    }
+
+    func refreshLoops() {
+        loops = ActionLoopStore.shared.loadAll()
+        if let selectedLoopID, loops.contains(where: { $0.id == selectedLoopID }) {
+            self.selectedLoopID = selectedLoopID
+        } else {
+            self.selectedLoopID = loops.first?.id
+        }
+        if let loop = selectedLoop {
+            if let selectedLoopStepID, loop.steps.contains(where: { $0.id == selectedLoopStepID }) {
+                self.selectedLoopStepID = selectedLoopStepID
+            } else {
+                selectedLoopStepID = loop.steps.first?.id
+            }
+        } else {
+            selectedLoopStepID = nil
+        }
+    }
+
+    func deleteSelectedLoop() {
+        guard let id = selectedLoopID else { return }
+        try? ActionLoopStore.shared.delete(id: id)
+        if selectedLoopID == id {
+            selectedLoopID = nil
+        }
+        refreshLoops()
+    }
+
+    private func persistLoop(_ loop: ActionLoopDocument) {
+        do {
+            try ActionLoopStore.shared.save(loop)
+            if let index = loops.firstIndex(where: { $0.id == loop.id }) {
+                loops[index] = loop
+            } else {
+                loops.insert(loop, at: 0)
+            }
+            selectedLoopID = loop.id
+        } catch {
+            guidedDemoStatus = "Failed to save loop: \(error.localizedDescription)"
+            logger.error("Save loop failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func runGuidedCalculatorDemo(forLoopID loopID: String?) {
         guard !isRunningGuidedDemo else {
             return
         }
@@ -331,14 +481,40 @@ final class ActionLauncherViewModel: ObservableObject {
                 if let result = try await launchGuidedDemo() {
                     guidedDemoStatus = "Completed \(result.expression) = \(result.actualResult)"
                     refreshSessions()
+                    selectedSessionID = result.sessionId
+
+                    if let loopID,
+                       var loop = loops.first(where: { $0.id == loopID })
+                        ?? ActionLoopStore.shared.loadAll().first(where: { $0.id == loopID }) {
+                        if !loop.sessionIds.contains(result.sessionId) {
+                            loop.sessionIds.insert(result.sessionId, at: 0)
+                        }
+                        loop.latestSessionId = result.sessionId
+                        loop.lastRunStatus = "completed"
+                        loop.phase = .review
+                        loop.title = "Calculator · \(result.expression)"
+                        persistLoop(loop)
+                        selectedLoopID = loop.id
+                        loopNavigationRequestID = UUID()
+                        reviewSelectionRequestID = UUID()
+                    }
                 } else {
                     guidedDemoStatus = "Cancelled"
+                    if let loopID, var loop = loops.first(where: { $0.id == loopID }) {
+                        loop.lastRunStatus = "cancelled"
+                        persistLoop(loop)
+                    }
                 }
             } catch {
                 guidedDemoStatus = "Failed: \(error.localizedDescription)"
                 logger.error("Guided calculator demo failed: \(error.localizedDescription, privacy: .public)")
+                if let loopID, var loop = loops.first(where: { $0.id == loopID }) {
+                    loop.lastRunStatus = "failed"
+                    persistLoop(loop)
+                }
             }
             isRunningGuidedDemo = false
+            refreshLoops()
         }
     }
 

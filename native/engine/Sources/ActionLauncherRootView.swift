@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ActionLauncherRootView: View {
     private enum LauncherSection: String, CaseIterable, Identifiable, Hashable {
-        case takes = "Takes"
+        case loop = "Loop"
         case library = "Library"
         case settings = "Settings"
 
@@ -11,10 +11,10 @@ struct ActionLauncherRootView: View {
 
         var subtitle: String {
             switch self {
-            case .takes:
-                return "Latest session"
+            case .loop:
+                return "Start · Edit · Review"
             case .library:
-                return "All sessions"
+                return "All takes"
             case .settings:
                 return "Permissions and preferences"
             }
@@ -72,7 +72,7 @@ struct ActionLauncherRootView: View {
     }
 
     @ObservedObject var model: ActionLauncherViewModel
-    @State private var selectedSection: LauncherSection? = .takes
+    @State private var selectedSection: LauncherSection? = .loop
     @State private var librarySearch = ""
     @State private var hoveredLibrarySessionID: String?
     @State private var sessionPendingDelete: ActionSessionSummary?
@@ -92,7 +92,7 @@ struct ActionLauncherRootView: View {
     }
 
     private var activeSection: LauncherSection {
-        selectedSection ?? .takes
+        selectedSection ?? .loop
     }
 
     private var libraryLayout: LibraryLayout {
@@ -136,7 +136,13 @@ struct ActionLauncherRootView: View {
         .frame(minWidth: 1100, minHeight: 720)
         .background(StageHUDTheme.appBackground)
         .onChange(of: model.reviewSelectionRequestID) { _, _ in
-            selectedSection = .takes
+            selectedSection = .loop
+            if model.selectedLoop != nil {
+                model.setLoopPhase(.review)
+            }
+        }
+        .onChange(of: model.loopNavigationRequestID) { _, _ in
+            selectedSection = .loop
         }
         .onReceive(NotificationCenter.default.publisher(for: .actionShowKeyboardCheatSheet)) { _ in
             showKeyboardCheatSheet = true
@@ -149,7 +155,7 @@ struct ActionLauncherRootView: View {
         }
         .background(
             Group {
-                Button("") { selectedSection = .takes }
+                Button("") { selectedSection = .loop }
                     .keyboardShortcut("1", modifiers: .command)
                     .opacity(0)
                     .frame(width: 0, height: 0)
@@ -199,7 +205,7 @@ struct ActionLauncherRootView: View {
             sidebarHeader
 
             VStack(spacing: 2) {
-                ForEach([LauncherSection.takes, .library], id: \.self) { section in
+                ForEach([LauncherSection.loop, .library], id: \.self) { section in
                     sidebarItem(section)
                 }
             }
@@ -306,8 +312,10 @@ struct ActionLauncherRootView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             switch activeSection {
-                            case .takes:
-                                takesSection
+                            case .loop:
+                                ActionLoopWorkspaceView(model: model, onOpenLibrary: {
+                                    selectedSection = .library
+                                })
                             case .library:
                                 librarySection
                             case .settings:
@@ -345,11 +353,21 @@ struct ActionLauncherRootView: View {
                 libraryLayoutPicker
             }
 
-            if activeSection == .takes || activeSection == .library {
+            if activeSection == .loop {
                 launcherButton(
-                    model.isRunningGuidedDemo ? "Recording…" : "New take",
+                    "New loop",
                     tone: .primary,
-                    action: model.runGuidedCalculatorDemo
+                    action: { model.startCalculatorLoop() }
+                )
+                .disabled(model.isRunningGuidedDemo)
+            } else if activeSection == .library {
+                launcherButton(
+                    model.isRunningGuidedDemo ? "Recording…" : "New loop",
+                    tone: .primary,
+                    action: {
+                        model.startCalculatorLoop()
+                        selectedSection = .loop
+                    }
                 )
                 .disabled(model.isRunningGuidedDemo)
             }
@@ -423,11 +441,11 @@ struct ActionLauncherRootView: View {
 
     private var headerSubtitle: String {
         switch activeSection {
-        case .takes:
-            if model.selectedSession != nil {
-                return "Playback and notes"
+        case .loop:
+            if let loop = model.selectedLoop {
+                return "\(loop.phase.title) · \(loop.title)"
             }
-            return "Record a demo, then review it here"
+            return "Start · Edit · Review"
         case .library:
             let total = model.recentSessions.count
             if total == 0 {
@@ -883,7 +901,16 @@ struct ActionLauncherRootView: View {
 
     private func openSession(_ session: ActionSessionSummary) {
         model.selectSession(session)
-        selectedSection = .takes
+        selectedSection = .loop
+        if let loop = model.loops.first(where: {
+            $0.latestSessionId == session.sessionId
+                || $0.sessionIds.contains(session.sessionId)
+                || $0.latestSessionId == session.id
+                || $0.sessionIds.contains(session.id)
+        }) {
+            model.selectLoop(loop)
+            model.setLoopPhase(.review)
+        }
     }
 
     // MARK: - Settings
@@ -1277,8 +1304,8 @@ struct ActionLauncherRootView: View {
 
     private func iconName(for section: LauncherSection) -> String {
         switch section {
-        case .takes:
-            return "play.rectangle"
+        case .loop:
+            return "arrow.triangle.2.circlepath"
         case .library:
             return "square.stack"
         case .settings:
