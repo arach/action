@@ -1,5 +1,6 @@
 import AppKit
 import ActionCore
+import AVFoundation
 import Foundation
 import OSLog
 
@@ -37,6 +38,8 @@ struct ActionSessionSummary: Identifiable {
     let startedAt: Date?
     let finishedAt: Date?
     let feedbackCount: Int
+    /// Best-effort media duration in seconds (video first, wall-clock fallback).
+    let durationSeconds: Double?
 
     var agentFeedbackMarkdownURL: URL {
         artifactDirectoryURL.appendingPathComponent("agent-feedback.md")
@@ -44,6 +47,24 @@ struct ActionSessionSummary: Identifiable {
 
     var agentFeedbackJSONURL: URL {
         artifactDirectoryURL.appendingPathComponent("agent-feedback.json")
+    }
+
+    var displayTitle: String {
+        let compact = expression.replacingOccurrences(of: " ", with: "")
+        return compact.isEmpty ? sessionId : compact
+    }
+
+    var formattedDuration: String? {
+        guard let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 else {
+            return nil
+        }
+        if durationSeconds < 60 {
+            return String(format: "%.0fs", durationSeconds.rounded())
+        }
+        let total = Int(durationSeconds.rounded())
+        let minutes = total / 60
+        let seconds = total % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 
@@ -426,6 +447,17 @@ final class ActionLauncherViewModel: ObservableObject {
         }
     }
 
+    /// Permanently removes a session's artifact directory from disk.
+    func deleteSession(_ session: ActionSessionSummary) throws {
+        try FileManager.default.removeItem(at: session.artifactDirectoryURL)
+        if selectedSessionID == session.id {
+            selectedSessionID = nil
+            focusedFeedbackItemID = nil
+        }
+        refreshSessions()
+        logger.notice("Deleted session \(session.sessionId, privacy: .public)")
+    }
+
     var selectedSession: ActionSessionSummary? {
         if let selectedSessionID,
            let selected = recentSessions.first(where: { $0.id == selectedSessionID }) {
@@ -716,12 +748,20 @@ final class ActionLauncherViewModel: ObservableObject {
         let resultScreenshotURL = screenshots.first(where: { $0.lastPathComponent == "result.png" })
         let feedbackCount = ((try? Data(contentsOf: feedbackURL))
             .flatMap { try? JSONDecoder().decode(ActionSessionFeedbackDocument.self, from: $0) })?.items.count ?? 0
+        let startedAt = isoFormatter.date(from: trace.startedAt)
+        let finishedAt = isoFormatter.date(from: trace.finishedAt)
+        let videoURL = URL(fileURLWithPath: trace.videoPath)
+        let durationSeconds = Self.resolveDurationSeconds(
+            videoURL: videoURL,
+            startedAt: startedAt,
+            finishedAt: finishedAt
+        )
 
         return ActionSessionSummary(
             id: trace.sessionId,
             sessionId: trace.sessionId,
             artifactDirectoryURL: sessionURL,
-            videoURL: URL(fileURLWithPath: trace.videoPath),
+            videoURL: videoURL,
             traceURL: traceURL,
             feedbackURL: feedbackURL,
             stageScreenshotURL: stageScreenshotURL,
@@ -729,10 +769,32 @@ final class ActionLauncherViewModel: ObservableObject {
             expression: trace.expression,
             expectedResult: trace.expectedResult,
             actualResult: trace.actualResult,
-            startedAt: isoFormatter.date(from: trace.startedAt),
-            finishedAt: isoFormatter.date(from: trace.finishedAt),
-            feedbackCount: feedbackCount
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            feedbackCount: feedbackCount,
+            durationSeconds: durationSeconds
         )
+    }
+
+    private static func resolveDurationSeconds(
+        videoURL: URL,
+        startedAt: Date?,
+        finishedAt: Date?
+    ) -> Double? {
+        if FileManager.default.fileExists(atPath: videoURL.path) {
+            let asset = AVURLAsset(url: videoURL)
+            let seconds = CMTimeGetSeconds(asset.duration)
+            if seconds.isFinite, seconds > 0 {
+                return seconds
+            }
+        }
+        if let startedAt, let finishedAt {
+            let wall = finishedAt.timeIntervalSince(startedAt)
+            if wall.isFinite, wall > 0 {
+                return wall
+            }
+        }
+        return nil
     }
 
     private func launchGuidedDemo() async throws -> GuidedCaptureLauncherResult? {
