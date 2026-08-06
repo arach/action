@@ -82,6 +82,25 @@ struct ActionWorkspaceView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Open plan") {
+                model.selectScenario(scenario)
+                model.setFlowPhase(.edit)
+            }
+            if scenario.latestSessionId != nil || !scenario.sessionIds.isEmpty {
+                Button("Open last take") {
+                    model.selectScenario(scenario, preferTake: true)
+                }
+            }
+            Button("Run") {
+                model.selectScenario(scenario)
+                model.approveAndRunSelectedScenario()
+            }
+            Divider()
+            Button("Delete…", role: .destructive) {
+                model.deleteScenario(scenario)
+            }
+        }
     }
 
     // MARK: - Detail

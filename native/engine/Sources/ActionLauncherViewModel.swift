@@ -365,12 +365,28 @@ final class ActionLauncherViewModel: ObservableObject {
         }
     }
 
-    func selectScenario(_ scenario: ActionScenarioDocument) {
+    func selectScenario(_ scenario: ActionScenarioDocument, preferTake: Bool = false) {
         selectedScenarioID = scenario.id
         selectedScenarioStepID = scenario.steps.first?.id
         if let latest = scenario.latestSessionId {
             selectedSessionID = latest
         }
+        // Open on plan by default; prefer take when jumping from a capture.
+        if preferTake, scenario.latestSessionId != nil || !scenario.sessionIds.isEmpty {
+            setFlowPhase(.review)
+        } else if scenario.phase == .review, scenario.latestSessionId == nil {
+            setFlowPhase(.edit)
+        }
+    }
+
+    func deleteScenario(_ scenario: ActionScenarioDocument) {
+        try? ActionScenarioStore.shared.delete(id: scenario.id)
+        if selectedScenarioID == scenario.id {
+            selectedScenarioID = nil
+            selectedScenarioStepID = nil
+        }
+        refreshScenarios()
+        guidedDemoStatus = "Scenario deleted"
     }
 
     func setFlowPhase(_ phase: ActionFlowPhase) {
@@ -422,7 +438,8 @@ final class ActionLauncherViewModel: ObservableObject {
             runGuidedCalculatorDemo(forScenarioID: nil)
             return
         }
-        setFlowPhase(.edit)
+        // Stay on plan while running; success flips to last take.
+        guidedDemoStatus = "Running “\(scenario.title)”…"
         runGuidedCalculatorDemo(forScenarioID: scenario.id)
     }
 
