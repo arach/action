@@ -472,6 +472,10 @@ struct ActionLauncherRootView: View {
         VStack(alignment: .leading, spacing: 16) {
             homeHero
 
+            if let scenario = model.scenarios.first {
+                homeContinueCard(scenario)
+            }
+
             HStack(alignment: .top, spacing: 14) {
                 homeRecentScenarios
                 homeRecentTakes
@@ -479,6 +483,49 @@ struct ActionLauncherRootView: View {
 
             homeStatus
         }
+    }
+
+    private func homeContinueCard(_ scenario: ActionScenarioDocument) -> some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Continue")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(StageHUDTheme.textMuted)
+                    .textCase(.uppercase)
+                Text(scenario.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(StageHUDTheme.textPrimary)
+                Text(scenario.goal)
+                    .font(.system(size: 12))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 8) {
+                launcherButton("Open") {
+                    model.selectScenario(scenario)
+                    selectedSection = .scenarios
+                }
+                if scenario.latestSessionId != nil {
+                    launcherButton("Last take") {
+                        model.selectScenario(scenario, preferTake: true)
+                        selectedSection = .scenarios
+                    }
+                }
+                launcherButton(
+                    model.isRunningGuidedDemo ? "Running…" : "Run",
+                    tone: .primary,
+                    action: {
+                        model.selectScenario(scenario)
+                        selectedSection = .scenarios
+                        model.approveAndRunSelectedScenario()
+                    }
+                )
+                .disabled(model.isRunningGuidedDemo)
+            }
+        }
+        .padding(16)
+        .background(cardBackground)
     }
 
     private var homeHero: some View {
