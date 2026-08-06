@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ActionLauncherRootView: View {
     private enum LauncherSection: String, CaseIterable, Identifiable, Hashable {
-        case home = "Home"
+        case scenarios = "Scenarios"
         case library = "Library"
         case settings = "Settings"
 
@@ -11,10 +11,10 @@ struct ActionLauncherRootView: View {
 
         var subtitle: String {
             switch self {
-            case .home:
-                return "Start · Edit · Review"
+            case .scenarios:
+                return "Plans you can run"
             case .library:
-                return "All takes"
+                return "Captured takes"
             case .settings:
                 return "Permissions and preferences"
             }
@@ -72,7 +72,7 @@ struct ActionLauncherRootView: View {
     }
 
     @ObservedObject var model: ActionLauncherViewModel
-    @State private var selectedSection: LauncherSection? = .home
+    @State private var selectedSection: LauncherSection? = .scenarios
     @State private var librarySearch = ""
     @State private var hoveredLibrarySessionID: String?
     @State private var sessionPendingDelete: ActionSessionSummary?
@@ -92,7 +92,7 @@ struct ActionLauncherRootView: View {
     }
 
     private var activeSection: LauncherSection {
-        selectedSection ?? .home
+        selectedSection ?? .scenarios
     }
 
     private var libraryLayout: LibraryLayout {
@@ -136,13 +136,13 @@ struct ActionLauncherRootView: View {
         .frame(minWidth: 1100, minHeight: 720)
         .background(StageHUDTheme.appBackground)
         .onChange(of: model.reviewSelectionRequestID) { _, _ in
-            selectedSection = .home
+            selectedSection = .scenarios
             if model.selectedScenario != nil {
                 model.setFlowPhase(.review)
             }
         }
         .onChange(of: model.workspaceNavigationRequestID) { _, _ in
-            selectedSection = .home
+            selectedSection = .scenarios
         }
         .onReceive(NotificationCenter.default.publisher(for: .actionShowKeyboardCheatSheet)) { _ in
             showKeyboardCheatSheet = true
@@ -155,7 +155,7 @@ struct ActionLauncherRootView: View {
         }
         .background(
             Group {
-                Button("") { selectedSection = .home }
+                Button("") { selectedSection = .scenarios }
                     .keyboardShortcut("1", modifiers: .command)
                     .opacity(0)
                     .frame(width: 0, height: 0)
@@ -205,7 +205,7 @@ struct ActionLauncherRootView: View {
             sidebarHeader
 
             VStack(spacing: 2) {
-                ForEach([LauncherSection.home, .library], id: \.self) { section in
+                ForEach([LauncherSection.scenarios, .library], id: \.self) { section in
                     sidebarItem(section)
                 }
             }
@@ -312,7 +312,7 @@ struct ActionLauncherRootView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             switch activeSection {
-                            case .home:
+                            case .scenarios:
                                 ActionWorkspaceView(model: model, onOpenLibrary: {
                                     selectedSection = .library
                                 })
@@ -353,20 +353,13 @@ struct ActionLauncherRootView: View {
                 libraryLayoutPicker
             }
 
-            if activeSection == .home {
+            if activeSection == .scenarios || activeSection == .library {
                 launcherButton(
-                    "Start",
-                    tone: .primary,
-                    action: { model.startCalculatorScenario() }
-                )
-                .disabled(model.isRunningGuidedDemo)
-            } else if activeSection == .library {
-                launcherButton(
-                    model.isRunningGuidedDemo ? "Recording…" : "Start",
+                    "New scenario",
                     tone: .primary,
                     action: {
                         model.startCalculatorScenario()
-                        selectedSection = .home
+                        selectedSection = .scenarios
                     }
                 )
                 .disabled(model.isRunningGuidedDemo)
@@ -441,11 +434,12 @@ struct ActionLauncherRootView: View {
 
     private var headerSubtitle: String {
         switch activeSection {
-        case .home:
+        case .scenarios:
             if let scenario = model.selectedScenario {
-                return "\(scenario.phase.title) · \(scenario.title)"
+                return scenario.title
             }
-            return "Start · Edit · Review"
+            let n = model.scenarios.count
+            return n == 0 ? "No scenarios yet" : "\(n) scenario\(n == 1 ? "" : "s")"
         case .library:
             let total = model.recentSessions.count
             if total == 0 {
@@ -901,7 +895,7 @@ struct ActionLauncherRootView: View {
 
     private func openSession(_ session: ActionSessionSummary) {
         model.selectSession(session)
-        selectedSection = .home
+        selectedSection = .scenarios
         if let scenario = model.scenarios.first(where: {
             $0.latestSessionId == session.sessionId
                 || $0.sessionIds.contains(session.sessionId)
@@ -1304,8 +1298,8 @@ struct ActionLauncherRootView: View {
 
     private func iconName(for section: LauncherSection) -> String {
         switch section {
-        case .home:
-            return "square.grid.2x2"
+        case .scenarios:
+            return "list.bullet.rectangle"
         case .library:
             return "square.stack"
         case .settings:
