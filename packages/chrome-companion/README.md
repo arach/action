@@ -39,49 +39,68 @@ Action should run Chrome browser-surface work in an Action-owned Chrome profile
 by default. This keeps extension state, tabs, cookies, cache, and other browser
 settings deterministic and avoids mutating the user's daily Chrome profile.
 
-For authenticated tools, use a named persistent Action profile and let the user
-sign in there once. Attaching to the user's existing Chrome profile should be an
-explicit mode.
+For authenticated tools, use a named persistent Action profile and either:
+
+1. sign in once interactively in that profile, or
+2. **selectively import cookies** from personal Chrome (domain allowlists).
+
+Attaching to the user's existing Chrome profile should be an explicit mode, not
+the default. Full product docs: [docs/browser-profiles.md](../../docs/browser-profiles.md).
 
 Create and prepare a named profile with:
 
 ```bash
+bun run profile -- setup coding
+# or the historical example:
 bun run profile -- setup mira
 ```
 
 This builds the extension, creates the profile directory, opens that profile to
 `chrome://extensions`, and reveals the extension `dist/` folder in Finder.
-`mira` is the example Action browser identity: a friendly, persistent Chrome
-profile for observing and acting in web tools without touching the daily browser.
+Named identities (for example `coding` or `mira`) are persistent Chrome profiles
+for observing and acting in web tools without touching the daily browser.
 
-Launch it later with:
+### Cookie seeding
 
 ```bash
-bun run profile -- launch mira
+bun run import:cookies -- --list-profiles
+bun run import:cookies -- --list-action-profiles
+bun run import:cookies -- list --into coding --domains github.com
+bun run import:cookies -- import --into coding --domains github.com --confirm
 ```
 
-Check the repeatable setup state with:
+Also available as:
 
 ```bash
-bun run profile -- check mira
+bun run profile -- import-cookies import --into coding --domains github.com --confirm
+```
+
+### Launch and check
+
+```bash
+bun run profile -- launch coding
+bun run profile -- check coding
 ```
 
 If `check` reports a companion extension id, open the persistent bridge page:
 
 ```bash
-bun run profile -- bridge mira --extension-id <id-from-check>
+bun run profile -- bridge coding --extension-id <id-from-check>
 ```
 
 Profiles live under:
 
-`~/Library/Application Support/Action/ChromeProfiles/default`
+`~/Library/Application Support/Action/ChromeProfiles/<name>`
 
-Named profiles use sibling directories, for example:
+Examples:
 
-`~/Library/Application Support/Action/ChromeProfiles/mira`
+- `.../ChromeProfiles/agent-browser` — Action Browser MCP default
+- `.../ChromeProfiles/coding`
+- `.../ChromeProfiles/mira`
 
 Override the root with `ACTION_CHROME_COMPANION_PROFILE_ROOT` or a single profile
-with `ACTION_CHROME_COMPANION_PROFILE_DIR`.
+with `ACTION_CHROME_COMPANION_PROFILE_DIR`. Action Browser MCP shares the same
+root via `ACTION_BROWSER_PROFILE` / `ACTION_BROWSER_PROFILE_ROOT`.
 
 Chrome Stable may ignore command-line `--load-extension`, so the reliable setup
 is:

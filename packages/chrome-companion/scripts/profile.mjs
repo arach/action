@@ -52,6 +52,10 @@ switch (command) {
     break;
   case "import-cookies": {
     const importArgs = ["scripts/import-cookies.mjs", ...args];
+    const hasInto = args.some((value) => value === "--into" || value === "--profile" || value === "--to");
+    if (!hasInto) {
+      importArgs.push("--into", profileName);
+    }
     const importRun = spawnSync("bun", importArgs, { cwd: rootPath, stdio: "inherit" });
     process.exit(importRun.status ?? 1);
     break;
@@ -209,16 +213,30 @@ function printHelp() {
   bun run profile -- setup [name]
   bun run profile -- launch [name] [--url URL]
   bun run profile -- bridge [name] --extension-id EXTENSION_ID
-  bun run profile -- import-cookies list --domains DOMAIN
-  bun run profile -- import-cookies import --domains DOMAIN --only NAME --confirm
+  bun run profile -- import-cookies list --into NAME --domains DOMAIN
+  bun run profile -- import-cookies import --into NAME --domains DOMAIN --only COOKIE --confirm
+  bun run profile -- import-cookies --list-action-profiles
+  bun run profile -- import-cookies --list-profiles
   bun run profile -- check [name]
   bun run profile -- path [name]
+
+Named Action profiles live under:
+  ~/Library/Application Support/Action/ChromeProfiles/<name>
+
+Cookie seeding (selective, not full-profile clone):
+  bun run profile -- import-cookies import --into coding --domains github.com --confirm
+
+Companion extension (load unpacked once per profile):
+  bun run profile -- setup coding
+  # then Load unpacked -> packages/chrome-companion/dist
 
 Environment:
   ACTION_CHROME_COMPANION_PROFILE       Profile name, default: default
   ACTION_CHROME_COMPANION_PROFILE_DIR   Absolute profile directory override
+  ACTION_CHROME_COMPANION_PROFILE_ROOT  Profiles root override
   ACTION_CHROME_COMPANION_DEBUG_PORT    Chrome remote debugging port, default: 9333
   ACTION_CHROME_COMPANION_EXTENSION_ID  Open bridge page after launch
+  ACTION_BROWSER_PROFILE                Alias used by Action Browser MCP
 `);
 }
 

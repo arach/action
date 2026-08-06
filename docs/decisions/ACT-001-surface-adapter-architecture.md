@@ -162,6 +162,9 @@ Profile policy:
 - Repeatable local setup should create and launch named Action profiles through
   project commands. The user-owned step is approving the companion extension in
   the Action profile when Chrome requires UI approval.
+- Authenticated Action profiles may be seeded with **selective cookie import**
+  from personal Chrome (domain / name allowlists), not a full profile clone.
+  See [docs/browser-profiles.md](../browser-profiles.md).
 
 Core abilities:
 

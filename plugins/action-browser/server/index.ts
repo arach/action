@@ -1,9 +1,19 @@
 #!/usr/bin/env bun
 
 import { mkdir } from "node:fs/promises";
-import { mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 type JsonObject = Record<string, unknown>;
 
@@ -48,9 +58,17 @@ type ReleaseOutcome = {
 };
 
 const debugPort = Number(process.env.ACTION_BROWSER_DEBUG_PORT ?? "9334");
-const profileName = process.env.ACTION_BROWSER_PROFILE ?? "agent-browser";
-const profileDir = process.env.ACTION_BROWSER_PROFILE_DIR
-  ?? join(homedir(), "Library/Application Support/Action/ChromeProfiles", profileName);
+const profileRoot = process.env.ACTION_BROWSER_PROFILE_ROOT
+  ?? process.env.ACTION_CHROME_COMPANION_PROFILE_ROOT
+  ?? join(homedir(), "Library/Application Support/Action/ChromeProfiles");
+const fixedProfileDir = process.env.ACTION_BROWSER_PROFILE_DIR
+  ?? process.env.ACTION_CHROME_COMPANION_PROFILE_DIR;
+let profileName = sanitizeProfileName(
+  process.env.ACTION_BROWSER_PROFILE
+    ?? process.env.ACTION_CHROME_COMPANION_PROFILE
+    ?? "agent-browser",
+);
+let profileDir = fixedProfileDir ?? join(profileRoot, profileName);
 const artifactRoot = process.env.ACTION_BROWSER_ARTIFACT_DIR
   ?? join(homedir(), "Library/Application Support/Action/BrowserArtifacts");
 const sessionRoot = process.env.ACTION_BROWSER_SESSION_DIR
@@ -62,6 +80,8 @@ const idleTimeoutMs = Math.max(0, Number(process.env.ACTION_BROWSER_IDLE_TIMEOUT
 const shutdownBudgetMs = Math.max(500, Number(process.env.ACTION_BROWSER_SHUTDOWN_TIMEOUT_MS ?? "4000") || 4_000);
 const chromeAppName = process.env.ACTION_BROWSER_CHROME_APP ?? "Google Chrome";
 const chromeBaseURL = `http://127.0.0.1:${debugPort}`;
+const companionBridgeHealthURL = process.env.ACTION_CHROME_COMPANION_HEALTH_URL
+  ?? "http://127.0.0.1:4321/health";
 const textDecoder = new TextDecoder();
 let currentTargetId: string | undefined;
 let claimHeld = false;
@@ -69,15 +89,202 @@ let ownsBrowser = false;
 let shuttingDown = false;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 
+function sanitizeProfileName(name: string): string {
+  const cleaned = name.trim().replace(/[^A-Za-z0-9._-]/g, "-");
+  if (!cleaned || cleaned === "." || cleaned === "..") {
+    throw new Error(`Invalid Action profile name: ${name}`);
+  }
+  return cleaned;
+}
+
+function resolveActionRoot(): string {
+  if (process.env.ACTION_ROOT) return resolve(process.env.ACTION_ROOT);
+  // plugins/action-browser/server -> repo root
+  return resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+}
+
+function companionScriptsDir(): string {
+  return join(resolveActionRoot(), "packages/chrome-companion/scripts");
+}
+
+function companionDistDir(): string {
+  return join(resolveActionRoot(), "packages/chrome-companion/dist");
+}
+
+function writeProfileMeta(name: string, dir: string): void {
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, ".action-profile.json"),
+      `${JSON.stringify({
+        name,
+        profileDir: dir,
+        extensionDist: companionDistDir(),
+        debugPort,
+        updatedAt: new Date().toISOString(),
+      }, null, 2)}\n`,
+    );
+  } catch {
+    // Metadata is best-effort.
+  }
+}
+
+function listActionProfilesOnDisk(): Array<{
+  name: string;
+  userDataDir: string;
+  current: boolean;
+  hasCookiesDb: boolean;
+  meta: JsonObject | null;
+}> {
+  if (!existsSync(profileRoot)) return [];
+  return readdirSync(profileRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => {
+      const userDataDir = join(profileRoot, entry.name);
+      const defaultDir = existsSync(join(userDataDir, "Cookies"))
+        ? userDataDir
+        : join(userDataDir, "Default");
+      const metaPath = join(userDataDir, ".action-profile.json");
+      let meta: JsonObject | null = null;
+      if (existsSync(metaPath)) {
+        try {
+          meta = JSON.parse(readFileSync(metaPath, "utf8")) as JsonObject;
+        } catch {
+          meta = null;
+        }
+      }
+      return {
+        name: entry.name,
+        userDataDir,
+        current: userDataDir === profileDir,
+        hasCookiesDb: existsSync(join(defaultDir, "Cookies")),
+        meta,
+      };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function loadCookieModule(): Promise<{
+  importCookiesToActionProfile: (args: {
+    into?: string;
+    sourceProfile?: string;
+    domains?: string[];
+    selectors?: Array<{ hostKey?: string; name: string }>;
+  }) => {
+    into: string;
+    sourceProfilePath: string;
+    destUserDataDir: string;
+    destProfilePath: string;
+    cookies: string[];
+    count: number;
+  };
+  listCookieEntries: (
+    profileDir: string,
+    opts: { domains?: string[]; selectors?: Array<{ hostKey?: string; name: string }> },
+  ) => Array<{ hostKey: string; name: string }>;
+  listPersonalProfiles: () => Array<{ dir: string; name: string; path: string }>;
+  parseCookieSelectors: (specs: string[]) => Array<{ hostKey?: string; name: string }>;
+  resolveSourceProfileDir: (profileDir?: string) => string;
+}> {
+  const modulePath = join(companionScriptsDir(), "chrome-cookies.mjs");
+  if (!existsSync(modulePath)) {
+    throw new Error(
+      `Cookie tooling not found at ${modulePath}. ` +
+      "Set ACTION_ROOT to the Action monorepo root when using the marketplace plugin outside the repo.",
+    );
+  }
+  return await import(modulePath);
+}
+
 const tools = [
+  {
+    name: "browser_profiles",
+    title: "List Action Browser Profiles",
+    description: "List named Action-owned Chrome identities under ChromeProfiles, plus the currently active profile. These are not your daily Chrome profiles.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, idempotentHint: true },
+  },
+  {
+    name: "browser_use_profile",
+    title: "Use Action Browser Profile",
+    description: "Switch the active Action Chrome identity (named profile under ChromeProfiles). Closes the previous Action Chrome if it was owned by this session. Does not attach to daily personal Chrome.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        profile: {
+          type: "string",
+          description: "Action profile name, e.g. agent-browser, coding, mira.",
+        },
+      },
+      required: ["profile"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, idempotentHint: true },
+  },
+  {
+    name: "browser_profile_info",
+    title: "Current Browser Profile Info",
+    description: "Report the active Action profile path, cookies readiness, companion extension dist, and optional companion bridge health.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, idempotentHint: true },
+  },
+  {
+    name: "browser_import_cookies",
+    title: "Import Cookies Into Action Profile",
+    description: "Selectively copy cookies from personal Chrome into a named Action profile. Dry-run unless confirm=true. Prefer domain allowlists; never dumps the full jar by default.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        into: {
+          type: "string",
+          description: "Target Action profile name. Defaults to the active profile.",
+        },
+        source: {
+          type: "string",
+          description: "Personal Chrome profile directory name (Default, Profile 1, ...). Defaults to most recently used.",
+        },
+        domains: {
+          type: "array",
+          items: { type: "string" },
+          description: "Host suffixes to import, e.g. [\"github.com\", \"midjourney.com\"].",
+        },
+        only: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional cookie names or host:name selectors.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "When true, write cookies. When false/omitted, list matches only.",
+        },
+        listSourceProfiles: {
+          type: "boolean",
+          description: "When true, list personal Chrome profiles and return.",
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, idempotentHint: false },
+  },
+  {
+    name: "browser_companion_status",
+    title: "Chrome Companion Status",
+    description: "Check whether the Action Chrome Companion extension dist exists and whether the localhost bridge reports a live connection for richer DOM act/observe.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, idempotentHint: true },
+  },
   {
     name: "browser_open",
     title: "Open in Action Browser",
-    description: "Open a URL in an isolated real Chrome profile. Chrome starts on demand and stays in the background by default.",
+    description: "Open a URL in a named Action-owned Chrome profile. Chrome starts on demand and stays in the background by default. Optional profile switches identity first.",
     inputSchema: {
       type: "object",
       properties: {
         url: { type: "string", description: "URL to open. https:// is added when no scheme is provided." },
+        profile: {
+          type: "string",
+          description: "Optional Action profile name to use for this session (e.g. coding, mira).",
+        },
         background: { type: "boolean", description: "Keep Chrome hidden in the background. Defaults to true." },
         waitMs: { type: "number", description: "Maximum time to wait for the page to become ready. Defaults to 15000." },
       },
@@ -89,7 +296,7 @@ const tools = [
   {
     name: "browser_tabs",
     title: "List Action Browser Tabs",
-    description: "List open page tabs in the isolated Action Chrome profile.",
+    description: "List open page tabs in the active Action Chrome profile.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, idempotentHint: true },
   },
@@ -515,6 +722,88 @@ function installLifecycleHooks(): void {
   });
 }
 
+async function useProfile(nextName: string): Promise<{
+  profile: string;
+  profileDir: string;
+  switched: boolean;
+  closedPrevious: boolean;
+}> {
+  if (fixedProfileDir) {
+    throw new Error(
+      "ACTION_BROWSER_PROFILE_DIR is fixed for this MCP process; unset it to switch named profiles.",
+    );
+  }
+  const name = sanitizeProfileName(nextName);
+  const nextDir = join(profileRoot, name);
+  if (name === profileName && nextDir === profileDir) {
+    writeProfileMeta(profileName, profileDir);
+    return { profile: profileName, profileDir, switched: false, closedPrevious: false };
+  }
+  let closedPrevious = false;
+  if (ownsBrowser) {
+    const outcome = await releaseBrowser("profile-switch");
+    closedPrevious = outcome.closed;
+    currentTargetId = undefined;
+  }
+  profileName = name;
+  profileDir = nextDir;
+  writeProfileMeta(profileName, profileDir);
+  return { profile: profileName, profileDir, switched: true, closedPrevious };
+}
+
+async function companionStatus(): Promise<JsonObject> {
+  const dist = companionDistDir();
+  const distExists = existsSync(dist);
+  const manifestPath = join(dist, "manifest.json");
+  let bridge: JsonObject = { ok: false, connected: false };
+  try {
+    const response = await fetch(companionBridgeHealthURL);
+    bridge = await response.json() as JsonObject;
+  } catch (error) {
+    bridge = {
+      ok: false,
+      connected: false,
+      error: error instanceof Error ? error.message : String(error),
+      hint: "Start the bridge with: bun run chrome:companion:bridge",
+    };
+  }
+
+  let extensionTargets: Array<{ type: string; title: string; url: string }> = [];
+  let extensionIds: string[] = [];
+  if (await chromeIsReady()) {
+    try {
+      const targets = await fetchJson<ChromeTarget[]>("/json/list");
+      extensionTargets = targets
+        .filter((target) => typeof target.url === "string" && target.url.includes("chrome-extension://"))
+        .map((target) => ({ type: target.type, title: target.title, url: target.url }));
+      extensionIds = [
+        ...new Set(
+          extensionTargets
+            .map((target) => target.url.match(/^chrome-extension:\/\/([^/]+)\//)?.[1])
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+    } catch {
+      // Chrome may not expose targets yet.
+    }
+  }
+
+  return {
+    profile: profileName,
+    profileDir,
+    companionDist: dist,
+    companionDistExists: distExists,
+    companionManifestExists: existsSync(manifestPath),
+    bridgeHealthUrl: companionBridgeHealthURL,
+    bridge,
+    extensionTargets,
+    extensionIds,
+    setupHint: distExists
+      ? `Load unpacked extension once in this Action profile: ${dist}`
+      : "Build companion first: bun run chrome:companion:build",
+  };
+}
+
 async function ensureChrome(background = true): Promise<void> {
   if (await chromeIsReady()) {
     claimBrowser();
@@ -522,6 +811,7 @@ async function ensureChrome(background = true): Promise<void> {
   }
 
   await mkdir(profileDir, { recursive: true });
+  writeProfileMeta(profileName, profileDir);
   const openArgs = [
     "/usr/bin/open",
     "-n",
@@ -652,7 +942,100 @@ function textResult(data: JsonObject): ToolResult {
 
 async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
   switch (name) {
+    case "browser_profiles":
+      return textResult({
+        ok: true,
+        profileRoot,
+        current: { profile: profileName, profileDir, fixedProfileDir: Boolean(fixedProfileDir) },
+        profiles: listActionProfilesOnDisk(),
+        policy: {
+          default: "Action-owned named profiles under ChromeProfiles",
+          dailyChrome: "explicit opt-in only; not supported by browser_use_profile",
+          cookies: "seed with browser_import_cookies using domain allowlists",
+          companion: "load packages/chrome-companion/dist unpacked once per profile",
+        },
+      });
+
+    case "browser_use_profile": {
+      const result = await useProfile(asString(args.profile, "profile"));
+      return textResult({ ok: true, ...result });
+    }
+
+    case "browser_profile_info": {
+      const defaultDir = existsSync(join(profileDir, "Cookies"))
+        ? profileDir
+        : join(profileDir, "Default");
+      return textResult({
+        ok: true,
+        profile: profileName,
+        profileDir,
+        defaultDir,
+        hasCookiesDb: existsSync(join(defaultDir, "Cookies")),
+        debugPort,
+        fixedProfileDir: Boolean(fixedProfileDir),
+        companion: await companionStatus(),
+      });
+    }
+
+    case "browser_companion_status":
+      return textResult({ ok: true, ...(await companionStatus()) });
+
+    case "browser_import_cookies": {
+      const cookies = await loadCookieModule();
+      if (args.listSourceProfiles === true) {
+        return textResult({
+          ok: true,
+          sourceProfiles: cookies.listPersonalProfiles(),
+          actionProfiles: listActionProfilesOnDisk(),
+        });
+      }
+      const domains = Array.isArray(args.domains)
+        ? args.domains.map((entry) => String(entry).trim()).filter(Boolean)
+        : [];
+      const only = Array.isArray(args.only)
+        ? args.only.map((entry) => String(entry).trim()).filter(Boolean)
+        : [];
+      const selectors = cookies.parseCookieSelectors(only);
+      if (!domains.length && !selectors.length) {
+        throw new Error("browser_import_cookies requires domains and/or only.");
+      }
+      const into = typeof args.into === "string" && args.into.trim()
+        ? sanitizeProfileName(args.into)
+        : profileName;
+      const source = typeof args.source === "string" && args.source.trim()
+        ? args.source.trim()
+        : undefined;
+      const sourceProfilePath = cookies.resolveSourceProfileDir(source);
+      const matches = cookies.listCookieEntries(sourceProfilePath, { domains, selectors });
+      if (args.confirm !== true) {
+        return textResult({
+          ok: true,
+          dryRun: true,
+          into,
+          sourceProfilePath,
+          count: matches.length,
+          cookies: matches.map((cookie) => `${cookie.hostKey}:${cookie.name}`),
+          confirmRequired: true,
+          hint: "Re-call with confirm=true to write these cookies into the Action profile.",
+        });
+      }
+      if (into === profileName && ownsBrowser) {
+        await releaseBrowser("cookie-import");
+        currentTargetId = undefined;
+      }
+      const result = cookies.importCookiesToActionProfile({
+        into,
+        sourceProfile: source,
+        domains,
+        selectors,
+      });
+      return textResult({ ok: true, dryRun: false, ...result });
+    }
+
     case "browser_open": {
+      if (typeof args.profile === "string" && args.profile.trim()) {
+        await useProfile(args.profile);
+      }
       const url = normalizeURL(asString(args.url, "url"));
       const background = args.background !== false;
       await ensureChrome(background);
@@ -670,7 +1053,13 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
         return textResult({
           ok: true,
           tab: { id: target.id, title: page.title ?? target.title, url: page.url ?? url },
-          chrome: { profile: profileName, background, debugPort, session: sessionName },
+          chrome: {
+            profile: profileName,
+            profileDir,
+            background,
+            debugPort,
+            session: sessionName,
+          },
         });
       } finally {
         session.close();
@@ -876,7 +1265,7 @@ async function handleRequest(request: JsonRpcRequest): Promise<JsonObject | unde
             protocolVersion: String(request.params?.protocolVersion ?? "2025-06-18"),
             capabilities: { tools: { listChanged: false } },
             serverInfo: { name: "action-browser", version: "0.1.0" },
-            instructions: "Use browser_open, then browser_screenshot for the fastest URL-to-image workflow in a real Chrome profile.",
+            instructions: "Action Browser uses named Action-owned Chrome profiles (not daily Chrome). Prefer browser_profiles / browser_use_profile for identity, browser_import_cookies with domain allowlists to seed logins, and browser_companion_status for the extension bridge. Fast path: browser_open → browser_screenshot.",
           },
         };
       case "ping":
