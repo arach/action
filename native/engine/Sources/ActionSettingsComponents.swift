@@ -1,4 +1,16 @@
+import AppKit
 import SwiftUI
+
+// MARK: - Product links
+
+enum ActionDocs {
+    static let siteURL = URL(string: "https://arach.github.io/action/")!
+    static let siteHostLabel = "arach.github.io/action"
+}
+
+extension Notification.Name {
+    static let actionShowKeyboardCheatSheet = Notification.Name("Action.ShowKeyboardCheatSheet")
+}
 
 // MARK: - Settings primitives
 // Inspired by HudsonUI HudSettings + Scout settings rows:
@@ -305,5 +317,132 @@ struct ActionSettingsPageHeader: View {
                 .foregroundStyle(StageHUDTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+// MARK: - Keyboard cheat sheet
+
+struct ActionKeyboardCheatSheetView: View {
+    var onOpenDocs: () -> Void = {
+        NSWorkspace.shared.open(ActionDocs.siteURL)
+    }
+    var onClose: (() -> Void)?
+
+    private let groups: [(title: String, rows: [(keys: String, action: String)])] = [
+        (
+            "App",
+            [
+                ("⌘1", "Takes"),
+                ("⌘2", "Library"),
+                ("⌘3", "Settings"),
+                ("⌘,", "Settings window"),
+                ("⌘/", "This cheat sheet"),
+                ("?", "This cheat sheet"),
+            ]
+        ),
+        (
+            "Library",
+            [
+                ("Click", "Open take"),
+                ("Hover", "Quick actions"),
+                ("Right-click", "Replay, Finder, Delete…"),
+            ]
+        ),
+        (
+            "Takes review",
+            [
+                ("N", "Open note composer"),
+                ("1 / 2 / 3 / 4", "Point · Range · Region · Draw"),
+                ("Space", "Play / pause"),
+                ("Esc", "Cancel selection / close composer"),
+                ("⌘↩", "Save note"),
+                ("[ / ]", "Previous / next note"),
+            ]
+        ),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Keyboard")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(StageHUDTheme.textPrimary)
+                    Text("Quick navigation for Action.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                }
+                Spacer()
+                if let onClose {
+                    Button("Done", action: onClose)
+                        .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+
+            ForEach(groups, id: \.title) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(group.title.uppercased())
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundStyle(StageHUDTheme.textMuted)
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(group.rows.enumerated()), id: \.offset) { index, row in
+                            HStack {
+                                Text(row.keys)
+                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(StageHUDTheme.textPrimary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(StageHUDTheme.buttonSecondaryHover)
+                                    )
+                                Spacer(minLength: 12)
+                                Text(row.action)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(StageHUDTheme.textSecondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+
+                            if index < group.rows.count - 1 {
+                                Rectangle()
+                                    .fill(StageHUDTheme.cardBorder)
+                                    .frame(height: 1)
+                                    .padding(.leading, 12)
+                            }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(StageHUDTheme.cardFill)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
+                    )
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    onOpenDocs()
+                } label: {
+                    Label("Documentation", systemImage: "book")
+                }
+                .buttonStyle(ActionSettingsPillButtonStyle())
+
+                Text(ActionDocs.siteHostLabel)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(StageHUDTheme.textMuted)
+
+                Spacer()
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+        .background(StageHUDTheme.appBackground)
     }
 }
