@@ -119,36 +119,36 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var appearanceMode: ActionAppearanceMode
     @Published private(set) var reviewSelectionRequestID = UUID()
 
-    /// Agentic loop documents (Start → Edit → Review).
-    @Published var loops: [ActionLoopDocument] = []
-    @Published var selectedLoopID: String?
-    @Published var selectedLoopStepID: String?
-    @Published var loopDraftGoal: String = "Show a short Calculator demo with keyboard and click input"
-    @Published var loopStepFeedbackDraft: String = ""
-    @Published private(set) var loopNavigationRequestID = UUID()
+    /// Scenarios under Start → Edit → Review (the flow is inherent, not a named “loop”).
+    @Published var scenarios: [ActionScenarioDocument] = []
+    @Published var selectedScenarioID: String?
+    @Published var selectedScenarioStepID: String?
+    @Published var scenarioDraftGoal: String = "Show a short Calculator demo with keyboard and click input"
+    @Published var scenarioStepFeedbackDraft: String = ""
+    @Published private(set) var workspaceNavigationRequestID = UUID()
 
-    var selectedLoop: ActionLoopDocument? {
-        if let selectedLoopID,
-           let loop = loops.first(where: { $0.id == selectedLoopID }) {
-            return loop
+    var selectedScenario: ActionScenarioDocument? {
+        if let selectedScenarioID,
+           let scenario = scenarios.first(where: { $0.id == selectedScenarioID }) {
+            return scenario
         }
-        return loops.first
+        return scenarios.first
     }
 
-    var selectedLoopStep: ActionLoopScenarioStep? {
-        guard let loop = selectedLoop else { return nil }
-        if let selectedLoopStepID,
-           let step = loop.steps.first(where: { $0.id == selectedLoopStepID }) {
+    var selectedScenarioStep: ActionScenarioStep? {
+        guard let scenario = selectedScenario else { return nil }
+        if let selectedScenarioStepID,
+           let step = scenario.steps.first(where: { $0.id == selectedScenarioStepID }) {
             return step
         }
-        return loop.steps.first
+        return scenario.steps.first
     }
 
     init() {
         self.consoleURL = localConsoleURL
         self.appearanceMode = ActionAppearanceStore.shared.mode
         refreshSessions()
-        refreshLoops()
+        refreshScenarios()
         refreshConsoleState()
         startConsoleWatchdog()
     }
@@ -345,130 +345,130 @@ final class ActionLauncherViewModel: ObservableObject {
     }
 
     func runGuidedCalculatorDemo() {
-        runGuidedCalculatorDemo(forLoopID: nil)
+        runGuidedCalculatorDemo(forScenarioID: nil)
     }
 
-    /// Creates a Calculator loop, drafts the scenario, and opens Edit.
-    func startCalculatorLoop(goal: String? = nil) {
-        let loop = ActionLoopPresets.makeCalculatorLoop(goal: goal ?? loopDraftGoal)
+    /// Draft a Calculator scenario and open Edit.
+    func startCalculatorScenario(goal: String? = nil) {
+        let scenario = ActionScenarioPresets.makeCalculatorScenario(goal: goal ?? scenarioDraftGoal)
         do {
-            try ActionLoopStore.shared.save(loop)
-            refreshLoops()
-            selectedLoopID = loop.id
-            selectedLoopStepID = loop.steps.first?.id
-            setLoopPhase(.edit)
-            loopNavigationRequestID = UUID()
+            try ActionScenarioStore.shared.save(scenario)
+            refreshScenarios()
+            selectedScenarioID = scenario.id
+            selectedScenarioStepID = scenario.steps.first?.id
+            setFlowPhase(.edit)
+            workspaceNavigationRequestID = UUID()
             guidedDemoStatus = "Scenario drafted — review steps, then run"
         } catch {
-            guidedDemoStatus = "Failed to create loop: \(error.localizedDescription)"
-            logger.error("Create loop failed: \(error.localizedDescription, privacy: .public)")
+            guidedDemoStatus = "Failed to create scenario: \(error.localizedDescription)"
+            logger.error("Create scenario failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    func selectLoop(_ loop: ActionLoopDocument) {
-        selectedLoopID = loop.id
-        selectedLoopStepID = loop.steps.first?.id
-        if let latest = loop.latestSessionId {
+    func selectScenario(_ scenario: ActionScenarioDocument) {
+        selectedScenarioID = scenario.id
+        selectedScenarioStepID = scenario.steps.first?.id
+        if let latest = scenario.latestSessionId {
             selectedSessionID = latest
         }
     }
 
-    func setLoopPhase(_ phase: ActionLoopPhase) {
-        guard var loop = selectedLoop else { return }
-        loop.phase = phase
-        persistLoop(loop)
+    func setFlowPhase(_ phase: ActionFlowPhase) {
+        guard var scenario = selectedScenario else { return }
+        scenario.phase = phase
+        persistScenario(scenario)
 
-        if phase == .review, let sessionId = loop.latestSessionId {
+        if phase == .review, let sessionId = scenario.latestSessionId {
             selectedSessionID = sessionId
             reviewSelectionRequestID = UUID()
         }
     }
 
-    func selectLoopStep(_ step: ActionLoopScenarioStep) {
-        selectedLoopStepID = step.id
+    func selectScenarioStep(_ step: ActionScenarioStep) {
+        selectedScenarioStepID = step.id
     }
 
-    func toggleSkipLoopStep(_ stepID: String) {
-        guard var loop = selectedLoop,
-              let index = loop.steps.firstIndex(where: { $0.id == stepID }) else { return }
-        let current = loop.steps[index].status
-        loop.steps[index].status = current == "skipped" ? "pending" : "skipped"
-        persistLoop(loop)
+    func toggleSkipScenarioStep(_ stepID: String) {
+        guard var scenario = selectedScenario,
+              let index = scenario.steps.firstIndex(where: { $0.id == stepID }) else { return }
+        let current = scenario.steps[index].status
+        scenario.steps[index].status = current == "skipped" ? "pending" : "skipped"
+        persistScenario(scenario)
     }
 
-    func addFeedbackToSelectedLoopStep() {
-        let text = loopStepFeedbackDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    func addFeedbackToSelectedScenarioStep() {
+        let text = scenarioStepFeedbackDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty,
-              var loop = selectedLoop,
-              let stepID = selectedLoopStepID,
-              let index = loop.steps.firstIndex(where: { $0.id == stepID }) else { return }
+              var scenario = selectedScenario,
+              let stepID = selectedScenarioStepID,
+              let index = scenario.steps.firstIndex(where: { $0.id == stepID }) else { return }
 
-        let item = ActionLoopStepFeedback(
+        let item = ActionScenarioStepFeedback(
             id: UUID().uuidString,
             createdAt: ISO8601DateFormatter().string(from: Date()),
             instruction: text
         )
-        loop.steps[index].feedback.append(item)
-        if loop.steps[index].status == "pending" {
-            loop.steps[index].status = "flagged"
+        scenario.steps[index].feedback.append(item)
+        if scenario.steps[index].status == "pending" {
+            scenario.steps[index].status = "flagged"
         }
-        loopStepFeedbackDraft = ""
-        persistLoop(loop)
-        guidedDemoStatus = "Feedback saved on step \(loop.steps[index].index)"
+        scenarioStepFeedbackDraft = ""
+        persistScenario(scenario)
+        guidedDemoStatus = "Feedback saved on step \(scenario.steps[index].index)"
     }
 
-    func approveAndRunSelectedLoop() {
-        guard let loop = selectedLoop else {
-            runGuidedCalculatorDemo(forLoopID: nil)
+    func approveAndRunSelectedScenario() {
+        guard let scenario = selectedScenario else {
+            runGuidedCalculatorDemo(forScenarioID: nil)
             return
         }
-        setLoopPhase(.edit)
-        runGuidedCalculatorDemo(forLoopID: loop.id)
+        setFlowPhase(.edit)
+        runGuidedCalculatorDemo(forScenarioID: scenario.id)
     }
 
-    func refreshLoops() {
-        loops = ActionLoopStore.shared.loadAll()
-        if let selectedLoopID, loops.contains(where: { $0.id == selectedLoopID }) {
-            self.selectedLoopID = selectedLoopID
+    func refreshScenarios() {
+        scenarios = ActionScenarioStore.shared.loadAll()
+        if let selectedScenarioID, scenarios.contains(where: { $0.id == selectedScenarioID }) {
+            self.selectedScenarioID = selectedScenarioID
         } else {
-            self.selectedLoopID = loops.first?.id
+            self.selectedScenarioID = scenarios.first?.id
         }
-        if let loop = selectedLoop {
-            if let selectedLoopStepID, loop.steps.contains(where: { $0.id == selectedLoopStepID }) {
-                self.selectedLoopStepID = selectedLoopStepID
+        if let scenario = selectedScenario {
+            if let selectedScenarioStepID, scenario.steps.contains(where: { $0.id == selectedScenarioStepID }) {
+                self.selectedScenarioStepID = selectedScenarioStepID
             } else {
-                selectedLoopStepID = loop.steps.first?.id
+                selectedScenarioStepID = scenario.steps.first?.id
             }
         } else {
-            selectedLoopStepID = nil
+            selectedScenarioStepID = nil
         }
     }
 
-    func deleteSelectedLoop() {
-        guard let id = selectedLoopID else { return }
-        try? ActionLoopStore.shared.delete(id: id)
-        if selectedLoopID == id {
-            selectedLoopID = nil
+    func deleteSelectedScenario() {
+        guard let id = selectedScenarioID else { return }
+        try? ActionScenarioStore.shared.delete(id: id)
+        if selectedScenarioID == id {
+            selectedScenarioID = nil
         }
-        refreshLoops()
+        refreshScenarios()
     }
 
-    private func persistLoop(_ loop: ActionLoopDocument) {
+    private func persistScenario(_ scenario: ActionScenarioDocument) {
         do {
-            try ActionLoopStore.shared.save(loop)
-            if let index = loops.firstIndex(where: { $0.id == loop.id }) {
-                loops[index] = loop
+            try ActionScenarioStore.shared.save(scenario)
+            if let index = scenarios.firstIndex(where: { $0.id == scenario.id }) {
+                scenarios[index] = scenario
             } else {
-                loops.insert(loop, at: 0)
+                scenarios.insert(scenario, at: 0)
             }
-            selectedLoopID = loop.id
+            selectedScenarioID = scenario.id
         } catch {
-            guidedDemoStatus = "Failed to save loop: \(error.localizedDescription)"
-            logger.error("Save loop failed: \(error.localizedDescription, privacy: .public)")
+            guidedDemoStatus = "Failed to save scenario: \(error.localizedDescription)"
+            logger.error("Save scenario failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    private func runGuidedCalculatorDemo(forLoopID loopID: String?) {
+    private func runGuidedCalculatorDemo(forScenarioID scenarioID: String?) {
         guard !isRunningGuidedDemo else {
             return
         }
@@ -483,38 +483,38 @@ final class ActionLauncherViewModel: ObservableObject {
                     refreshSessions()
                     selectedSessionID = result.sessionId
 
-                    if let loopID,
-                       var loop = loops.first(where: { $0.id == loopID })
-                        ?? ActionLoopStore.shared.loadAll().first(where: { $0.id == loopID }) {
-                        if !loop.sessionIds.contains(result.sessionId) {
-                            loop.sessionIds.insert(result.sessionId, at: 0)
+                    if let scenarioID,
+                       var scenario = scenarios.first(where: { $0.id == scenarioID })
+                        ?? ActionScenarioStore.shared.loadAll().first(where: { $0.id == scenarioID }) {
+                        if !scenario.sessionIds.contains(result.sessionId) {
+                            scenario.sessionIds.insert(result.sessionId, at: 0)
                         }
-                        loop.latestSessionId = result.sessionId
-                        loop.lastRunStatus = "completed"
-                        loop.phase = .review
-                        loop.title = "Calculator · \(result.expression)"
-                        persistLoop(loop)
-                        selectedLoopID = loop.id
-                        loopNavigationRequestID = UUID()
+                        scenario.latestSessionId = result.sessionId
+                        scenario.lastRunStatus = "completed"
+                        scenario.phase = .review
+                        scenario.title = "Calculator · \(result.expression)"
+                        persistScenario(scenario)
+                        selectedScenarioID = scenario.id
+                        workspaceNavigationRequestID = UUID()
                         reviewSelectionRequestID = UUID()
                     }
                 } else {
                     guidedDemoStatus = "Cancelled"
-                    if let loopID, var loop = loops.first(where: { $0.id == loopID }) {
-                        loop.lastRunStatus = "cancelled"
-                        persistLoop(loop)
+                    if let scenarioID, var scenario = scenarios.first(where: { $0.id == scenarioID }) {
+                        scenario.lastRunStatus = "cancelled"
+                        persistScenario(scenario)
                     }
                 }
             } catch {
                 guidedDemoStatus = "Failed: \(error.localizedDescription)"
                 logger.error("Guided calculator demo failed: \(error.localizedDescription, privacy: .public)")
-                if let loopID, var loop = loops.first(where: { $0.id == loopID }) {
-                    loop.lastRunStatus = "failed"
-                    persistLoop(loop)
+                if let scenarioID, var scenario = scenarios.first(where: { $0.id == scenarioID }) {
+                    scenario.lastRunStatus = "failed"
+                    persistScenario(scenario)
                 }
             }
             isRunningGuidedDemo = false
-            refreshLoops()
+            refreshScenarios()
         }
     }
 

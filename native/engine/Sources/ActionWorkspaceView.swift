@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Start → Edit → Review workspace for one agentic loop.
-struct ActionLoopWorkspaceView: View {
+/// Start → Edit → Review workspace for one agentic scenario.
+struct ActionWorkspaceView: View {
     @ObservedObject var model: ActionLauncherViewModel
     var onOpenLibrary: () -> Void
 
@@ -9,14 +9,14 @@ struct ActionLoopWorkspaceView: View {
         VStack(alignment: .leading, spacing: 16) {
             phasePicker
 
-            if let loop = model.selectedLoop {
-                switch loop.phase {
+            if let scenario = model.selectedScenario {
+                switch scenario.phase {
                 case .start:
-                    startPhase(for: loop)
+                    startPhase(for: scenario)
                 case .edit:
-                    editPhase(for: loop)
+                    editPhase(for: scenario)
                 case .review:
-                    reviewPhase(for: loop)
+                    reviewPhase(for: scenario)
                 }
             } else if let session = model.selectedSession {
                 orphanTakeReview(session)
@@ -30,12 +30,12 @@ struct ActionLoopWorkspaceView: View {
 
     private var phasePicker: some View {
         HStack(spacing: 8) {
-            ForEach(ActionLoopPhase.allCases) { phase in
+            ForEach(ActionFlowPhase.allCases) { phase in
                 phaseTab(phase)
             }
             Spacer(minLength: 0)
-            if let loop = model.selectedLoop {
-                Text(loop.title)
+            if let scenario = model.selectedScenario {
+                Text(scenario.title)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(StageHUDTheme.textMuted)
                     .lineLimit(1)
@@ -43,13 +43,13 @@ struct ActionLoopWorkspaceView: View {
         }
     }
 
-    private func phaseTab(_ phase: ActionLoopPhase) -> some View {
-        let selected = model.selectedLoop?.phase == phase
+    private func phaseTab(_ phase: ActionFlowPhase) -> some View {
+        let selected = model.selectedScenario?.phase == phase
         let enabled = phaseIsEnabled(phase)
 
         return Button {
             guard enabled else { return }
-            model.setLoopPhase(phase)
+            model.setFlowPhase(phase)
         } label: {
             HStack(spacing: 6) {
                 Text(phaseNumber(phase))
@@ -80,7 +80,7 @@ struct ActionLoopWorkspaceView: View {
         .help(phase.subtitle)
     }
 
-    private func phaseNumber(_ phase: ActionLoopPhase) -> String {
+    private func phaseNumber(_ phase: ActionFlowPhase) -> String {
         switch phase {
         case .start: return "1"
         case .edit: return "2"
@@ -88,17 +88,17 @@ struct ActionLoopWorkspaceView: View {
         }
     }
 
-    private func phaseIsEnabled(_ phase: ActionLoopPhase) -> Bool {
-        guard let loop = model.selectedLoop else {
+    private func phaseIsEnabled(_ phase: ActionFlowPhase) -> Bool {
+        guard let scenario = model.selectedScenario else {
             return phase == .start
         }
         switch phase {
         case .start:
             return true
         case .edit:
-            return !loop.steps.isEmpty
+            return !scenario.steps.isEmpty
         case .review:
-            return loop.latestSessionId != nil || !loop.sessionIds.isEmpty
+            return scenario.latestSessionId != nil || !scenario.sessionIds.isEmpty
         }
     }
 
@@ -107,7 +107,7 @@ struct ActionLoopWorkspaceView: View {
     private var startEmptyState: some View {
         card {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Start a loop")
+                Text("Start")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textPrimary)
 
@@ -120,19 +120,19 @@ struct ActionLoopWorkspaceView: View {
 
                 HStack(spacing: 10) {
                     Button {
-                        model.startCalculatorLoop()
+                        model.startCalculatorScenario()
                     } label: {
                         Text("Draft Calculator scenario")
                     }
                     .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
                     .disabled(model.isRunningGuidedDemo)
 
-                    if !model.loops.isEmpty {
-                        Menu("Open recent") {
-                            ForEach(model.loops) { loop in
-                                Button(loop.title) {
-                                    model.selectLoop(loop)
-                                    model.setLoopPhase(loop.phase == .start ? .edit : loop.phase)
+                    if !model.scenarios.isEmpty {
+                        Menu("Recent scenarios") {
+                            ForEach(model.scenarios) { scenario in
+                                Button(scenario.title) {
+                                    model.selectScenario(scenario)
+                                    model.setFlowPhase(scenario.phase == .start ? .edit : scenario.phase)
                                 }
                             }
                         }
@@ -147,28 +147,28 @@ struct ActionLoopWorkspaceView: View {
         }
     }
 
-    private func startPhase(for loop: ActionLoopDocument) -> some View {
-        // If a loop already exists, Start still lets you spin another or jump to Edit.
+    private func startPhase(for scenario: ActionScenarioDocument) -> some View {
+        // If a scenario already exists, Start still lets you spin another or jump to Edit.
         VStack(alignment: .leading, spacing: 14) {
             card {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Active loop")
+                    Text("Current scenario")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(StageHUDTheme.textMuted)
-                    Text(loop.title)
+                    Text(scenario.title)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(StageHUDTheme.textPrimary)
-                    Text(loop.goal)
+                    Text(scenario.goal)
                         .font(.system(size: 13))
                         .foregroundStyle(StageHUDTheme.textSecondary)
                     HStack(spacing: 8) {
                         Button("Continue to Edit") {
-                            model.setLoopPhase(.edit)
+                            model.setFlowPhase(.edit)
                         }
                         .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
                         if phaseIsEnabled(.review) {
                             Button("Jump to Review") {
-                                model.setLoopPhase(.review)
+                                model.setFlowPhase(.review)
                             }
                             .buttonStyle(ActionSettingsPillButtonStyle())
                         }
@@ -178,14 +178,14 @@ struct ActionLoopWorkspaceView: View {
 
             card {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Start another")
+                    Text("Start another scenario")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(StageHUDTheme.textPrimary)
                     goalField
                     Button {
-                        model.startCalculatorLoop()
+                        model.startCalculatorScenario()
                     } label: {
-                        Text("Draft new Calculator scenario")
+                        Text("Draft Calculator scenario")
                     }
                     .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
                     .disabled(model.isRunningGuidedDemo)
@@ -199,7 +199,7 @@ struct ActionLoopWorkspaceView: View {
             Text("Goal")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(StageHUDTheme.textMuted)
-            TextField("What should this demo show?", text: $model.loopDraftGoal, axis: .vertical)
+            TextField("What should this demo show?", text: $model.scenarioDraftGoal, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(2...4)
                 .padding(10)
@@ -216,7 +216,7 @@ struct ActionLoopWorkspaceView: View {
 
     // MARK: - Edit
 
-    private func editPhase(for loop: ActionLoopDocument) -> some View {
+    private func editPhase(for scenario: ActionScenarioDocument) -> some View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 12) {
                 card {
@@ -224,14 +224,14 @@ struct ActionLoopWorkspaceView: View {
                         Text("Scenario")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(StageHUDTheme.textMuted)
-                        Text(loop.goal)
+                        Text(scenario.goal)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(StageHUDTheme.textPrimary)
                         HStack(spacing: 8) {
-                            metaChip(loop.targetAppName)
-                            metaChip("\(loop.steps.count) steps")
-                            if loop.feedbackCount > 0 {
-                                metaChip("\(loop.feedbackCount) notes")
+                            metaChip(scenario.targetAppName)
+                            metaChip("\(scenario.steps.count) steps")
+                            if scenario.feedbackCount > 0 {
+                                metaChip("\(scenario.feedbackCount) notes")
                             }
                         }
                     }
@@ -250,9 +250,9 @@ struct ActionLoopWorkspaceView: View {
                         }
                         .padding(.bottom, 8)
 
-                        ForEach(loop.steps) { step in
-                            stepRow(step, selected: model.selectedLoopStepID == step.id)
-                            if step.id != loop.steps.last?.id {
+                        ForEach(scenario.steps) { step in
+                            stepRow(step, selected: model.selectedScenarioStepID == step.id)
+                            if step.id != scenario.steps.last?.id {
                                 Rectangle()
                                     .fill(StageHUDTheme.cardBorder)
                                     .frame(height: 1)
@@ -263,7 +263,7 @@ struct ActionLoopWorkspaceView: View {
 
                 HStack(spacing: 10) {
                     Button {
-                        model.approveAndRunSelectedLoop()
+                        model.approveAndRunSelectedScenario()
                     } label: {
                         Text(model.isRunningGuidedDemo ? "Running…" : "Approve & run")
                     }
@@ -271,7 +271,7 @@ struct ActionLoopWorkspaceView: View {
                     .disabled(model.isRunningGuidedDemo)
 
                     Button("Back to Start") {
-                        model.setLoopPhase(.start)
+                        model.setFlowPhase(.start)
                     }
                     .buttonStyle(ActionSettingsPillButtonStyle())
 
@@ -285,14 +285,14 @@ struct ActionLoopWorkspaceView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            stepDetailRail(for: loop)
+            stepDetailRail(for: scenario)
                 .frame(width: 300)
         }
     }
 
-    private func stepRow(_ step: ActionLoopScenarioStep, selected: Bool) -> some View {
+    private func stepRow(_ step: ActionScenarioStep, selected: Bool) -> some View {
         Button {
-            model.selectLoopStep(step)
+            model.selectScenarioStep(step)
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Text("\(step.index)")
@@ -342,8 +342,8 @@ struct ActionLoopWorkspaceView: View {
         .buttonStyle(.plain)
     }
 
-    private func stepDetailRail(for loop: ActionLoopDocument) -> some View {
-        let step = model.selectedLoopStep
+    private func stepDetailRail(for scenario: ActionScenarioDocument) -> some View {
+        let step = model.selectedScenarioStep
 
         return card {
             VStack(alignment: .leading, spacing: 12) {
@@ -359,7 +359,7 @@ struct ActionLoopWorkspaceView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(StageHUDTheme.textSecondary)
 
-                    TextField("e.g. Wait for Calculator to finish opening", text: $model.loopStepFeedbackDraft, axis: .vertical)
+                    TextField("e.g. Wait for Calculator to finish opening", text: $model.scenarioStepFeedbackDraft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .lineLimit(3...6)
                         .padding(10)
@@ -374,13 +374,13 @@ struct ActionLoopWorkspaceView: View {
 
                     HStack(spacing: 8) {
                         Button("Add feedback") {
-                            model.addFeedbackToSelectedLoopStep()
+                            model.addFeedbackToSelectedScenarioStep()
                         }
                         .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
-                        .disabled(model.loopStepFeedbackDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(model.scenarioStepFeedbackDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         Button(step.isSkipped ? "Include step" : "Skip step") {
-                            model.toggleSkipLoopStep(step.id)
+                            model.toggleSkipScenarioStep(step.id)
                         }
                         .buttonStyle(ActionSettingsPillButtonStyle())
                     }
@@ -416,15 +416,15 @@ struct ActionLoopWorkspaceView: View {
 
     // MARK: - Review
 
-    private func reviewPhase(for loop: ActionLoopDocument) -> some View {
+    private func reviewPhase(for scenario: ActionScenarioDocument) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             card {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Take from this loop")
+                        Text("Take from this scenario")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(StageHUDTheme.textMuted)
-                        if let session = sessionForLoop(loop) {
+                        if let session = sessionForScenario(scenario) {
                             Text(session.displayTitle)
                                 .font(.system(size: 16, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(StageHUDTheme.textPrimary)
@@ -440,11 +440,11 @@ struct ActionLoopWorkspaceView: View {
                     Spacer()
                     HStack(spacing: 8) {
                         Button("Edit scenario") {
-                            model.setLoopPhase(.edit)
+                            model.setFlowPhase(.edit)
                         }
                         .buttonStyle(ActionSettingsPillButtonStyle())
                         Button {
-                            model.approveAndRunSelectedLoop()
+                            model.approveAndRunSelectedScenario()
                         } label: {
                             Text(model.isRunningGuidedDemo ? "Running…" : "Run again")
                         }
@@ -458,7 +458,7 @@ struct ActionLoopWorkspaceView: View {
                 }
             }
 
-            if let session = sessionForLoop(loop) {
+            if let session = sessionForScenario(scenario) {
                 ActionSessionPreviewView(session: session, model: model)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
@@ -475,12 +475,12 @@ struct ActionLoopWorkspaceView: View {
         }
     }
 
-    private func sessionForLoop(_ loop: ActionLoopDocument) -> ActionSessionSummary? {
-        if let latest = loop.latestSessionId,
+    private func sessionForScenario(_ scenario: ActionScenarioDocument) -> ActionSessionSummary? {
+        if let latest = scenario.latestSessionId,
            let session = model.recentSessions.first(where: { $0.sessionId == latest || $0.id == latest }) {
             return session
         }
-        for id in loop.sessionIds {
+        for id in scenario.sessionIds {
             if let session = model.recentSessions.first(where: { $0.sessionId == id || $0.id == id }) {
                 return session
             }
@@ -492,16 +492,16 @@ struct ActionLoopWorkspaceView: View {
         VStack(alignment: .leading, spacing: 12) {
             card {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Take without a loop")
+                    Text("Take without a scenario")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(StageHUDTheme.textMuted)
                     Text(session.displayTitle)
                         .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                    Text("Start a Calculator loop to get Start → Edit → Review. This take is still reviewable.")
+                    Text("Start a Calculator scenario to get Start → Edit → Review. This take is still reviewable.")
                         .font(.system(size: 12))
                         .foregroundStyle(StageHUDTheme.textSecondary)
-                    Button("New Calculator loop") {
-                        model.startCalculatorLoop()
+                    Button("New Calculator scenario") {
+                        model.startCalculatorScenario()
                     }
                     .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
                 }

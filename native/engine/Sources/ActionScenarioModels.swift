@@ -1,8 +1,10 @@
 import Foundation
 
-// MARK: - Agentic loop: Start → Edit → Review
+// MARK: - Start → Edit → Review
+// The cycle is inherent to the product — not a named "loop" object.
+// Users work with a scenario (plan) and takes (runs).
 
-enum ActionLoopPhase: String, Codable, CaseIterable, Identifiable {
+enum ActionFlowPhase: String, Codable, CaseIterable, Identifiable {
     case start
     case edit
     case review
@@ -19,20 +21,20 @@ enum ActionLoopPhase: String, Codable, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .start: return "Kick off a goal or seed a scenario"
-        case .edit: return "Inspect the plan and leave scenario feedback"
+        case .start: return "Set a goal and draft a scenario"
+        case .edit: return "Inspect the plan and leave feedback"
         case .review: return "Watch the take and mark truth on media"
         }
     }
 }
 
-struct ActionLoopStepFeedback: Codable, Identifiable, Hashable, Sendable {
+struct ActionScenarioStepFeedback: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let createdAt: String
     var instruction: String
 }
 
-struct ActionLoopScenarioStep: Codable, Identifiable, Hashable, Sendable {
+struct ActionScenarioStep: Codable, Identifiable, Hashable, Sendable {
     let id: String
     var index: Int
     var action: String
@@ -40,23 +42,24 @@ struct ActionLoopScenarioStep: Codable, Identifiable, Hashable, Sendable {
     var targetSummary: String?
     /// pending | approved | flagged | skipped
     var status: String
-    var feedback: [ActionLoopStepFeedback]
+    var feedback: [ActionScenarioStepFeedback]
 
     var isSkipped: Bool { status == "skipped" }
     var isFlagged: Bool { status == "flagged" || !feedback.isEmpty }
 }
 
-struct ActionLoopDocument: Codable, Identifiable, Hashable, Sendable {
+/// A draft plan the agent (or a preset) proposed. Runs produce takes.
+struct ActionScenarioDocument: Codable, Identifiable, Hashable, Sendable {
     let id: String
     var title: String
     var goal: String
-    var phase: ActionLoopPhase
-    /// Built-in scenario seed id (e.g. calculator-demo).
+    var phase: ActionFlowPhase
+    /// Built-in seed id (e.g. calculator-demo).
     var scenarioId: String
     var targetAppName: String
     var targetBundleId: String
-    var steps: [ActionLoopScenarioStep]
-    /// Session ids (take folders) produced by runs of this loop.
+    var steps: [ActionScenarioStep]
+    /// Take session ids produced by runs of this scenario.
     var sessionIds: [String]
     var latestSessionId: String?
     var createdAt: String
@@ -68,9 +71,8 @@ struct ActionLoopDocument: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
-enum ActionLoopPresets {
-    /// Seed scenario matching scenarios/calculator-demo.json for the first closed circuit.
-    static func calculatorDemoSteps() -> [ActionLoopScenarioStep] {
+enum ActionScenarioPresets {
+    static func calculatorDemoSteps() -> [ActionScenarioStep] {
         [
             step(1, action: "type", description: "Enter 12", target: "keyboard"),
             step(2, action: "click", description: "Click plus", target: "calculator.operator.plus · +"),
@@ -79,13 +81,13 @@ enum ActionLoopPresets {
         ]
     }
 
-    static func makeCalculatorLoop(goal: String? = nil) -> ActionLoopDocument {
+    static func makeCalculatorScenario(goal: String? = nil) -> ActionScenarioDocument {
         let now = ISO8601DateFormatter().string(from: Date())
-        let id = "loop-\(Int(Date().timeIntervalSince1970))-\(String(UUID().uuidString.prefix(6)).lowercased())"
+        let id = "scenario-\(Int(Date().timeIntervalSince1970))-\(String(UUID().uuidString.prefix(6)).lowercased())"
         let resolvedGoal = (goal?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
             ?? "Show a short Calculator demo with keyboard and click input"
 
-        return ActionLoopDocument(
+        return ActionScenarioDocument(
             id: id,
             title: "Calculator demo",
             goal: resolvedGoal,
@@ -107,8 +109,8 @@ enum ActionLoopPresets {
         action: String,
         description: String,
         target: String?
-    ) -> ActionLoopScenarioStep {
-        ActionLoopScenarioStep(
+    ) -> ActionScenarioStep {
+        ActionScenarioStep(
             id: "step_\(index)",
             index: index,
             action: action,
@@ -121,8 +123,8 @@ enum ActionLoopPresets {
 }
 
 @MainActor
-final class ActionLoopStore {
-    static let shared = ActionLoopStore()
+final class ActionScenarioStore {
+    static let shared = ActionScenarioStore()
 
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -132,18 +134,26 @@ final class ActionLoopStore {
 
     private let decoder = JSONDecoder()
 
-    private var loopsDirectoryURL: URL {
+    private var scenariosDirectoryURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Action/scenarios", isDirectory: true)
+    }
+
+    /// Legacy path from the short-lived "loops" naming.
+    private var legacyLoopsDirectoryURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Action/loops", isDirectory: true)
     }
 
     func ensureDirectory() throws {
-        try FileManager.default.createDirectory(at: loopsDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: scenariosDirectoryURL, withIntermediateDirectories: true)
     }
 
-    func loadAll() -> [ActionLoopDocument] {
+    func loadAll() -> [ActionScenarioDocument] {
+        migrateLegacyLoopsIfNeeded()
+
         guard let urls = try? FileManager.default.contentsOfDirectory(
-            at: loopsDirectoryURL,
+            at: scenariosDirectoryURL,
             includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else {
@@ -160,27 +170,66 @@ final class ActionLoopStore {
 
         return sorted.compactMap { url in
             guard let data = try? Data(contentsOf: url) else { return nil }
-            return try? decoder.decode(ActionLoopDocument.self, from: data)
+            return try? decoder.decode(ActionScenarioDocument.self, from: data)
         }
     }
 
-    func save(_ document: ActionLoopDocument) throws {
+    func save(_ document: ActionScenarioDocument) throws {
         try ensureDirectory()
         var copy = document
         copy.updatedAt = ISO8601DateFormatter().string(from: Date())
         let data = try encoder.encode(copy)
-        let url = loopsDirectoryURL.appendingPathComponent("\(copy.id).json")
+        let url = scenariosDirectoryURL.appendingPathComponent("\(copy.id).json")
         try data.write(to: url, options: .atomic)
     }
 
     func delete(id: String) throws {
-        let url = loopsDirectoryURL.appendingPathComponent("\(id).json")
+        let url = scenariosDirectoryURL.appendingPathComponent("\(id).json")
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
     }
 
-    func fileURL(for id: String) -> URL {
-        loopsDirectoryURL.appendingPathComponent("\(id).json")
+    private func migrateLegacyLoopsIfNeeded() {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: legacyLoopsDirectoryURL.path) else { return }
+        try? ensureDirectory()
+
+        guard let urls = try? fm.contentsOfDirectory(
+            at: legacyLoopsDirectoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for url in urls where url.pathExtension == "json" {
+            // Old files used the same JSON shape with different Swift type names — field names match.
+            let dest = scenariosDirectoryURL.appendingPathComponent(url.lastPathComponent.replacingOccurrences(of: "loop-", with: "scenario-"))
+            if fm.fileExists(atPath: dest.path) { continue }
+            if let data = try? Data(contentsOf: url),
+               var doc = try? decoder.decode(ActionScenarioDocument.self, from: data) {
+                // Re-key ids that still say loop-
+                if doc.id.hasPrefix("loop-") {
+                    doc = ActionScenarioDocument(
+                        id: doc.id.replacingOccurrences(of: "loop-", with: "scenario-"),
+                        title: doc.title,
+                        goal: doc.goal,
+                        phase: doc.phase,
+                        scenarioId: doc.scenarioId,
+                        targetAppName: doc.targetAppName,
+                        targetBundleId: doc.targetBundleId,
+                        steps: doc.steps,
+                        sessionIds: doc.sessionIds,
+                        latestSessionId: doc.latestSessionId,
+                        createdAt: doc.createdAt,
+                        updatedAt: doc.updatedAt,
+                        lastRunStatus: doc.lastRunStatus
+                    )
+                }
+                try? save(doc)
+            } else if let data = try? Data(contentsOf: url) {
+                // If decode fails (old encoding), copy raw for inspection
+                try? data.write(to: dest)
+            }
+        }
     }
 }

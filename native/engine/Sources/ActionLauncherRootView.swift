@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ActionLauncherRootView: View {
     private enum LauncherSection: String, CaseIterable, Identifiable, Hashable {
-        case loop = "Loop"
+        case home = "Home"
         case library = "Library"
         case settings = "Settings"
 
@@ -11,7 +11,7 @@ struct ActionLauncherRootView: View {
 
         var subtitle: String {
             switch self {
-            case .loop:
+            case .home:
                 return "Start · Edit · Review"
             case .library:
                 return "All takes"
@@ -72,7 +72,7 @@ struct ActionLauncherRootView: View {
     }
 
     @ObservedObject var model: ActionLauncherViewModel
-    @State private var selectedSection: LauncherSection? = .loop
+    @State private var selectedSection: LauncherSection? = .home
     @State private var librarySearch = ""
     @State private var hoveredLibrarySessionID: String?
     @State private var sessionPendingDelete: ActionSessionSummary?
@@ -92,7 +92,7 @@ struct ActionLauncherRootView: View {
     }
 
     private var activeSection: LauncherSection {
-        selectedSection ?? .loop
+        selectedSection ?? .home
     }
 
     private var libraryLayout: LibraryLayout {
@@ -136,13 +136,13 @@ struct ActionLauncherRootView: View {
         .frame(minWidth: 1100, minHeight: 720)
         .background(StageHUDTheme.appBackground)
         .onChange(of: model.reviewSelectionRequestID) { _, _ in
-            selectedSection = .loop
-            if model.selectedLoop != nil {
-                model.setLoopPhase(.review)
+            selectedSection = .home
+            if model.selectedScenario != nil {
+                model.setFlowPhase(.review)
             }
         }
-        .onChange(of: model.loopNavigationRequestID) { _, _ in
-            selectedSection = .loop
+        .onChange(of: model.workspaceNavigationRequestID) { _, _ in
+            selectedSection = .home
         }
         .onReceive(NotificationCenter.default.publisher(for: .actionShowKeyboardCheatSheet)) { _ in
             showKeyboardCheatSheet = true
@@ -155,7 +155,7 @@ struct ActionLauncherRootView: View {
         }
         .background(
             Group {
-                Button("") { selectedSection = .loop }
+                Button("") { selectedSection = .home }
                     .keyboardShortcut("1", modifiers: .command)
                     .opacity(0)
                     .frame(width: 0, height: 0)
@@ -205,7 +205,7 @@ struct ActionLauncherRootView: View {
             sidebarHeader
 
             VStack(spacing: 2) {
-                ForEach([LauncherSection.loop, .library], id: \.self) { section in
+                ForEach([LauncherSection.home, .library], id: \.self) { section in
                     sidebarItem(section)
                 }
             }
@@ -312,8 +312,8 @@ struct ActionLauncherRootView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             switch activeSection {
-                            case .loop:
-                                ActionLoopWorkspaceView(model: model, onOpenLibrary: {
+                            case .home:
+                                ActionWorkspaceView(model: model, onOpenLibrary: {
                                     selectedSection = .library
                                 })
                             case .library:
@@ -353,20 +353,20 @@ struct ActionLauncherRootView: View {
                 libraryLayoutPicker
             }
 
-            if activeSection == .loop {
+            if activeSection == .home {
                 launcherButton(
-                    "New loop",
+                    "Start",
                     tone: .primary,
-                    action: { model.startCalculatorLoop() }
+                    action: { model.startCalculatorScenario() }
                 )
                 .disabled(model.isRunningGuidedDemo)
             } else if activeSection == .library {
                 launcherButton(
-                    model.isRunningGuidedDemo ? "Recording…" : "New loop",
+                    model.isRunningGuidedDemo ? "Recording…" : "Start",
                     tone: .primary,
                     action: {
-                        model.startCalculatorLoop()
-                        selectedSection = .loop
+                        model.startCalculatorScenario()
+                        selectedSection = .home
                     }
                 )
                 .disabled(model.isRunningGuidedDemo)
@@ -441,9 +441,9 @@ struct ActionLauncherRootView: View {
 
     private var headerSubtitle: String {
         switch activeSection {
-        case .loop:
-            if let loop = model.selectedLoop {
-                return "\(loop.phase.title) · \(loop.title)"
+        case .home:
+            if let scenario = model.selectedScenario {
+                return "\(scenario.phase.title) · \(scenario.title)"
             }
             return "Start · Edit · Review"
         case .library:
@@ -901,15 +901,15 @@ struct ActionLauncherRootView: View {
 
     private func openSession(_ session: ActionSessionSummary) {
         model.selectSession(session)
-        selectedSection = .loop
-        if let loop = model.loops.first(where: {
+        selectedSection = .home
+        if let scenario = model.scenarios.first(where: {
             $0.latestSessionId == session.sessionId
                 || $0.sessionIds.contains(session.sessionId)
                 || $0.latestSessionId == session.id
                 || $0.sessionIds.contains(session.id)
         }) {
-            model.selectLoop(loop)
-            model.setLoopPhase(.review)
+            model.selectScenario(scenario)
+            model.setFlowPhase(.review)
         }
     }
 
@@ -1304,8 +1304,8 @@ struct ActionLauncherRootView: View {
 
     private func iconName(for section: LauncherSection) -> String {
         switch section {
-        case .loop:
-            return "arrow.triangle.2.circlepath"
+        case .home:
+            return "square.grid.2x2"
         case .library:
             return "square.stack"
         case .settings:
