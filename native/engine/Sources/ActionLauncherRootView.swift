@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ActionLauncherRootView: View {
     private enum LauncherSection: String, CaseIterable, Identifiable, Hashable {
+        case home = "Home"
         case scenarios = "Scenarios"
         case library = "Library"
         case settings = "Settings"
@@ -11,6 +12,8 @@ struct ActionLauncherRootView: View {
 
         var subtitle: String {
             switch self {
+            case .home:
+                return "Overview and shortcuts"
             case .scenarios:
                 return "Plans you can run"
             case .library:
@@ -72,7 +75,7 @@ struct ActionLauncherRootView: View {
     }
 
     @ObservedObject var model: ActionLauncherViewModel
-    @State private var selectedSection: LauncherSection? = .scenarios
+    @State private var selectedSection: LauncherSection? = .home
     @State private var librarySearch = ""
     @State private var hoveredLibrarySessionID: String?
     @State private var sessionPendingDelete: ActionSessionSummary?
@@ -92,7 +95,7 @@ struct ActionLauncherRootView: View {
     }
 
     private var activeSection: LauncherSection {
-        selectedSection ?? .scenarios
+        selectedSection ?? .home
     }
 
     private var libraryLayout: LibraryLayout {
@@ -155,16 +158,20 @@ struct ActionLauncherRootView: View {
         }
         .background(
             Group {
-                Button("") { selectedSection = .scenarios }
+                Button("") { selectedSection = .home }
                     .keyboardShortcut("1", modifiers: .command)
                     .opacity(0)
                     .frame(width: 0, height: 0)
-                Button("") { selectedSection = .library }
+                Button("") { selectedSection = .scenarios }
                     .keyboardShortcut("2", modifiers: .command)
                     .opacity(0)
                     .frame(width: 0, height: 0)
-                Button("") { selectedSection = .settings }
+                Button("") { selectedSection = .library }
                     .keyboardShortcut("3", modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                Button("") { selectedSection = .settings }
+                    .keyboardShortcut("4", modifiers: .command)
                     .opacity(0)
                     .frame(width: 0, height: 0)
                 Button("") { showKeyboardCheatSheet = true }
@@ -205,7 +212,7 @@ struct ActionLauncherRootView: View {
             sidebarHeader
 
             VStack(spacing: 2) {
-                ForEach([LauncherSection.scenarios, .library], id: \.self) { section in
+                ForEach([LauncherSection.home, .scenarios, .library], id: \.self) { section in
                     sidebarItem(section)
                 }
             }
@@ -312,6 +319,8 @@ struct ActionLauncherRootView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             switch activeSection {
+                            case .home:
+                                homeSection
                             case .scenarios:
                                 ActionWorkspaceView(model: model, onOpenLibrary: {
                                     selectedSection = .library
@@ -353,7 +362,7 @@ struct ActionLauncherRootView: View {
                 libraryLayoutPicker
             }
 
-            if activeSection == .scenarios || activeSection == .library {
+            if activeSection == .home || activeSection == .scenarios || activeSection == .library {
                 launcherButton(
                     "New scenario",
                     tone: .primary,
@@ -434,6 +443,8 @@ struct ActionLauncherRootView: View {
 
     private var headerSubtitle: String {
         switch activeSection {
+        case .home:
+            return activeSection.subtitle
         case .scenarios:
             if let scenario = model.selectedScenario {
                 return scenario.title
@@ -452,6 +463,205 @@ struct ActionLauncherRootView: View {
             return "\(total) take\(total == 1 ? "" : "s")"
         case .settings:
             return activeSection.subtitle
+        }
+    }
+
+    // MARK: - Home
+
+    private var homeSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            homeHero
+
+            HStack(alignment: .top, spacing: 14) {
+                homeRecentScenarios
+                homeRecentTakes
+            }
+
+            homeStatus
+        }
+    }
+
+    private var homeHero: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Ready when you are")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(StageHUDTheme.textPrimary)
+                Text("Draft a scenario, run it, then review the take. Scenarios hold the plan; Library holds the captures.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    launcherButton(
+                        "New scenario",
+                        tone: .primary,
+                        action: {
+                            model.startCalculatorScenario()
+                            selectedSection = .scenarios
+                        }
+                    )
+                    .disabled(model.isRunningGuidedDemo)
+
+                    launcherButton("Scenarios") {
+                        selectedSection = .scenarios
+                    }
+                    launcherButton("Library") {
+                        selectedSection = .library
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            MiraSpriteView(state: "idle", width: 72, height: 78)
+        }
+        .padding(20)
+        .background(cardBackground)
+    }
+
+    private var homeRecentScenarios: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Recent scenarios")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(StageHUDTheme.textMuted)
+                Spacer()
+                Button("All") { selectedSection = .scenarios }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(StageHUDTheme.reviewAccent)
+            }
+
+            if model.scenarios.isEmpty {
+                Text("None yet.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+            } else {
+                ForEach(Array(model.scenarios.prefix(4))) { scenario in
+                    Button {
+                        model.selectScenario(scenario)
+                        selectedSection = .scenarios
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(scenario.title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(StageHUDTheme.textPrimary)
+                                    .lineLimit(1)
+                                Text("\(scenario.steps.count) steps")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(StageHUDTheme.textMuted)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(StageHUDTheme.textMuted)
+                        }
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(StageHUDTheme.buttonSecondary)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
+    }
+
+    private var homeRecentTakes: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Recent takes")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(StageHUDTheme.textMuted)
+                Spacer()
+                Button("All") { selectedSection = .library }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(StageHUDTheme.reviewAccent)
+            }
+
+            if model.recentSessions.isEmpty {
+                Text("None yet.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+            } else {
+                ForEach(Array(model.recentSessions.prefix(4))) { session in
+                    Button {
+                        openSession(session)
+                    } label: {
+                        HStack(spacing: 10) {
+                            ActionSessionThumbnailView(
+                                session: session,
+                                width: 64,
+                                height: 40,
+                                showCaption: false,
+                                showDuration: true,
+                                cornerRadius: 6
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(session.displayTitle)
+                                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(StageHUDTheme.textPrimary)
+                                    .lineLimit(1)
+                                Text(sessionTimestamp(session))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(StageHUDTheme.textMuted)
+                            }
+                            Spacer()
+                        }
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(StageHUDTheme.buttonSecondary)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
+    }
+
+    private var homeStatus: some View {
+        HStack(spacing: 16) {
+            homeStatusPill(
+                title: "Agent",
+                value: humanAgentStatus,
+                ok: agentIsHealthy
+            )
+            homeStatusPill(
+                title: "Permissions",
+                value: permissionSummary,
+                ok: permissionsReady
+            )
+            Spacer()
+            if !permissionsReady {
+                launcherButton("Open Settings") {
+                    selectedSection = .settings
+                }
+            }
+        }
+        .padding(14)
+        .background(cardBackground)
+    }
+
+    private func homeStatusPill(title: String, value: String, ok: Bool) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(ok ? Color(nsColor: .systemGreen) : StageHUDTheme.textMuted.opacity(0.5))
+                .frame(width: 7, height: 7)
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundStyle(StageHUDTheme.textMuted)
+            Text(value)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(StageHUDTheme.textPrimary)
         }
     }
 
@@ -1298,6 +1508,8 @@ struct ActionLauncherRootView: View {
 
     private func iconName(for section: LauncherSection) -> String {
         switch section {
+        case .home:
+            return "house"
         case .scenarios:
             return "list.bullet.rectangle"
         case .library:

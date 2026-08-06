@@ -332,9 +332,10 @@ struct ActionKeyboardCheatSheetView: View {
         (
             "App",
             [
-                ("⌘1", "Scenarios"),
-                ("⌘2", "Library"),
-                ("⌘3", "Settings"),
+                ("⌘1", "Home"),
+                ("⌘2", "Scenarios"),
+                ("⌘3", "Library"),
+                ("⌘4", "Settings"),
                 ("⌘,", "Settings window"),
                 ("⌘/", "This cheat sheet"),
                 ("?", "This cheat sheet"),
