@@ -48,6 +48,23 @@ The runtime should record which tier was used for every action.
 
 The user should be able to cancel or defer attention-taking actions.
 
+## Drive Lease Authorization
+
+Live automation clients announce work with agent-owned drive leases. The lease
+mode is the authorization gate for the ladder above:
+
+- `background` leases are granted immediately and cover observe / semantic /
+  target-focus / app-api work while the supervision HUD shows `{agent} · {task}`
+- `attention` leases are required before attention-tier keyboard or pointer
+  control; v0 denies attention begins and rejects attention-tier touches on a
+  background lease
+- observe and act paths heartbeat the active lease so a forgotten release cannot
+  leave the Mac marked as driving forever
+
+Lease truth lives in the local agent runtime. `Action.app` only presents the
+self-expiring supervision registration. Full method and timer details are in
+[api.md](api.md#drive-lease-contract).
+
 ## Current Daily App Findings
 
 Use:

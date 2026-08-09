@@ -17,6 +17,7 @@ Owns:
 - launcher UI
 - permission UX
 - recording probe execution
+- supervision HUD presentation for drive presence
 
 Main file:
 
@@ -30,12 +31,14 @@ Owns:
 - automation-facing request handling
 - local runtime methods
 - bridge-friendly command orchestration
+- agent-owned drive lease registry and heartbeat / expiry logic
 
 Main files:
 
 - [ActionAgentRuntime.swift](native/engine/CoreSources/ActionAgentRuntime.swift)
 - [ActionAgentClient.swift](native/engine/CoreSources/ActionAgentClient.swift)
 - [ActionAgentCommandBridge.swift](native/engine/Sources/ActionAgentCommandBridge.swift)
+- [ActionDriveLeaseStore.swift](native/engine/CoreSources/ActionDriveLeaseStore.swift)
 
 ## Why This Exists
 
@@ -73,6 +76,18 @@ For recording:
 4. probe performs the actual `ScreenCaptureKit` recording
 5. artifacts and finished markers are written
 
+For drive leases:
+
+1. an automation client opens a persistent WebSocket to the local agent
+2. the client calls `drive.begin` with agent identity and task text
+3. the agent stores the lease, keyed to that connection owner
+4. the agent publishes a self-expiring supervision registration with agent + task
+5. `Action.app` renders the supervision HUD; it does not own lease truth
+6. observe / act paths call `drive.touch` so idle expiry cannot outlive real work
+7. release, disconnect, idle timeout, max duration, stop-file, or agent restart ends the lease
+
+See [api.md](api.md#drive-lease-contract) for method shapes, timers, and MCP mapping.
+
 ## Important Boundaries
 
 Keep these rules intact:
@@ -81,6 +96,8 @@ Keep these rules intact:
 - do not move recording implementation back into the plain headless agent path
 - keep the agent useful for orchestration and transport
 - keep AppKit-owned concerns in the app process
+- keep drive lease authority in the agent runtime; the HUD only presents presence
+- do not let harness-local state be the only place a "driving" claim lives
 
 ## Scripts And Helpers
 
