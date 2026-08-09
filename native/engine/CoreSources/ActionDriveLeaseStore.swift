@@ -7,6 +7,7 @@ enum ActionDriveLeaseError: LocalizedError {
     case leaseNotOwned(String)
     case leaseNotActive(String)
     case ambiguousLease
+    case attentionApprovalRequired
 
     var errorDescription: String? {
         switch self {
@@ -20,6 +21,8 @@ enum ActionDriveLeaseError: LocalizedError {
             return "Drive lease \(leaseID) is not active"
         case .ambiguousLease:
             return "Multiple drive leases are active for this client; pass leaseId explicitly"
+        case .attentionApprovalRequired:
+            return "Foreground keyboard or pointer control requires an approved attention lease"
         }
     }
 }
@@ -70,6 +73,7 @@ actor ActionDriveLeaseStore {
     private let now: @Sendable () -> Date
     private let publishesPresence: Bool
     private var records: [String: ActionStoredDriveLease]
+    private var disconnectedOwners: [String: Date] = [:]
 
     init(
         rootURL: URL = ActionDriveLeaseStore.defaultRootURL,
@@ -112,6 +116,9 @@ actor ActionDriveLeaseStore {
     ) throws -> ActionDriveBeginResult {
         let at = now()
         try sweep(at: at)
+        guard disconnectedOwners[ownerID] == nil else {
+            throw ActionDriveLeaseError.invalidInput("Drive client disconnected before the lease began")
+        }
 
         let agent = rawAgent.trimmingCharacters(in: .whitespacesAndNewlines)
         let task = rawTask.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -196,6 +203,9 @@ actor ActionDriveLeaseStore {
         guard var record = try resolveActiveRecord(ownerID: ownerID, leaseID: leaseID) else {
             return nil
         }
+        if axTier == "attention" && record.lease.mode != "attention" {
+            throw ActionDriveLeaseError.attentionApprovalRequired
+        }
 
         record.lease.lastActAt = actionDriveISO8601(at)
         if let axTier, !axTier.isEmpty {
@@ -253,8 +263,9 @@ actor ActionDriveLeaseStore {
         return record.lease
     }
 
-    func releaseOwned(by ownerID: String, summary: String) {
+    func disconnectOwner(by ownerID: String, summary: String) {
         let at = now()
+        disconnectedOwners[ownerID] = at
         for (leaseID, var record) in records
             where record.ownerID == ownerID && record.lease.status == "driving" {
             record.lease.status = "cancelled"
@@ -286,6 +297,9 @@ actor ActionDriveLeaseStore {
     }
 
     private func sweep(at: Date) throws {
+        disconnectedOwners = disconnectedOwners.filter {
+            at.timeIntervalSince($0.value) < maximumDuration
+        }
         for (leaseID, var record) in records {
             if record.lease.status == "driving" {
                 let stopRequested = FileManager.default.fileExists(atPath: record.lease.stopFile)
@@ -325,6 +339,7 @@ actor ActionDriveLeaseStore {
             }
             records.removeValue(forKey: leaseID)
             try? FileManager.default.removeItem(at: recordURL(for: leaseID))
+            try? FileManager.default.removeItem(atPath: record.lease.stopFile)
             if publishesPresence {
                 ActionDrivePresencePublisher.remove(leaseID: leaseID)
             }

@@ -93,7 +93,7 @@ enum ActionSupervisionRegistry {
                     return nil
                 }
                 if let expiresAt = registration.expiresAt,
-                   let expiration = ISO8601DateFormatter().date(from: expiresAt),
+                   let expiration = try? Date(expiresAt, strategy: .iso8601),
                    expiration <= now {
                     try? FileManager.default.removeItem(at: url)
                     return nil

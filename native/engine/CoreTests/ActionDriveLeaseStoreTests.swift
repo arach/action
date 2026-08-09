@@ -63,6 +63,36 @@ final class ActionDriveLeaseStoreTests: XCTestCase {
         }
     }
 
+    func testBackgroundLeaseCannotAuthorizeAttentionTierActions() async throws {
+        try await withStore { store, _ in
+            let begun = try await store.begin(
+                ownerID: "client-a",
+                agent: "Agent A",
+                task: "Background task",
+                mode: "background",
+                sessionID: nil,
+                implicit: false
+            )
+
+            do {
+                _ = try await store.touch(
+                    ownerID: "client-a",
+                    leaseID: begun.lease.leaseId,
+                    axTier: "attention"
+                )
+                XCTFail("Expected attention approval to be required")
+            } catch ActionDriveLeaseError.attentionApprovalRequired {
+                // Expected: a background lease cannot authorize foreground HID control.
+            }
+
+            let snapshot = try await store.status()
+            XCTAssertEqual(snapshot.activeCount, 1)
+            XCTAssertNil(
+                snapshot.leases.first { $0.leaseId == begun.lease.leaseId }?.lastAxTier
+            )
+        }
+    }
+
     func testConnectionCloseCancelsOnlyOwnedLeases() async throws {
         try await withStore { store, _ in
             let first = try await store.begin(
@@ -82,13 +112,37 @@ final class ActionDriveLeaseStoreTests: XCTestCase {
                 implicit: false
             )
 
-            await store.releaseOwned(by: "client-a", summary: "Driving client disconnected")
+            await store.disconnectOwner(by: "client-a", summary: "Driving client disconnected")
             let snapshot = try await store.status()
             let firstLease = snapshot.leases.first { $0.leaseId == first.lease.leaseId }
             let secondLease = snapshot.leases.first { $0.leaseId == second.lease.leaseId }
             XCTAssertEqual(firstLease?.status, "cancelled")
             XCTAssertEqual(secondLease?.status, "driving")
             XCTAssertEqual(snapshot.activeCount, 1)
+        }
+    }
+
+    func testLateBeginCannotCreateALeaseAfterConnectionClose() async throws {
+        try await withStore { store, _ in
+            await store.disconnectOwner(by: "client-a", summary: "Driving client disconnected")
+
+            do {
+                _ = try await store.begin(
+                    ownerID: "client-a",
+                    agent: "Agent A",
+                    task: "Late task",
+                    mode: "background",
+                    sessionID: nil,
+                    implicit: false
+                )
+                XCTFail("Expected a disconnected-owner error")
+            } catch ActionDriveLeaseError.invalidInput(let message) {
+                XCTAssertEqual(message, "Drive client disconnected before the lease began")
+            }
+
+            let snapshot = try await store.status()
+            XCTAssertEqual(snapshot.activeCount, 0)
+            XCTAssertTrue(snapshot.leases.isEmpty)
         }
     }
 
@@ -197,6 +251,7 @@ final class ActionDriveLeaseStoreTests: XCTestCase {
                 sessionID: nil,
                 implicit: false
             )
+            try Data("stop\n".utf8).write(to: URL(fileURLWithPath: begun.lease.stopFile))
             _ = try await store.release(
                 ownerID: "client-a",
                 leaseID: begun.lease.leaseId,
@@ -206,6 +261,7 @@ final class ActionDriveLeaseStoreTests: XCTestCase {
             clock.advance(by: 2)
             let snapshot = try await store.status()
             XCTAssertFalse(snapshot.leases.contains { $0.leaseId == begun.lease.leaseId })
+            XCTAssertFalse(FileManager.default.fileExists(atPath: begun.lease.stopFile))
         }
     }
 

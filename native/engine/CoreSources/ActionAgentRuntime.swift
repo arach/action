@@ -25,7 +25,6 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
     private var driveSweepTimer: DispatchSourceTimer?
     private var idleExitTimer: DispatchSourceTimer?
     private var activeConnections: [ObjectIdentifier: NWConnection] = [:]
-    private var connectionOwners: [ObjectIdentifier: String] = [:]
     private var lastConnectionActivityAt = Date()
 
     init(port: UInt16, parentProcessID: pid_t?, idleExitSeconds: TimeInterval?) throws {
@@ -77,7 +76,6 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         let identifier = ObjectIdentifier(connection)
         let ownerID = UUID().uuidString
         activeConnections[identifier] = connection
-        connectionOwners[identifier] = ownerID
         lastConnectionActivityAt = Date()
 
         connection.stateUpdateHandler = { state in
@@ -94,10 +92,10 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         }
 
         connection.start(queue: queue)
-        receiveNextMessage(on: connection)
+        receiveNextMessage(on: connection, ownerID: ownerID)
     }
 
-    private func receiveNextMessage(on connection: NWConnection) {
+    private func receiveNextMessage(on connection: NWConnection, ownerID: String) {
         connection.receiveMessage { [weak self] data, _, _, error in
             guard let self else {
                 connection.cancel()
@@ -107,14 +105,13 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
             if let error {
                 _ = error
                 let identifier = ObjectIdentifier(connection)
-                let ownerID = self.connectionOwners[identifier] ?? "unknown"
                 self.connectionDidClose(identifier: identifier, ownerID: ownerID)
                 connection.cancel()
                 return
             }
 
             guard let data, !data.isEmpty else {
-                self.receiveNextMessage(on: connection)
+                self.receiveNextMessage(on: connection, ownerID: ownerID)
                 return
             }
 
@@ -124,11 +121,10 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                     return
                 }
 
-                let ownerID = self.connectionOwners[ObjectIdentifier(connection)] ?? "unknown"
                 let response = await self.processMessage(data, ownerID: ownerID)
                 self.queue.async {
                     self.send(response: response, on: connection)
-                    self.receiveNextMessage(on: connection)
+                    self.receiveNextMessage(on: connection, ownerID: ownerID)
                 }
             }
         }
@@ -452,10 +448,9 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         guard activeConnections.removeValue(forKey: identifier) != nil else {
             return
         }
-        connectionOwners.removeValue(forKey: identifier)
         lastConnectionActivityAt = Date()
         Task {
-            await driveStore.releaseOwned(
+            await driveStore.disconnectOwner(
                 by: ownerID,
                 summary: "Driving client disconnected"
             )
