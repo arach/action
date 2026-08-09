@@ -17,6 +17,7 @@ The current repo is early, but it already has a meaningful native core:
 - a real AppKit launcher with menus and WebKit support
 - a local `Action` agent runtime reachable over WebSocket
 - native screenshot and recording commands
+- agent-owned drive leases for operator-visible automation sessions
 - permission and diagnostics wrappers for local development
 
 The strongest proof point right now is native capture:
@@ -24,12 +25,21 @@ The strongest proof point right now is native capture:
 - screenshot flows work
 - `ScreenCaptureKit` recording now works through a real app lifecycle path
 
+Drive leases are the matching control-plane proof point for live automation:
+
+- clients call `drive.begin` / `drive.release` / `drive.status` on the local agent
+- observe and act paths heartbeat the lease so idle silence cannot leave a ghost "driving" claim
+- background mode is granted today; attention-tier foreground control is denied until approval lands
+- cleanup covers disconnect, supervisor stop, idle expiry, max duration, and agent restart
+
+See [api.md](api.md#drive-lease-contract) for the full contract.
+
 ## Current Architecture Direction
 
 The project is deliberately split into two responsibilities:
 
-- `Action.app` owns AppKit lifecycle, menus, WebKit, settings, and permission UX
-- the local agent owns transport, automation-facing methods, and runtime orchestration
+- `Action.app` owns AppKit lifecycle, menus, WebKit, settings, permission UX, and supervision HUD presentation
+- the local agent owns transport, automation-facing methods, drive lease truth, and runtime orchestration
 
 This split exists because UI lifecycle and automation lifecycle are not the same
 problem on macOS. Earlier experiments showed that trying to make a command-style
