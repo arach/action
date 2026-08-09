@@ -61,4 +61,8 @@ if [[ $needs_build -eq 1 ]]; then
   "$SCRIPT_DIR/build-app.sh" >/dev/stderr
 fi
 
+if [[ "$COMMAND" == "agent" ]]; then
+  run_direct "$@"
+fi
+
 run_via_open "$@"

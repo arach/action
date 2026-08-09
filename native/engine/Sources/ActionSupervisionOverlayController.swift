@@ -354,10 +354,13 @@ final class ActionSupervisionOverlayController: NSObject {
         // Only publish when a value actually changes. The poll runs several
         // times a second; assigning unconditionally would fire objectWillChange
         // on every tick and churn the view — the source of the visible flicker.
-        let detail = registrations.last?.detail ?? "Supervisor stop · Cmd+Ctrl+. or Esc Esc"
+        let primary = registrations.last
+        let title = primary?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = title?.isEmpty == false ? title! : "Action Supervision"
+        let detail = primary?.detail ?? "Supervisor stop · Cmd+Ctrl+. or Esc Esc"
         let countLabel = registrations.count == 1 ? "1 live" : "\(registrations.count) live"
-        if model.title != "Action Supervision" {
-            model.title = "Action Supervision"
+        if model.title != resolvedTitle {
+            model.title = resolvedTitle
         }
         if model.detail != detail {
             model.detail = detail

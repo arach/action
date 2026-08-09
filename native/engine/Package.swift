@@ -51,6 +51,11 @@ let package = Package(
         .executableTarget(
             name: "WebKitProbe",
             path: "ProbeSources"
+        ),
+        .testTarget(
+            name: "ActionCoreTests",
+            dependencies: ["ActionCore"],
+            path: "CoreTests"
         )
     ]
 )

@@ -18,12 +18,18 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "dev.action.agent.listener")
     private let runtimeState = ActionAgentRuntimeState()
+    private let driveStore = ActionDriveLeaseStore()
     private let parentProcessID: pid_t?
+    private let idleExitSeconds: TimeInterval?
     private var parentWatchTimer: DispatchSourceTimer?
+    private var driveSweepTimer: DispatchSourceTimer?
+    private var idleExitTimer: DispatchSourceTimer?
     private var activeConnections: [ObjectIdentifier: NWConnection] = [:]
+    private var lastConnectionActivityAt = Date()
 
-    init(port: UInt16, parentProcessID: pid_t?) throws {
+    init(port: UInt16, parentProcessID: pid_t?, idleExitSeconds: TimeInterval?) throws {
         self.parentProcessID = parentProcessID
+        self.idleExitSeconds = idleExitSeconds
         let tcpOptions = NWProtocolTCP.Options()
         let websocketOptions = NWProtocolWebSocket.Options()
         websocketOptions.autoReplyPing = true
@@ -60,32 +66,36 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
 
         listener.start(queue: queue)
         startParentWatchIfNeeded()
+        startDriveSweep()
+        startIdleExitIfNeeded()
         NSApplication.shared.run()
         exit(0)
     }
 
     private func handle(connection: NWConnection) {
         let identifier = ObjectIdentifier(connection)
+        let ownerID = UUID().uuidString
         activeConnections[identifier] = connection
+        lastConnectionActivityAt = Date()
 
         connection.stateUpdateHandler = { state in
             switch state {
             case .failed(let error):
                 _ = error
                 connection.cancel()
-                self.activeConnections.removeValue(forKey: identifier)
+                self.connectionDidClose(identifier: identifier, ownerID: ownerID)
             case .cancelled:
-                self.activeConnections.removeValue(forKey: identifier)
+                self.connectionDidClose(identifier: identifier, ownerID: ownerID)
             default:
                 break
             }
         }
 
         connection.start(queue: queue)
-        receiveNextMessage(on: connection)
+        receiveNextMessage(on: connection, ownerID: ownerID)
     }
 
-    private func receiveNextMessage(on connection: NWConnection) {
+    private func receiveNextMessage(on connection: NWConnection, ownerID: String) {
         connection.receiveMessage { [weak self] data, _, _, error in
             guard let self else {
                 connection.cancel()
@@ -94,13 +104,14 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
 
             if let error {
                 _ = error
-                self.activeConnections.removeValue(forKey: ObjectIdentifier(connection))
+                let identifier = ObjectIdentifier(connection)
+                self.connectionDidClose(identifier: identifier, ownerID: ownerID)
                 connection.cancel()
                 return
             }
 
             guard let data, !data.isEmpty else {
-                self.receiveNextMessage(on: connection)
+                self.receiveNextMessage(on: connection, ownerID: ownerID)
                 return
             }
 
@@ -110,16 +121,16 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                     return
                 }
 
-                let response = await self.processMessage(data)
+                let response = await self.processMessage(data, ownerID: ownerID)
                 self.queue.async {
                     self.send(response: response, on: connection)
-                    self.receiveNextMessage(on: connection)
+                    self.receiveNextMessage(on: connection, ownerID: ownerID)
                 }
             }
         }
     }
 
-    private func processMessage(_ data: Data) async -> ActionAgentResponse {
+    private func processMessage(_ data: Data, ownerID: String) async -> ActionAgentResponse {
         let decoder = JSONDecoder()
 
         let request: ActionAgentRequest
@@ -134,14 +145,18 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         }
 
         do {
-            let result = try await handle(request: request, method: method)
+            let result = try await handle(request: request, method: method, ownerID: ownerID)
             return ActionAgentResponse(id: request.id, ok: true, result: result)
         } catch {
             return ActionAgentResponse(id: request.id, ok: false, error: error.localizedDescription)
         }
     }
 
-    private func handle(request: ActionAgentRequest, method: ActionAgentMethod) async throws -> [String: String] {
+    private func handle(
+        request: ActionAgentRequest,
+        method: ActionAgentMethod,
+        ownerID: String
+    ) async throws -> [String: String] {
         switch method {
         case .ping:
             return ["message": "pong", "service": "ActionAgent"]
@@ -289,6 +304,53 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         case .calculatorDisplayValue:
             let value = try ActionNativeAutomation.calculatorDisplayValue()
             return ["status": "calculator-display", "value": value]
+        case .driveBegin:
+            let result = try await driveStore.begin(
+                ownerID: ownerID,
+                agent: request.params["agent"] ?? "",
+                task: request.params["task"] ?? "",
+                mode: request.params["mode"],
+                sessionID: request.params["sessionId"],
+                implicit: request.params["implicit"] == "true"
+            )
+            var response = [
+                "status": result.status,
+                "lease": try actionAgentJSONString(result.lease),
+            ]
+            if let reason = result.reason {
+                response["reason"] = reason
+            }
+            return response
+        case .driveTouch:
+            let lease = try await driveStore.touch(
+                ownerID: ownerID,
+                leaseID: request.params["leaseId"],
+                axTier: request.params["axTier"]
+            )
+            guard let lease else {
+                return ["status": "idle"]
+            }
+            return [
+                "status": "driving",
+                "lease": try actionAgentJSONString(lease),
+            ]
+        case .driveRelease:
+            guard let leaseID = request.params["leaseId"], !leaseID.isEmpty else {
+                throw ActionDriveLeaseError.invalidInput("drive.release requires leaseId")
+            }
+            let lease = try await driveStore.release(
+                ownerID: ownerID,
+                leaseID: leaseID,
+                outcome: request.params["outcome"],
+                summary: request.params["summary"]
+            )
+            return [
+                "status": lease.status,
+                "lease": try actionAgentJSONString(lease),
+            ]
+        case .driveStatus:
+            let snapshot = try await driveStore.status()
+            return ["snapshot": try actionAgentJSONString(snapshot)]
         case .recordAppWindow:
             guard #available(macOS 15.0, *) else {
                 throw NSError(domain: "ActionAgent", code: 7, userInfo: [NSLocalizedDescriptionKey: "Window recording requires macOS 15.0 or newer."])
@@ -382,6 +444,19 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         }
     }
 
+    private func connectionDidClose(identifier: ObjectIdentifier, ownerID: String) {
+        guard activeConnections.removeValue(forKey: identifier) != nil else {
+            return
+        }
+        lastConnectionActivityAt = Date()
+        Task {
+            await driveStore.disconnectOwner(
+                by: ownerID,
+                summary: "Driving client disconnected"
+            )
+        }
+    }
+
     private func startParentWatchIfNeeded() {
         guard let parentProcessID else {
             return
@@ -397,6 +472,41 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         timer.resume()
         parentWatchTimer = timer
     }
+
+    private func startDriveSweep() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + .milliseconds(500), repeating: .milliseconds(500))
+        timer.setEventHandler { [driveStore] in
+            Task {
+                try? await driveStore.sweep()
+            }
+        }
+        timer.resume()
+        driveSweepTimer = timer
+    }
+
+    private func startIdleExitIfNeeded() {
+        guard let idleExitSeconds, idleExitSeconds > 0 else {
+            return
+        }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1))
+        timer.setEventHandler {
+            guard self.activeConnections.isEmpty,
+                  Date().timeIntervalSince(self.lastConnectionActivityAt) >= idleExitSeconds else {
+                return
+            }
+            exit(0)
+        }
+        timer.resume()
+        idleExitTimer = timer
+    }
+}
+
+private func actionAgentJSONString<T: Encodable>(_ value: T) throws -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    return String(decoding: try encoder.encode(value), as: UTF8.self)
 }
 
 private func actionAgentAccessibilityStatus(prompt: Bool = false) -> ActionAgentRuntimePermissionState {
@@ -430,12 +540,17 @@ public enum ActionAgentRuntime {
     public static func run(arguments: [String]) -> Never {
         let port = parsePort(arguments: arguments) ?? ActionAgentDefaults.port
         let parentProcessID = parseParentProcessID(arguments: arguments)
+        let idleExitSeconds = parseIdleExitSeconds(arguments: arguments)
 
         do {
             let application = NSApplication.shared
-            application.setActivationPolicy(.regular)
+            application.setActivationPolicy(.accessory)
 
-            let server = try ActionAgentRuntimeServer(port: port, parentProcessID: parentProcessID)
+            let server = try ActionAgentRuntimeServer(
+                port: port,
+                parentProcessID: parentProcessID,
+                idleExitSeconds: idleExitSeconds
+            )
             return server.run()
         } catch {
             FileHandle.standardError.write(Data("ActionAgent failed: \(error.localizedDescription)\n".utf8))
@@ -458,5 +573,13 @@ public enum ActionAgentRuntime {
             return nil
         }
         return pid_t(raw)
+    }
+
+    private static func parseIdleExitSeconds(arguments: [String]) -> TimeInterval? {
+        guard let index = arguments.firstIndex(of: "--idle-exit-seconds"),
+              arguments.indices.contains(index + 1) else {
+            return nil
+        }
+        return TimeInterval(arguments[index + 1])
     }
 }

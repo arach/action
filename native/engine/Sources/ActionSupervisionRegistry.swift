@@ -9,6 +9,7 @@ struct ActionSupervisionRegistration: Codable {
     let stopFile: String?
     let ownsVisibleControls: Bool?
     let avoidedDisplayID: UInt32?
+    let expiresAt: String?
     let updatedAt: String
 }
 
@@ -43,7 +44,8 @@ enum ActionSupervisionRegistry {
         controlFile: String?,
         stopFile: String?,
         ownsVisibleControls: Bool = false,
-        avoidedDisplayID: UInt32? = nil
+        avoidedDisplayID: UInt32? = nil,
+        expiresAt: String? = nil
     ) throws {
         let registration = ActionSupervisionRegistration(
             id: id,
@@ -53,6 +55,7 @@ enum ActionSupervisionRegistry {
             stopFile: stopFile,
             ownsVisibleControls: ownsVisibleControls,
             avoidedDisplayID: avoidedDisplayID,
+            expiresAt: expiresAt,
             updatedAt: ISO8601DateFormatter().string(from: Date())
         )
         try FileManager.default.createDirectory(at: registrationsDirectoryURL, withIntermediateDirectories: true)
@@ -79,13 +82,23 @@ enum ActionSupervisionRegistry {
         }
 
         let decoder = JSONDecoder()
+        let now = Date()
         return urls
             .filter { $0.pathExtension == "json" }
             .compactMap { url in
                 guard let data = try? Data(contentsOf: url) else {
                     return nil
                 }
-                return try? decoder.decode(ActionSupervisionRegistration.self, from: data)
+                guard let registration = try? decoder.decode(ActionSupervisionRegistration.self, from: data) else {
+                    return nil
+                }
+                if let expiresAt = registration.expiresAt,
+                   let expiration = try? Date(expiresAt, strategy: .iso8601),
+                   expiration <= now {
+                    try? FileManager.default.removeItem(at: url)
+                    return nil
+                }
+                return registration
             }
             .sorted { $0.updatedAt < $1.updatedAt }
     }
