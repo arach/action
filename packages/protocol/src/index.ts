@@ -325,7 +325,59 @@ export type ArtifactKind =
   | "focus-metadata"
   | "subtitle"
   | "render-manifest"
-  | "final-video";
+  | "final-video"
+  | "drive-lease";
+
+/** How an automation client intends to interact with the Mac. */
+export const driveModes = ["background", "attention"] as const;
+export type DriveMode = (typeof driveModes)[number];
+
+/** Active and terminal states for an operator-visible drive lease. */
+export const driveLeaseStates = [
+  "driving",
+  "done",
+  "failed",
+  "cancelled",
+  "expired",
+  "denied",
+] as const;
+export type DriveLeaseState = (typeof driveLeaseStates)[number];
+
+export const driveOutcomes = ["done", "failed", "cancelled"] as const;
+export type DriveOutcome = (typeof driveOutcomes)[number];
+
+export const driveAggregateStates = ["idle", "driving"] as const;
+export type DriveAggregateState = (typeof driveAggregateStates)[number];
+
+export type AxActionTier =
+  | "observe"
+  | "semantic"
+  | "target-focus"
+  | "app-api"
+  | "attention";
+
+export interface DriveLease {
+  leaseId: string;
+  agent: string;
+  task: string;
+  mode: DriveMode;
+  status: DriveLeaseState;
+  sessionId: string;
+  startedAt: string;
+  lastActAt: string;
+  releasedAt?: string;
+  outcome?: DriveOutcome | "expired";
+  summary?: string;
+  implicit?: boolean;
+  stopFile: string;
+  lastAxTier?: AxActionTier;
+}
+
+export interface DriveStatusSnapshot {
+  state: DriveAggregateState;
+  leases: DriveLease[];
+  activeCount: number;
+}
 
 export interface RuntimeArtifact {
   kind: ArtifactKind;
@@ -557,6 +609,36 @@ export type TraceEvent =
       type: "artifact.registered";
       at: string;
       artifact: RuntimeArtifact;
+    }
+  | {
+      type: "drive.lease_began";
+      at: string;
+      leaseId: string;
+      agent: string;
+      task: string;
+      mode: DriveMode;
+      sessionId: string;
+      implicit?: boolean;
+    }
+  | {
+      type: "drive.lease_released";
+      at: string;
+      leaseId: string;
+      outcome: DriveOutcome | "expired";
+      summary?: string;
+    }
+  | {
+      type: "drive.lease_expired";
+      at: string;
+      leaseId: string;
+      reason: "idle" | "max-duration" | "stop-file" | "connection-closed";
+    }
+  | {
+      type: "drive.act_tier";
+      at: string;
+      leaseId: string;
+      axTier: AxActionTier;
+      actionKind?: string;
     };
 
 export interface CompiledTimelineStep {

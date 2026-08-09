@@ -14,15 +14,22 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type {
+  AxActionTier,
   Bounds,
+  DriveLease,
+  DriveMode,
+  DriveOutcome,
   ResolvedTarget,
   RuntimeAction,
   SessionMode,
   TargetQuery,
+  TraceEvent,
 } from "@action/protocol";
 import {
   analyzeScreenshotVision,
   CompanionClient,
+  DriveAgentClient,
+  inferAxTier,
   inspectCurrentSurface,
   MacOSCommandEngine,
   ocrScreenshot,
@@ -31,6 +38,7 @@ import {
 
 export const toolFamilies = [
   "session",
+  "drive",
   "observe",
   "resolve",
   "act",
@@ -73,6 +81,7 @@ const actionRoot = resolve(process.env.ACTION_ROOT ?? defaultActionRoot);
 const nativeHostPath = resolve(
   process.env.ACTION_NATIVE_HOST ?? resolve(actionRoot, "native/engine/scripts/run-app-host.sh"),
 );
+const driveClient = new DriveAgentClient({ launcherPath: nativeHostPath });
 const activeRecordings = new Map<string, RecordingEntry>();
 
 function now(): string {
@@ -183,6 +192,17 @@ function parseSessionMode(value: unknown): SessionMode {
   return "inspection";
 }
 
+function parseDriveMode(value: unknown): DriveMode {
+  return value === "attention" ? "attention" : "background";
+}
+
+function parseDriveOutcome(value: unknown): DriveOutcome {
+  if (value === "done" || value === "failed" || value === "cancelled") {
+    return value;
+  }
+  return "cancelled";
+}
+
 function parseBounds(value: unknown, label = "bounds"): Bounds {
   const object = asObject(value, label);
   const x = optionalNumber(object.x);
@@ -291,6 +311,117 @@ async function readTextIfExists(path: string): Promise<string | undefined> {
 async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function persistDriveSession(lease: DriveLease, events: TraceEvent[]): Promise<void> {
+  const outputDir = sessionOutputDir(lease.sessionId);
+  await writeJson(resolve(outputDir, "drive-lease.json"), lease);
+
+  if (events.length > 0) {
+    const tracePath = resolve(outputDir, "drive-trace.json");
+    const rawTrace = await readTextIfExists(tracePath);
+    let trace: TraceEvent[] = [];
+    try {
+      const parsed = rawTrace ? JSON.parse(rawTrace) : [];
+      trace = Array.isArray(parsed) ? parsed as TraceEvent[] : [];
+    } catch {
+      trace = [];
+    }
+    await writeJson(tracePath, [...trace, ...events]);
+  }
+
+  const sessionPath = resolve(outputDir, "session.json");
+  const rawSession = await readTextIfExists(sessionPath);
+  let session: JsonObject = {};
+  try {
+    session = rawSession ? JSON.parse(rawSession) as JsonObject : {};
+  } catch {
+    session = {};
+  }
+  await writeJson(sessionPath, {
+    ...session,
+    id: session.id ?? lease.sessionId,
+    mode: session.mode ?? "hybrid",
+    state: lease.status === "driving" ? "running" : "completed",
+    phase: lease.status === "driving" ? "acting" : "completed",
+    createdAt: session.createdAt ?? lease.startedAt,
+    outputDir: session.outputDir ?? outputDir,
+    updatedAt: lease.releasedAt ?? lease.lastActAt,
+    driveLeaseId: lease.leaseId,
+    drive: lease,
+  });
+}
+
+async function heartbeatDrive(input: {
+  leaseId?: string;
+  axTier: AxActionTier;
+  actionKind?: string;
+}): Promise<DriveLease | undefined> {
+  if (!input.leaseId && !driveClient.isConnected) {
+    return undefined;
+  }
+  const lease = await driveClient.touch({
+    leaseId: input.leaseId,
+    axTier: input.axTier,
+  });
+  if (!lease) {
+    return undefined;
+  }
+  await persistDriveSession(lease, [{
+    type: "drive.act_tier",
+    at: lease.lastActAt,
+    leaseId: lease.leaseId,
+    axTier: input.axTier,
+    actionKind: input.actionKind,
+  }]);
+  return lease;
+}
+
+async function ensureDriveLeaseForAct(input: {
+  leaseId?: string;
+  axTier: AxActionTier;
+  actionKind: string;
+  description: string;
+}): Promise<DriveLease> {
+  let lease = await driveClient.touch({
+    leaseId: input.leaseId,
+    axTier: input.axTier,
+  });
+
+  if (!lease) {
+    const begun = await driveClient.begin({
+      agent: "Action MCP",
+      task: input.description || input.actionKind,
+      mode: "background",
+      implicit: true,
+    });
+    if (begun.status !== "granted") {
+      throw new Error(begun.reason ?? "Unable to begin an implicit drive lease");
+    }
+    lease = await driveClient.touch({
+      leaseId: begun.lease.leaseId,
+      axTier: input.axTier,
+    }) ?? begun.lease;
+    await persistDriveSession(lease, [{
+      type: "drive.lease_began",
+      at: lease.startedAt,
+      leaseId: lease.leaseId,
+      agent: lease.agent,
+      task: lease.task,
+      mode: lease.mode,
+      sessionId: lease.sessionId,
+      implicit: true,
+    }]);
+  }
+
+  await persistDriveSession(lease, [{
+    type: "drive.act_tier",
+    at: lease.lastActAt,
+    leaseId: lease.leaseId,
+    axTier: input.axTier,
+    actionKind: input.actionKind,
+  }]);
+  return lease;
 }
 
 async function runHost(command: string, ...args: string[]): Promise<JsonObject> {
@@ -469,6 +600,38 @@ const tools: Tool[] = [
     { readOnlyHint: false, idempotentHint: false },
   ),
   tool(
+    "action.drive.begin",
+    "Begin Drive Lease",
+    "Announce that an automation client is driving the Mac and show its identity and task in the supervision HUD.",
+    objectSchema({
+      agent: textProperty("Automation client identity shown to the operator."),
+      task: textProperty("Short description of the work shown to the operator."),
+      mode: enumProperty(["background", "attention"], "Drive mode. Background is the supported default; attention approval is not available yet."),
+      sessionId: textProperty("Optional Action session id for drive artifacts."),
+    }, ["agent", "task"]),
+    { readOnlyHint: false, idempotentHint: false },
+  ),
+  tool(
+    "action.drive.release",
+    "Release Drive Lease",
+    "Give control back to the operator and record a terminal outcome.",
+    objectSchema({
+      leaseId: textProperty("Lease id returned by action.drive.begin."),
+      outcome: enumProperty(["done", "failed", "cancelled"], "Terminal outcome. Defaults to cancelled."),
+      summary: textProperty("Optional short completion summary."),
+    }, ["leaseId"]),
+    { readOnlyHint: false, idempotentHint: false },
+  ),
+  tool(
+    "action.drive.status",
+    "Drive Status",
+    "Read active and recently completed drive leases from the native Action agent.",
+    objectSchema({
+      leaseId: textProperty("Optional lease id to focus the response."),
+    }),
+    { readOnlyHint: true, idempotentHint: true },
+  ),
+  tool(
     "action.observe.snapshot",
     "Observe Snapshot",
     "Capture the current focused surface screenshot, AX snapshot, and Apple Vision OCR as session artifacts.",
@@ -481,6 +644,7 @@ const tools: Tool[] = [
       visionProvider: enumProperty(["minimax", "moondream"], "Vision provider. Defaults to minimax when MINIMAX_API_KEY is set."),
       direct: booleanProperty("Bypass action-companion and run as a one-shot MCP call."),
       mockNative: booleanProperty("Use companion mock native mode for verification when ActionAgent is unavailable."),
+      leaseId: textProperty("Optional drive lease id to heartbeat while observing."),
     }),
     { readOnlyHint: false, idempotentHint: false },
   ),
@@ -542,6 +706,7 @@ const tools: Tool[] = [
         + "not a screen direction: which way the content moves is up to the target app, so scroll once and observe rather than reasoning from the sign.",
       ),
       target: objectProperty("Optional ResolvedTarget. If omitted, action.target is resolved first when present."),
+      leaseId: textProperty("Drive lease id for this action. Required when this client has more than one active lease."),
     }, ["action"]),
     { readOnlyHint: false, idempotentHint: false },
   ),
@@ -679,6 +844,86 @@ const handlers: Record<string, ToolHandler> = {
     };
   },
 
+  async "action.drive.begin"(args) {
+    const agent = optionalString(args.agent);
+    const task = optionalString(args.task);
+    if (!agent || !task) {
+      throw new Error("agent and task are required");
+    }
+    const result = await driveClient.begin({
+      agent,
+      task,
+      mode: parseDriveMode(args.mode),
+      sessionId: optionalString(args.sessionId),
+    });
+    if (result.status === "denied") {
+      return {
+        ok: false,
+        status: result.status,
+        leaseId: result.lease.leaseId,
+        reason: result.reason,
+        lease: result.lease,
+      };
+    }
+
+    await persistDriveSession(result.lease, [{
+      type: "drive.lease_began",
+      at: result.lease.startedAt,
+      leaseId: result.lease.leaseId,
+      agent: result.lease.agent,
+      task: result.lease.task,
+      mode: result.lease.mode,
+      sessionId: result.lease.sessionId,
+      implicit: result.lease.implicit,
+    }]);
+    return {
+      ok: true,
+      status: result.status,
+      leaseId: result.lease.leaseId,
+      lease: result.lease,
+    };
+  },
+
+  async "action.drive.release"(args) {
+    const leaseId = optionalString(args.leaseId);
+    if (!leaseId) {
+      throw new Error("leaseId is required");
+    }
+    const lease = await driveClient.release({
+      leaseId,
+      outcome: parseDriveOutcome(args.outcome),
+      summary: optionalString(args.summary),
+    });
+    await persistDriveSession(lease, [{
+      type: "drive.lease_released",
+      at: lease.releasedAt ?? lease.lastActAt,
+      leaseId: lease.leaseId,
+      outcome: lease.outcome ?? "cancelled",
+      summary: lease.summary,
+    }]);
+    return {
+      ok: true,
+      leaseId: lease.leaseId,
+      outcome: lease.outcome,
+      lease,
+    };
+  },
+
+  async "action.drive.status"(args) {
+    const snapshot = await driveClient.status();
+    const leaseId = optionalString(args.leaseId);
+    if (!leaseId) {
+      return { ok: true, ...snapshot };
+    }
+    return {
+      ok: true,
+      state: snapshot.state,
+      activeCount: snapshot.activeCount,
+      lease: snapshot.leases.find((lease) => lease.leaseId === leaseId),
+      leases: snapshot.leases,
+    };
+  },
+
   async "action.observe.snapshot"(args) {
     const sessionId = optionalString(args.sessionId) ?? defaultSessionId("inspection");
     const outputDir = resolve(actionRoot, optionalString(args.outputDir) ?? sessionOutputDir(sessionId));
@@ -691,6 +936,11 @@ const handlers: Record<string, ToolHandler> = {
       visionProvider: parseVisionProvider(args.visionProvider),
       mockNative: optionalBoolean(args.mockNative),
     };
+    await heartbeatDrive({
+      leaseId: optionalString(args.leaseId),
+      axTier: "observe",
+      actionKind: "observe.snapshot",
+    });
     const companion = await runCompanionJobIfAvailable("observe.snapshot", payload, optionalBoolean(args.direct));
     if (companion) {
       return companion;
@@ -832,6 +1082,19 @@ const handlers: Record<string, ToolHandler> = {
         ? await engine.resolveTarget(action.target)
         : undefined;
 
+    const channel = target?.mode === "coordinate" ? "hid" : "native";
+    const axTier = inferAxTier({
+      actionKind: action.kind,
+      channel,
+      targetMode: target?.mode,
+    });
+    const lease = await ensureDriveLeaseForAct({
+      leaseId: optionalString(args.leaseId),
+      axTier,
+      actionKind: action.kind,
+      description: action.description,
+    });
+
     // performAction throws for anything it could not carry out — including an action kind the
     // runtime has no handler for — and the tool dispatcher turns a throw into an isError reply.
     // Reaching this line is therefore the success signal; the literal below is not an assumption.
@@ -843,11 +1106,19 @@ const handlers: Record<string, ToolHandler> = {
         id: action.id,
         at: now(),
         status: "succeeded",
-        channel: target?.mode === "coordinate" ? "hid" : "native",
+        channel,
         detail: action.description,
+        axTier,
       },
       action,
       target,
+      drive: {
+        leaseId: lease.leaseId,
+        agent: lease.agent,
+        task: lease.task,
+        mode: lease.mode,
+        implicit: lease.implicit === true,
+      },
     };
   },
 
@@ -1032,6 +1303,9 @@ function createServer(): Server {
       },
       instructions: [
         "Use Action tools to observe, resolve, act, record, and inspect native macOS surfaces.",
+        "Before multi-step UI work, call action.drive.begin with an agent identity and short task.",
+        "Pass the returned leaseId to observe and act calls, then call action.drive.release when the work ends.",
+        "Background is the supported drive mode; attention approval is not available yet.",
         "Treat action.record.start as asynchronous; completion is represented by action.record.status and the finished file.",
         "Prefer action.observe.snapshot and action.resolve.target before action.act.execute.",
       ].join("\n"),
