@@ -265,6 +265,37 @@ final class ActionDriveLeaseStoreTests: XCTestCase {
         }
     }
 
+    func testTerminalTransitionsSignalDetachedPresentationToStop() async throws {
+        try await withStore { store, _ in
+            let released = try await store.begin(
+                ownerID: "client-a",
+                agent: "Agent A",
+                task: "Released task",
+                mode: "background",
+                sessionID: nil,
+                implicit: false
+            )
+            _ = try await store.release(
+                ownerID: "client-a",
+                leaseID: released.lease.leaseId,
+                outcome: "done",
+                summary: "Complete"
+            )
+            XCTAssertTrue(FileManager.default.fileExists(atPath: released.lease.stopFile))
+
+            let disconnected = try await store.begin(
+                ownerID: "client-b",
+                agent: "Agent B",
+                task: "Disconnected task",
+                mode: "background",
+                sessionID: nil,
+                implicit: false
+            )
+            await store.disconnectOwner(by: "client-b", summary: "Client disconnected")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: disconnected.lease.stopFile))
+        }
+    }
+
     func testAttentionModeIsDenied() async throws {
         try await withStore { store, _ in
             let result = try await store.begin(

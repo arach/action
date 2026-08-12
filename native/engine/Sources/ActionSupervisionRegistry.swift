@@ -14,11 +14,15 @@ struct ActionSupervisionRegistration: Codable {
 }
 
 enum ActionSupervisionRegistry {
+    private static let driveIdleExpirySeconds: TimeInterval = 90
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
     }()
+
+    private static let iso8601Format = Date.ISO8601FormatStyle()
+    private static let fractionalISO8601Format = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
     static var baseDirectoryURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -83,24 +87,19 @@ enum ActionSupervisionRegistry {
 
         let decoder = JSONDecoder()
         let now = Date()
-        return urls
-            .filter { $0.pathExtension == "json" }
-            .compactMap { url in
-                guard let data = try? Data(contentsOf: url) else {
-                    return nil
-                }
-                guard let registration = try? decoder.decode(ActionSupervisionRegistration.self, from: data) else {
-                    return nil
-                }
-                if let expiresAt = registration.expiresAt,
-                   let expiration = try? Date(expiresAt, strategy: .iso8601),
-                   expiration <= now {
-                    try? FileManager.default.removeItem(at: url)
-                    return nil
-                }
-                return registration
+        var registrations: [ActionSupervisionRegistration] = []
+        for url in urls where url.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: url),
+                  let registration = try? decoder.decode(ActionSupervisionRegistration.self, from: data) else {
+                continue
             }
-            .sorted { $0.updatedAt < $1.updatedAt }
+            if registrationIsExpired(registration, now: now) {
+                try? FileManager.default.removeItem(at: url)
+                continue
+            }
+            registrations.append(registration)
+        }
+        return registrations.sorted { $0.updatedAt < $1.updatedAt }
     }
 
     @discardableResult
@@ -159,6 +158,34 @@ enum ActionSupervisionRegistry {
 
     private static func registrationURL(for id: String) -> URL {
         registrationsDirectoryURL.appendingPathComponent("\(sanitizedID(id)).json")
+    }
+
+    private static func registrationIsExpired(_ registration: ActionSupervisionRegistration, now: Date) -> Bool {
+        if let expiresAt = registration.expiresAt,
+           let expiration = parseISO8601Date(expiresAt) {
+            return expiration <= now
+        }
+
+        // Registrations written before `expiresAt` existed can survive when
+        // their MCP owner exits. Apply the same drive deadlines during this
+        // one-time migration; non-drive Swift registrations remain durable
+        // until their owner unregisters them.
+        guard registration.id.hasPrefix("drive_"),
+              let updatedAt = parseISO8601Date(registration.updatedAt) else {
+            return false
+        }
+        let isTerminal = registration.detail.map { detail in
+            let normalized = detail.uppercased()
+            return ["DONE", "FAILED", "CANCELLED", "EXPIRED", "DENIED"]
+                .contains(where: normalized.hasPrefix)
+        } ?? false
+        let expiry = isTerminal ? 8 : driveIdleExpirySeconds
+        return now.timeIntervalSince(updatedAt) >= expiry
+    }
+
+    private static func parseISO8601Date(_ raw: String) -> Date? {
+        (try? Date(raw, strategy: fractionalISO8601Format))
+            ?? (try? Date(raw, strategy: iso8601Format))
     }
 
     private static func sanitizedID(_ raw: String) -> String {

@@ -42,6 +42,7 @@ enum ActionHostCommand: String {
     case supervisorStop = "supervisor-stop"
     case stageOverlay = "stage-overlay"
     case demoCursorOverlay = "demo-cursor-overlay"
+    case agentCursorOverlay = "agent-cursor-overlay"
     case terminalSession = "terminal-session"
     case prepareNotesNote = "prepare-notes-note"
     case getCaptureWindowFrame = "get-capture-window-frame"
@@ -3482,6 +3483,8 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         throw ActionHostError.unsupportedOS("stage-overlay should be started via runUICommand")
     case .demoCursorOverlay:
         throw ActionHostError.unsupportedOS("demo-cursor-overlay should be started via runUICommand")
+    case .agentCursorOverlay:
+        throw ActionHostError.unsupportedOS("agent-cursor-overlay should be started via runUICommand")
     case .terminalSession:
         throw ActionHostError.unsupportedOS("terminal-session should be started via runUICommand")
     case .guidedCalculatorDemo:
@@ -4081,6 +4084,32 @@ struct ActionHostMain {
                     replyFile: replyFile,
                     debugLogPath: debugLogPath,
                     controlFile: controlFile
+                )
+                do {
+                    try controller.run()
+                } catch {
+                    FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                    Darwin.exit(1)
+                }
+            }
+            return true
+        case .agentCursorOverlay:
+            let replyFile = options.options["reply-file"]
+            let debugLogPath = options.options["debug-log"]
+            guard let stateFile = options.options["state-file"], !stateFile.isEmpty else {
+                FileHandle.standardError.write(Data("ActionHost failed: --state-file is required for agent-cursor-overlay\n".utf8))
+                Darwin.exit(1)
+            }
+            let stopFile = options.options["stop-file"]
+                ?? "\(stateFile).stop"
+            let leaseStopFile = options.options["lease-stop-file"]
+            MainActor.assumeIsolated {
+                let controller = AgentCursorOverlayController(
+                    stateFile: stateFile,
+                    stopFile: stopFile,
+                    leaseStopFile: leaseStopFile,
+                    replyFile: replyFile,
+                    debugLogPath: debugLogPath
                 )
                 do {
                     try controller.run()
