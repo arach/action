@@ -92,10 +92,18 @@ export class DriveAgentClient {
     leaseId?: string;
     axTier?: AxActionTier;
   } = {}): Promise<DriveLease | undefined> {
-    const result = await this.request("drive.touch", {
-      leaseId: input.leaseId,
-      axTier: input.axTier,
-    });
+    let result: Record<string, string>;
+    try {
+      result = await this.request("drive.touch", {
+        leaseId: input.leaseId,
+        axTier: input.axTier,
+      });
+    } catch (error) {
+      if (isDriveLeaseInactiveError(error)) {
+        return undefined;
+      }
+      throw error;
+    }
     if (result.status === "idle") {
       return undefined;
     }
@@ -268,6 +276,11 @@ export class DriveAgentClient {
     }
     this.pending.clear();
   }
+}
+
+export function isDriveLeaseInactiveError(error: unknown): boolean {
+  return error instanceof Error
+    && /^Drive lease .+ is not active$/.test(error.message);
 }
 
 /** Infer the supervision tier from the resolved execution path. */

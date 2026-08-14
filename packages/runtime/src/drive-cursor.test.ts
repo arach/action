@@ -7,6 +7,7 @@ import {
   POINTER_FOCUS_COUNTDOWN_STEP_MS,
   agentCursorExpiration,
   pointFromBounds,
+  revalidatePointerFocusLease,
   requiresPointerFocusWarning,
   runPointerFocusCountdown,
 } from "./drive-cursor.js";
@@ -66,5 +67,49 @@ describe("agent cursor lifecycle", () => {
       runPointerFocusCountdown({ leaseId: "test", stepMs: -1 }),
       /non-negative number/,
     );
+  });
+
+  test("refuses to act when the lease ends during the warning", async () => {
+    let cleanupCalls = 0;
+    await assert.rejects(
+      revalidatePointerFocusLease({
+        warningShown: true,
+        isLeaseActive: async () => false,
+        onLeaseEnded: async () => {
+          cleanupCalls += 1;
+        },
+      }),
+      /Drive lease ended during pointer focus countdown/,
+    );
+    assert.equal(cleanupCalls, 1);
+  });
+
+  test("skips the extra lease check when no warning was shown", async () => {
+    let checks = 0;
+    await revalidatePointerFocusLease({
+      warningShown: false,
+      isLeaseActive: async () => {
+        checks += 1;
+        return false;
+      },
+    });
+    assert.equal(checks, 0);
+  });
+
+  test("cleans up presentation when the lease check itself fails", async () => {
+    let cleanupCalls = 0;
+    await assert.rejects(
+      revalidatePointerFocusLease({
+        warningShown: true,
+        isLeaseActive: async () => {
+          throw new Error("agent disconnected");
+        },
+        onCheckFailed: async () => {
+          cleanupCalls += 1;
+        },
+      }),
+      /agent disconnected/,
+    );
+    assert.equal(cleanupCalls, 1);
   });
 });

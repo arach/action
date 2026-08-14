@@ -36,6 +36,7 @@ import {
   MacOSCommandEngine,
   ocrScreenshot,
   pointFromBounds,
+  revalidatePointerFocusLease,
   requiresPointerFocusWarning,
   runPointerFocusCountdown,
   searchOCRText,
@@ -1303,6 +1304,20 @@ const handlers: Record<string, ToolHandler> = {
         label: (action.description || action.kind).slice(0, 40),
       });
     }
+    await revalidatePointerFocusLease({
+      warningShown: pointerFocusWarningShown,
+      isLeaseActive: async () => Boolean(await heartbeatDrive({
+        leaseId: lease.leaseId,
+        axTier,
+        actionKind: action.kind,
+      })),
+      onLeaseEnded: async () => {
+        // The native terminal transition owns the lease stop signal; only forget
+        // the local presentation handle so we do not recreate an orphan marker.
+        activeCursorLeaseIDs.delete(lease.leaseId);
+      },
+      onCheckFailed: async () => releaseAgentCursor(lease.leaseId),
+    });
 
     // performAction throws for anything it could not carry out — including an action kind the
     // runtime has no handler for — and the tool dispatcher turns a throw into an isError reply.

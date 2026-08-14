@@ -203,6 +203,36 @@ export async function runPointerFocusCountdown(input: {
   return true;
 }
 
+/** Re-check native lease authority after the warning window and before acting. */
+export async function revalidatePointerFocusLease(input: {
+  warningShown: boolean;
+  isLeaseActive: () => Promise<boolean>;
+  onLeaseEnded?: () => Promise<void>;
+  onCheckFailed?: () => Promise<void>;
+}): Promise<void> {
+  if (!input.warningShown) {
+    return;
+  }
+
+  let isActive = false;
+  try {
+    isActive = await input.isLeaseActive();
+  } catch (error) {
+    try {
+      await input.onCheckFailed?.();
+    } catch {}
+    throw error;
+  }
+  if (isActive) {
+    return;
+  }
+
+  try {
+    await input.onLeaseEnded?.();
+  } catch {}
+  throw new Error("Drive lease ended during pointer focus countdown");
+}
+
 export async function stopAgentCursor(leaseId: string): Promise<void> {
   await mkdir(cursorDirectory(), { recursive: true });
   await writeFile(agentCursorStopPath(leaseId), "stop\n");
