@@ -99,6 +99,7 @@ actor ActionDriveLeaseStore {
             record.lease.summary = "Lease owner was disconnected when the Action agent restarted"
             loaded[leaseID] = record
             try? Self.persist(record, rootURL: rootURL)
+            Self.signalStop(for: record.lease)
             if publishesPresence {
                 ActionDrivePresencePublisher.remove(leaseID: leaseID)
             }
@@ -259,6 +260,7 @@ actor ActionDriveLeaseStore {
             ?? record.lease.summary
         records[leaseID] = record
         try persist(record)
+        Self.signalStop(for: record.lease)
         try publishPresence(for: record.lease, at: at)
         return record.lease
     }
@@ -275,6 +277,7 @@ actor ActionDriveLeaseStore {
             record.lease.summary = summary
             records[leaseID] = record
             try? persist(record)
+            Self.signalStop(for: record.lease)
             try? publishPresence(for: record.lease, at: at)
         }
     }
@@ -326,6 +329,7 @@ actor ActionDriveLeaseStore {
                         : (reason == "idle" ? "Lease expired after idle silence" : "Lease exceeded maximum duration")
                     records[leaseID] = record
                     try persist(record)
+                    Self.signalStop(for: record.lease)
                     try publishPresence(for: record.lease, at: at)
                 } else {
                     try publishPresence(for: record.lease, at: at)
@@ -383,6 +387,15 @@ actor ActionDriveLeaseStore {
         let data = try encoder.encode(record)
         let url = rootURL.appendingPathComponent("\(actionDriveSanitize(record.lease.leaseId)).json")
         try data.write(to: url, options: .atomic)
+    }
+
+    private static func signalStop(for lease: ActionDriveLease) {
+        let url = URL(fileURLWithPath: lease.stopFile)
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? Data("stop\n".utf8).write(to: url, options: .atomic)
     }
 
     private func publishPresence(for lease: ActionDriveLease, at: Date) throws {

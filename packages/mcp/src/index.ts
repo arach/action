@@ -33,7 +33,11 @@ import {
   inspectCurrentSurface,
   MacOSCommandEngine,
   ocrScreenshot,
+  pointFromBounds,
   searchOCRText,
+  startAgentCursor,
+  stopAgentCursor,
+  updateAgentCursor,
 } from "@action/runtime";
 
 export const toolFamilies = [
@@ -82,6 +86,7 @@ const nativeHostPath = resolve(
   process.env.ACTION_NATIVE_HOST ?? resolve(actionRoot, "native/engine/scripts/run-app-host.sh"),
 );
 const driveClient = new DriveAgentClient({ launcherPath: nativeHostPath });
+const activeCursorLeaseIDs = new Set<string>();
 const activeRecordings = new Map<string, RecordingEntry>();
 
 function now(): string {
@@ -374,7 +379,50 @@ async function heartbeatDrive(input: {
     axTier: input.axTier,
     actionKind: input.actionKind,
   }]);
+  await renewAgentCursor(lease);
   return lease;
+}
+
+async function ensureAgentCursor(lease: DriveLease): Promise<void> {
+  try {
+    if (activeCursorLeaseIDs.has(lease.leaseId)) {
+      await renewAgentCursor(lease);
+      return;
+    }
+    await startAgentCursor({
+      nativeHostPath,
+      lease,
+      label: lease.task,
+    });
+    activeCursorLeaseIDs.add(lease.leaseId);
+  } catch {
+    // Cursor presence is presentation. The native lease remains authoritative.
+  }
+}
+
+async function renewAgentCursor(lease: DriveLease): Promise<void> {
+  if (!activeCursorLeaseIDs.has(lease.leaseId)) {
+    return;
+  }
+  try {
+    await updateAgentCursor({
+      leaseId: lease.leaseId,
+      agent: lease.agent,
+      label: lease.task,
+      phase: "idle",
+    });
+  } catch {
+    activeCursorLeaseIDs.delete(lease.leaseId);
+  }
+}
+
+async function releaseAgentCursor(leaseId: string): Promise<void> {
+  activeCursorLeaseIDs.delete(leaseId);
+  try {
+    await stopAgentCursor(leaseId);
+  } catch {
+    // The native lease stop marker is the independent shutdown path.
+  }
 }
 
 async function ensureDriveLeaseForAct(input: {
@@ -421,7 +469,102 @@ async function ensureDriveLeaseForAct(input: {
     axTier: input.axTier,
     actionKind: input.actionKind,
   }]);
+  await ensureAgentCursor(lease);
   return lease;
+}
+
+async function presentActCue(input: {
+  lease: DriveLease;
+  action: RuntimeAction;
+  target: ResolvedTarget | undefined;
+}): Promise<void> {
+  try {
+    const kind = input.action.kind;
+    const cueId = `${input.action.id}_${Date.now()}`;
+    const bounds = input.target?.bounds;
+    const point = bounds
+      ? pointFromBounds(bounds)
+      : input.action.target?.point
+        ? {
+            x: Number((input.action.target.point as { x?: number }).x),
+            y: Number((input.action.target.point as { y?: number }).y),
+          }
+        : undefined;
+    const safePoint = point && Number.isFinite(point.x) && Number.isFinite(point.y)
+      ? point
+      : undefined;
+    const description = (input.action.description || kind).slice(0, 40);
+
+    if (kind === "type") {
+      const text = String(input.action.input?.text ?? description);
+      await updateAgentCursor({
+        leaseId: input.lease.leaseId,
+        agent: input.lease.agent,
+        point: safePoint,
+        label: "type",
+        phase: "type",
+        typingText: text.slice(0, 80),
+        cueId,
+      });
+      const holdMs = Math.min(3200, 420 + text.length * 55);
+      setTimeout(() => {
+        void updateAgentCursor({
+          leaseId: input.lease.leaseId,
+          agent: input.lease.agent,
+          phase: "idle",
+          label: "driving",
+        });
+      }, holdMs);
+      return;
+    }
+
+    if (kind === "press-key") {
+      const keys = Array.isArray(input.action.input?.keys)
+        ? (input.action.input.keys as unknown[]).filter((key): key is string => typeof key === "string")
+        : [];
+      const key = String(input.action.input?.key ?? keys.at(-1) ?? "key");
+      const chord = (keys.length > 1 ? keys : [key]).join(" + ");
+      await updateAgentCursor({
+        leaseId: input.lease.leaseId,
+        agent: input.lease.agent,
+        point: safePoint,
+        label: chord,
+        phase: "key",
+        keyLabel: chord,
+        cueId,
+      });
+      setTimeout(() => {
+        void updateAgentCursor({
+          leaseId: input.lease.leaseId,
+          agent: input.lease.agent,
+          phase: "idle",
+          label: "driving",
+        });
+      }, 700);
+      return;
+    }
+
+    await updateAgentCursor({
+      leaseId: input.lease.leaseId,
+      agent: input.lease.agent,
+      point: safePoint,
+      label: description,
+      phase: safePoint ? "click" : "idle",
+      cueId,
+    });
+    if (safePoint) {
+      setTimeout(() => {
+        void updateAgentCursor({
+          leaseId: input.lease.leaseId,
+          agent: input.lease.agent,
+          phase: "idle",
+          label: "driving",
+        });
+      }, 480);
+    }
+  } catch {
+    // The action result remains authoritative when cursor presentation fails.
+  }
 }
 
 async function runHost(command: string, ...args: string[]): Promise<JsonObject> {
@@ -876,6 +1019,7 @@ const handlers: Record<string, ToolHandler> = {
       sessionId: result.lease.sessionId,
       implicit: result.lease.implicit,
     }]);
+    await ensureAgentCursor(result.lease);
     return {
       ok: true,
       status: result.status,
@@ -894,6 +1038,7 @@ const handlers: Record<string, ToolHandler> = {
       outcome: parseDriveOutcome(args.outcome),
       summary: optionalString(args.summary),
     });
+    await releaseAgentCursor(lease.leaseId);
     await persistDriveSession(lease, [{
       type: "drive.lease_released",
       at: lease.releasedAt ?? lease.lastActAt,
@@ -911,6 +1056,14 @@ const handlers: Record<string, ToolHandler> = {
 
   async "action.drive.status"(args) {
     const snapshot = await driveClient.status();
+    const drivingIDs = new Set(
+      snapshot.leases.filter((lease) => lease.status === "driving").map((lease) => lease.leaseId),
+    );
+    for (const leaseId of activeCursorLeaseIDs) {
+      if (!drivingIDs.has(leaseId)) {
+        await releaseAgentCursor(leaseId);
+      }
+    }
     const leaseId = optionalString(args.leaseId);
     if (!leaseId) {
       return { ok: true, ...snapshot };
@@ -1099,6 +1252,7 @@ const handlers: Record<string, ToolHandler> = {
     // runtime has no handler for — and the tool dispatcher turns a throw into an isError reply.
     // Reaching this line is therefore the success signal; the literal below is not an assumption.
     await engine.performAction(action, target);
+    await presentActCue({ lease, action, target });
 
     return {
       ok: true,

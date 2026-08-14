@@ -10,18 +10,21 @@ private let actionSupervisionShadowMargin: CGFloat = 20
 // The card sizes live here rather than at each use site because the SwiftUI frame and the
 // panel window have to agree exactly: a window smaller than its card clips the card, and a
 // larger one leaves dead transparent space that still swallows clicks.
-private let actionSupervisionExpandedCard = CGSize(width: 296, height: 64)
-private let actionSupervisionMinimizedCard = CGSize(width: 178, height: 40)
+private let actionSupervisionExpandedCard = CGSize(width: 360, height: 78)
+private let actionSupervisionMinimizedCard = CGSize(width: 278, height: 50)
 
 @MainActor
 final class ActionSupervisionViewModel: ObservableObject {
     @Published var title: String = "Action Supervision"
-    @Published var detail: String = "Supervisor stop · Cmd+Ctrl+. or Esc Esc"
-    @Published var countLabel: String = "0 live"
+    @Published var detail: String = "Supervising active work"
+    @Published var countLabel: String = "No active sessions"
+    @Published var stopButtonTitle: String = "Stop"
+    @Published var isStopPending: Bool = false
     @Published var isMinimized: Bool = false
 
     var onStop: (() -> Void)?
     var onToggleMinimized: (() -> Void)?
+    var onClose: (() -> Void)?
 }
 
 struct ActionSupervisionView: View {
@@ -35,29 +38,48 @@ struct ActionSupervisionView: View {
                 expandedBody
             }
         }
-        .help("Drag to reposition. Use Stop to halt supervised Action sessions.")
+        .help("Action supervision. Drag to reposition or right-click for more options.")
+        .contextMenu {
+            Button(model.isMinimized ? "Show Details" : "Show Less") {
+                model.onToggleMinimized?()
+            }
+
+            Button("Close HUD") {
+                model.onClose?()
+            }
+
+            Divider()
+
+            Button(model.stopButtonTitle, role: .destructive) {
+                model.onStop?()
+            }
+            .disabled(model.isStopPending)
+        }
     }
 
     private var expandedBody: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 5) {
+            ActionSupervisionBrandMark(size: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {
-                    supervisionSignal
-
-                    Text(model.title)
-                        .font(.system(size: 10, weight: .semibold, design: .default))
+                    Text("Action")
+                        .font(.system(size: 11, weight: .semibold, design: .default))
                         .foregroundStyle(StageHUDTheme.hudPaper)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
 
-                    Text(model.countLabel.uppercased())
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    Text(model.countLabel)
+                        .font(.system(size: 9, weight: .medium, design: .default))
                         .foregroundStyle(StageHUDTheme.hudMuted)
                         .lineLimit(1)
                 }
 
+                Text(model.title)
+                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .foregroundStyle(StageHUDTheme.hudPaper.opacity(0.92))
+                    .lineLimit(1)
+
                 Text(model.detail)
-                    .font(.system(size: 10, weight: .regular, design: .default))
+                    .font(.system(size: 9, weight: .regular, design: .default))
                     .foregroundStyle(StageHUDTheme.hudMuted)
                     .lineLimit(1)
             }
@@ -69,20 +91,21 @@ struct ActionSupervisionView: View {
                 Button {
                     model.onToggleMinimized?()
                 } label: {
-                    Image(systemName: "minus")
+                    Image(systemName: "chevron.up")
                 }
                 .buttonStyle(ActionSupervisionIconButtonStyle())
-                .help("Minimize supervision")
-                .accessibilityLabel("Minimize supervision")
+                .help("Show less")
+                .accessibilityLabel("Show less supervision detail")
 
                 Button {
                     model.onStop?()
                 } label: {
-                    ActionSupervisionStopLabel()
+                    ActionSupervisionStopLabel(title: model.stopButtonTitle)
                 }
                 .buttonStyle(ActionSupervisionButtonStyle())
-                .help("Stop all supervised Action sessions")
-                .accessibilityLabel("Stop all supervised Action sessions")
+                .disabled(model.isStopPending)
+                .help(stopButtonHelp)
+                .accessibilityLabel(stopButtonHelp)
             }
         }
         .padding(.leading, 13)
@@ -105,32 +128,40 @@ struct ActionSupervisionView: View {
     }
 
     private var minimizedBody: some View {
-        HStack(spacing: 7) {
-            supervisionSignal
+        HStack(spacing: 8) {
+            ActionSupervisionBrandMark(size: 24)
 
-            Text(model.countLabel.uppercased())
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(StageHUDTheme.hudPaper)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Action")
+                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .foregroundStyle(StageHUDTheme.hudPaper)
+
+                Text(model.countLabel)
+                    .font(.system(size: 9, weight: .regular, design: .default))
+                    .foregroundStyle(StageHUDTheme.hudMuted)
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: 4)
 
             Button {
                 model.onToggleMinimized?()
             } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                Image(systemName: "chevron.down")
             }
             .buttonStyle(ActionSupervisionIconButtonStyle())
-            .help("Expand supervision")
-            .accessibilityLabel("Expand supervision")
+            .help("Show details")
+            .accessibilityLabel("Show supervision details")
 
             Button {
                 model.onStop?()
             } label: {
-                ActionSupervisionStopLabel()
+                ActionSupervisionStopLabel(title: model.stopButtonTitle)
             }
             .buttonStyle(ActionSupervisionButtonStyle())
-            .help("Stop all supervised Action sessions")
-            .accessibilityLabel("Stop all supervised Action sessions")
+            .disabled(model.isStopPending)
+            .help(stopButtonHelp)
+            .accessibilityLabel(stopButtonHelp)
         }
         .padding(.horizontal, 10)
         .frame(
@@ -150,24 +181,46 @@ struct ActionSupervisionView: View {
         .padding(actionSupervisionShadowMargin)
     }
 
-    private var supervisionSignal: some View {
-        Circle()
-            .fill(StageHUDTheme.hudCoral)
-            .frame(width: 7, height: 7)
-            .overlay(
-                Circle()
-                    .stroke(StageHUDTheme.hudPaper.opacity(0.20), lineWidth: 1)
-            )
-            .accessibilityHidden(true)
+    private var stopButtonHelp: String {
+        switch model.stopButtonTitle {
+        case "Stop All":
+            return "Stop all active Action sessions"
+        case "Stopping…":
+            return "Stop request in progress"
+        default:
+            return "Stop the active Action session"
+        }
+    }
+}
+
+private struct ActionSupervisionBrandMark: View {
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(StageHUDTheme.hudCoral)
+            Text("A")
+                .font(.system(size: size * 0.50, weight: .bold, design: .rounded))
+                .foregroundStyle(StageHUDTheme.hudInk)
+        }
+        .frame(width: size, height: size)
+        .overlay(
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .stroke(StageHUDTheme.hudPaper.opacity(0.16), lineWidth: 1)
+        )
+        .accessibilityHidden(true)
     }
 }
 
 private struct ActionSupervisionStopLabel: View {
+    let title: String
+
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "stop.fill")
                 .font(.system(size: 7, weight: .bold))
-            Text("STOP")
+            Text(title.uppercased())
                 .lineLimit(1)
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -175,18 +228,27 @@ private struct ActionSupervisionStopLabel: View {
 }
 
 struct ActionSupervisionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 9, weight: .bold, design: .monospaced))
-            .foregroundStyle(StageHUDTheme.hudInk)
+            .foregroundStyle(StageHUDTheme.hudInk.opacity(isEnabled ? 1 : 0.52))
             .padding(.horizontal, 10)
             .frame(height: 28)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(configuration.isPressed ? StageHUDTheme.hudCoral.opacity(0.76) : StageHUDTheme.hudCoral)
+                    .fill(buttonColor(isPressed: configuration.isPressed))
             )
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    private func buttonColor(isPressed: Bool) -> Color {
+        guard isEnabled else {
+            return StageHUDTheme.hudCoral.opacity(0.42)
+        }
+        return isPressed ? StageHUDTheme.hudCoral.opacity(0.76) : StageHUDTheme.hudCoral
     }
 }
 
@@ -211,6 +273,11 @@ private struct ActionSupervisionIconButtonStyle: ButtonStyle {
 
 @MainActor
 final class ActionSupervisionOverlayController: NSObject {
+    private struct StopRequest {
+        let registrationIDs: Set<String>
+        let requestedAt: Date
+    }
+
     private enum OverlayLayout {
         // Window sizes include the transparent shadow margin on every side; the
         // visible card is inset by `margin` and reads at its card size.
@@ -239,6 +306,9 @@ final class ActionSupervisionOverlayController: NSObject {
     private var lastEscapeTimestamp: Date?
     private var hasPositionedWindow = false
     private var isWindowPresented = false
+    private var isDismissed = false
+    private var dismissedRegistrationIDs: Set<String> = []
+    private var stopRequest: StopRequest?
     private var positioningFingerprint = ""
 
     init(replyFile: String?, debugLogPath: String?) {
@@ -256,6 +326,9 @@ final class ActionSupervisionOverlayController: NSObject {
         }
         model.onToggleMinimized = { [weak self] in
             self?.toggleMinimized()
+        }
+        model.onClose = { [weak self] in
+            self?.dismissOverlay(reason: "context-menu")
         }
         createWindow()
         startPolling()
@@ -354,11 +427,29 @@ final class ActionSupervisionOverlayController: NSObject {
         // Only publish when a value actually changes. The poll runs several
         // times a second; assigning unconditionally would fire objectWillChange
         // on every tick and churn the view — the source of the visible flicker.
+        // Prefer the newest registration title so drive leases can show
+        // `{agent} · {task}` instead of a fixed product label.
         let primary = registrations.last
         let title = primary?.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedTitle = title?.isEmpty == false ? title! : "Action Supervision"
-        let detail = primary?.detail ?? "Supervisor stop · Cmd+Ctrl+. or Esc Esc"
-        let countLabel = registrations.count == 1 ? "1 live" : "\(registrations.count) live"
+        let resolvedTitle: String
+        if let title, !title.isEmpty, title != "Action Supervision" {
+            resolvedTitle = title
+        } else {
+            resolvedTitle = registrations.count == 1
+                ? "Supervising one session"
+                : "Supervising \(registrations.count) sessions"
+        }
+        let activeIDs = Set(registrations.map(\.id))
+        let stopPresentation = stopPresentation(activeIDs: activeIDs)
+        let detail = stopPresentation.detail
+            ?? primary?.detail
+            ?? "Use Stop to end the active session safely"
+        let countLabel = registrations.count == 1
+            ? "1 active session"
+            : "\(registrations.count) active sessions"
+        let stopButtonTitle = stopPresentation.isPending
+            ? "Stopping…"
+            : (registrations.count == 1 ? "Stop" : "Stop All")
         if model.title != resolvedTitle {
             model.title = resolvedTitle
         }
@@ -367,6 +458,12 @@ final class ActionSupervisionOverlayController: NSObject {
         }
         if model.countLabel != countLabel {
             model.countLabel = countLabel
+        }
+        if model.stopButtonTitle != stopButtonTitle {
+            model.stopButtonTitle = stopButtonTitle
+        }
+        if model.isStopPending != stopPresentation.isPending {
+            model.isStopPending = stopPresentation.isPending
         }
         let nextPositioningFingerprint = registrations
             .compactMap(\.avoidedDisplayID)
@@ -381,8 +478,13 @@ final class ActionSupervisionOverlayController: NSObject {
             positionWindow(registrations: registrations)
         }
 
+        if isDismissed, !activeIDs.isSubset(of: dismissedRegistrationIDs) {
+            isDismissed = false
+            dismissedRegistrationIDs.removeAll()
+        }
+
         let ownsVisibleControls = registrations.contains { $0.ownsVisibleControls == true }
-        if ownsVisibleControls {
+        if ownsVisibleControls || isDismissed {
             if isWindowPresented {
                 window?.orderOut(nil)
                 isWindowPresented = false
@@ -442,6 +544,20 @@ final class ActionSupervisionOverlayController: NSObject {
         model.isMinimized.toggle()
         UserDefaults.standard.set(model.isMinimized, forKey: OverlayLayout.minimizedDefaultsKey)
         resizeWindowForCurrentPresentation()
+    }
+
+    private func dismissOverlay(reason: String) {
+        let registrations = ActionSupervisionRegistry.activeRegistrations()
+        guard !registrations.isEmpty else {
+            shutdown()
+            return
+        }
+
+        dismissedRegistrationIDs = Set(registrations.map(\.id))
+        isDismissed = true
+        window?.orderOut(nil)
+        isWindowPresented = false
+        logger.log("supervision-overlay: dismissed HUD reason=\(reason) registrations=\(registrations.count)")
     }
 
     private func resizeWindowForCurrentPresentation() {
@@ -519,11 +635,55 @@ final class ActionSupervisionOverlayController: NSObject {
     }
 
     private func triggerStopAll(reason: String) {
+        let registrations = ActionSupervisionRegistry.activeRegistrations()
         let count = ActionSupervisionRegistry.triggerStopAll()
         logger.log("supervision-overlay: triggered stop count=\(count) reason=\(reason)")
-        model.detail = count > 0
-            ? "Sent stop to \(count) live session\(count == 1 ? "" : "s")."
-            : "No live Action sessions were registered."
+        guard count > 0 else {
+            model.detail = "No active Action sessions were found."
+            return
+        }
+
+        stopRequest = StopRequest(
+            registrationIDs: Set(registrations.map(\.id)),
+            requestedAt: Date()
+        )
+        model.isStopPending = true
+        model.stopButtonTitle = "Stopping…"
+        model.detail = count == 1
+            ? "Stop requested for the active session."
+            : "Stop requested for \(count) active sessions."
+    }
+
+    private func stopPresentation(activeIDs: Set<String>) -> (detail: String?, isPending: Bool) {
+        guard let stopRequest else {
+            return (nil, false)
+        }
+
+        let remainingIDs = stopRequest.registrationIDs.intersection(activeIDs)
+        guard !remainingIDs.isEmpty else {
+            self.stopRequest = nil
+            return (nil, false)
+        }
+
+        let elapsed = Date().timeIntervalSince(stopRequest.requestedAt)
+        if elapsed < 2 {
+            let count = stopRequest.registrationIDs.count
+            let detail = count == 1
+                ? "Stop requested for the active session."
+                : "Stop requested for \(count) active sessions."
+            return (detail, true)
+        }
+
+        if elapsed < 5 {
+            let count = remainingIDs.count
+            let detail = count == 1
+                ? "1 session is still active. You can try Stop again."
+                : "\(count) sessions are still active. You can try Stop All again."
+            return (detail, false)
+        }
+
+        self.stopRequest = nil
+        return (nil, false)
     }
 
     private func shutdown() {
