@@ -17,7 +17,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   assessNavigation,
+  browserOpenMode,
   navigationIsReady,
+  regularChromeLaunchArgs,
   shouldReuseCurrentTab,
 } from "./navigation.ts";
 
@@ -281,19 +283,24 @@ const tools = [
   },
   {
     name: "browser_open",
-    title: "Open in Action Browser",
-    description: "Open a URL in the session's current Action Browser tab, creating one on the first call. Chrome starts on demand and stays in the background by default. Set newTab only when a separate tab is intentional.",
+    title: "Open Browser URL",
+    description: "Open a URL in controlled Action Chrome by default, or hand it off to the user's regular Chrome with mode=regular. Regular Chrome is visible and intentionally unavailable to Action Browser inspection, clicks, fills, and screenshots.",
     inputSchema: {
       type: "object",
       properties: {
         url: { type: "string", description: "URL to open. https:// is added when no scheme is provided." },
+        mode: {
+          type: "string",
+          enum: ["action", "regular"],
+          description: "Use controlled Action Chrome (default) or open-only regular Chrome. Regular mode never attaches automation to the personal profile.",
+        },
         profile: {
           type: "string",
-          description: "Optional Action profile name to use for this session (e.g. coding, mira).",
+          description: "Optional Action profile name to use for this session (e.g. coding, mira). Only valid in action mode.",
         },
-        background: { type: "boolean", description: "Keep Chrome hidden in the background. Defaults to true." },
-        waitMs: { type: "number", description: "Maximum time to wait for the page to become ready. Defaults to 15000." },
-        newTab: { type: "boolean", description: "Create a separate tab instead of reusing this session's current tab. Defaults to false." },
+        background: { type: "boolean", description: "Action mode only: keep Chrome hidden in the background. Defaults to true. Regular mode is always visible." },
+        waitMs: { type: "number", description: "Action mode only: maximum time to wait for the page to become ready. Defaults to 15000." },
+        newTab: { type: "boolean", description: "Action mode only: create a separate tab instead of reusing this session's current tab. Defaults to false." },
       },
       required: ["url"],
       additionalProperties: false,
@@ -1074,11 +1081,40 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
     }
 
     case "browser_open": {
+      const inputUrl = asString(args.url, "url");
+      const url = normalizeURL(inputUrl);
+      const mode = browserOpenMode(args.mode);
+      if (mode === "regular") {
+        if (typeof args.profile === "string" && args.profile.trim()) {
+          throw new Error("profile is only available in action mode; regular mode uses the user's normal Chrome profile.");
+        }
+        const launch = Bun.spawn(regularChromeLaunchArgs(chromeAppName, url), {
+          stdout: "ignore",
+          stderr: "pipe",
+        });
+        const status = await launch.exited;
+        if (status !== 0) {
+          const stderr = await new Response(launch.stderr).text();
+          throw new Error(stderr.trim() || `Could not open ${chromeAppName}.`);
+        }
+        return textResult({
+          ok: true,
+          mode,
+          ...(inputUrl === url ? {} : { inputUrl }),
+          openedUrl: url,
+          controlAvailable: false,
+          handoff: true,
+          chrome: {
+            app: chromeAppName,
+            profile: "regular",
+            automated: false,
+          },
+          message: "Opened in regular Chrome. Action Browser cannot inspect, click, fill, or screenshot this personal-profile tab.",
+        });
+      }
       if (typeof args.profile === "string" && args.profile.trim()) {
         await useProfile(args.profile);
       }
-      const inputUrl = asString(args.url, "url");
-      const url = normalizeURL(inputUrl);
       const background = args.background !== false;
       const timeoutMs = Math.max(0, optionalNumber(args.waitMs, 15_000));
       await ensureChrome(background);
@@ -1142,6 +1178,7 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
         });
         const result: JsonObject = {
           ...outcome,
+          mode,
           ...(inputUrl === url ? {} : { inputUrl }),
           reusedTab,
           tab: {

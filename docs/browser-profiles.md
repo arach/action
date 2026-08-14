@@ -10,7 +10,7 @@ Chrome.
 | **Named Action profile** (default) | `~/Library/Application Support/Action/ChromeProfiles/<name>` |
 | **Selective cookie seed** | Copy only allowlisted domains/names from personal Chrome |
 | **Chrome Companion extension** | Optional richer DOM observe/act via localhost bridge |
-| **Daily personal Chrome** | Explicit opt-in only — not the default automation target |
+| **Daily personal Chrome** | Explicit `mode: "regular"` open-only handoff; never an automation target |
 
 Do **not** point automation at your everyday Chrome user-data-dir while you are
 browsing. Chrome locks that directory, and agents should not inherit your full
@@ -122,7 +122,7 @@ Server: `plugins/action-browser/server/index.ts`
 | `browser_profile_info` | Active path, cookies readiness, companion hints |
 | `browser_import_cookies` | Dry-run or confirm seed from personal Chrome |
 | `browser_companion_status` | Extension dist + bridge health |
-| `browser_open` | Open URL in the session's working tab; optional `profile` or `newTab: true` |
+| `browser_open` | Open in controlled Action Chrome, or use `mode: "regular"` for an open-only daily-Chrome handoff |
 | `browser_tabs` / `browser_snapshot` / `browser_click` / `browser_fill` / `browser_screenshot` / `browser_close` | Page automation via CDP |
 
 ### Claude Code (native Action MCP vs browser)
@@ -159,9 +159,20 @@ browser_screenshot
 browser_companion_status   # optional richer DOM path
 ```
 
+To open a URL in the user's normal Chrome instead:
+
+```text
+browser_open { url: "https://github.com", mode: "regular" }
+```
+
+Regular mode is deliberately not controllable. [Chrome 136 and later ignore
+remote-debugging switches for the default personal data directory](https://developer.chrome.com/blog/remote-debugging-port),
+and Action does not attempt to bypass that boundary. Snapshot, click, fill, and
+screenshot tools continue to target Action Chrome.
+
 ## What is intentionally not done
 
-- Automatic attach to the currently open personal Chrome window
+- Automation attachment to the currently open personal Chrome window
 - Silent full cookie jar import
 - Claiming a page is authenticated without observing it after seed/login
 
