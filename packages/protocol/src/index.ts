@@ -425,6 +425,10 @@ export interface StageViewport {
   bounds: Bounds;
   surfaceId?: string;
   dimming: "none" | "surround";
+  /** Center the requested size inside the selected display with edge clearance. */
+  placement?: "absolute" | "centered-safe";
+  /** Edge clearance used by centered-safe placement. Defaults to 72 points. */
+  safeAreaInset?: number;
 }
 
 export interface StageInputOverlay {
