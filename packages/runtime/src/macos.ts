@@ -102,8 +102,8 @@ export function centeredSafeBounds(
   const safeWidth = Math.max(1, display.width - safeInset * 2);
   const safeHeight = Math.max(1, display.height - safeInset * 2);
   const scale = Math.min(1, safeWidth / requested.width, safeHeight / requested.height);
-  const width = Math.round(requested.width * scale);
-  const height = Math.round(requested.height * scale);
+  const width = Math.max(1, Math.round(requested.width * scale));
+  const height = Math.max(1, Math.round(requested.height * scale));
   return {
     x: Math.round(display.x + (display.width - width) / 2),
     y: Math.round(display.y + (display.height - height) / 2),

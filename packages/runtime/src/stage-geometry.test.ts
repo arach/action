@@ -46,4 +46,15 @@ describe("centeredSafeBounds", () => {
       /Centered viewport size must be greater than zero/,
     );
   });
+
+  test("keeps extreme safe-area requests usable", () => {
+    assert.deepEqual(
+      centeredSafeBounds(
+        { x: 0, y: 0, width: 1_000_000, height: 1 },
+        { x: 0, y: 0, width: 1_440, height: 900 },
+        10_000,
+      ),
+      { x: 720, y: 450, width: 1, height: 1 },
+    );
+  });
 });
