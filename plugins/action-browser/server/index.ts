@@ -1106,7 +1106,8 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
           handoff: true,
           chrome: {
             app: chromeAppName,
-            profile: "regular",
+            profile: "system-selected",
+            profileVerified: false,
             automated: false,
           },
           message: "Opened in regular Chrome. Action Browser cannot inspect, click, fill, or screenshot this personal-profile tab.",
