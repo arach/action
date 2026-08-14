@@ -22,6 +22,11 @@ Action-owned Chrome profile** (not the user's daily Chrome).
    `browser_fill`.
 6. Take another screenshot after an action when visual confirmation matters.
 
+When the user explicitly asks to open the URL in their normal daily Chrome,
+call `browser_open` with `mode: "regular"`. This is a visible, open-only handoff:
+do not follow it with `browser_snapshot`, `browser_click`, `browser_fill`, or
+`browser_screenshot`, because those tools remain attached to Action Chrome.
+
 ## Identities and cookies
 
 - Profiles live under `~/Library/Application Support/Action/ChromeProfiles/<name>`.
@@ -31,7 +36,8 @@ Action-owned Chrome profile** (not the user's daily Chrome).
   1. dry-run (`confirm` omitted/false)
   2. write (`confirm: true`) after the user approves
 - Never claim a page is authenticated without observing it after seed/login.
-- Do not attach to the user's personal Chrome user-data-dir.
+- Do not attach automation to the user's personal Chrome user-data-dir. Regular
+  mode opens a URL there without exposing CDP control.
 
 ## Companion extension
 
@@ -43,6 +49,8 @@ Action-owned Chrome profile** (not the user's daily Chrome).
 ## Important behavior
 
 - Real Chrome with CDP — not headless.
+- `browser_open` defaults to controlled `mode: "action"`; `mode: "regular"`
+  opens the URL in normal Chrome and truthfully returns `controlAvailable: false`.
 - `browser_open` creates one working tab per agent session, then navigates that
   tab on later calls. Use `newTab: true` for an intentional additional tab.
 - `browser_screenshot` saves a PNG artifact and returns the image in the tool response.
