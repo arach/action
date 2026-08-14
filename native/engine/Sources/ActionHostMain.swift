@@ -72,6 +72,7 @@ enum ActionHostCommand: String {
     case getCalculatorDisplay = "get-calculator-display"
     case setWindowFrame = "set-window-frame"
     case getWindowFrame = "get-window-frame"
+    case getDisplayFrame = "get-display-frame"
     case recordRegion = "record-region"
     case recordRegionLocal = "record-region-local"
     case recordingProbe = "recording-probe"
@@ -728,6 +729,29 @@ func overlayBounds(from rect: CGRect) -> OverlayBounds {
         width: rect.size.width,
         height: rect.size.height
     )
+}
+
+func activeDisplayBounds(containing point: CGPoint) throws -> CGRect {
+    var displayCount: UInt32 = 0
+    let countResult = CGGetActiveDisplayList(0, nil, &displayCount)
+    guard countResult == .success, displayCount > 0 else {
+        throw ActionHostError.captureFailed("No display is available")
+    }
+
+    var displayIDs = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
+    let listResult = CGGetActiveDisplayList(displayCount, &displayIDs, &displayCount)
+    guard listResult == .success else {
+        throw ActionHostError.captureFailed("Failed to enumerate displays")
+    }
+
+    let activeIDs = displayIDs.prefix(Int(displayCount))
+    let displayID = activeIDs.first(where: { CGDisplayBounds($0).contains(point) })
+        ?? activeIDs.first(where: { $0 == CGMainDisplayID() })
+        ?? activeIDs.first
+    guard let displayID else {
+        throw ActionHostError.captureFailed("No display is available")
+    }
+    return CGDisplayBounds(displayID)
 }
 
 func rect(from windowInfo: [String: Any]) -> CGRect? {
@@ -1534,25 +1558,31 @@ final class StageOverlayView: NSView {
 
         let gradient: NSGradient
         switch state.backdrop {
+        case "neutral":
+            // Keep the production back sheet opaque so private desktop pixels
+            // cannot leak around a staged window or along capture edges.
+            NSColor(calibratedRed: 0.105, green: 0.115, blue: 0.12, alpha: 1).setFill()
+            bounds.fill()
+            return
         case "matte":
             gradient = NSGradient(colors: [
-                NSColor(calibratedRed: 0.91, green: 0.93, blue: 0.96, alpha: 0.98),
-                NSColor(calibratedRed: 0.89, green: 0.92, blue: 0.95, alpha: 0.98),
+                NSColor(calibratedRed: 0.91, green: 0.93, blue: 0.96, alpha: 1),
+                NSColor(calibratedRed: 0.89, green: 0.92, blue: 0.95, alpha: 1),
             ])!
         case "gradient":
             gradient = NSGradient(colors: [
-                NSColor(calibratedWhite: 0.18, alpha: 0.64),
-                NSColor(calibratedWhite: 0.05, alpha: 0.88),
+                NSColor(calibratedWhite: 0.18, alpha: 1),
+                NSColor(calibratedWhite: 0.05, alpha: 1),
             ])!
         case "spotlight":
             gradient = NSGradient(colors: [
-                NSColor(calibratedWhite: 0.16, alpha: 0.18),
-                NSColor(calibratedWhite: 0.04, alpha: 0.78),
+                NSColor(calibratedWhite: 0.16, alpha: 1),
+                NSColor(calibratedWhite: 0.04, alpha: 1),
             ])!
         default:
             gradient = NSGradient(colors: [
-                NSColor(calibratedWhite: 0.14, alpha: 0.56),
-                NSColor(calibratedWhite: 0.04, alpha: 0.86),
+                NSColor(calibratedWhite: 0.14, alpha: 1),
+                NSColor(calibratedWhite: 0.04, alpha: 1),
             ])!
         }
 
@@ -3974,6 +4004,18 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
                 status: "window-frame",
                 bundleId: bundleId,
                 frame: overlayBounds(from: rect)
+            )
+        )
+    case .getDisplayFrame:
+        let requestedPoint = CGPoint(
+            x: options.double("x", default: 0),
+            y: options.double("y", default: 0)
+        )
+        try writer.write(
+            WindowFrameResponse(
+                status: "display-frame",
+                bundleId: "display",
+                frame: overlayBounds(from: try activeDisplayBounds(containing: requestedPoint))
             )
         )
     case .ocrScreenshot:

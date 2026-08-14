@@ -72,6 +72,46 @@ function boundsCloseTo(
     && Math.abs(current.height - target.height) <= tolerance;
 }
 
+export function centeredSafeBounds(
+  requested: Bounds,
+  display: Bounds,
+  inset = 72,
+): Bounds {
+  const values = [
+    requested.x,
+    requested.y,
+    requested.width,
+    requested.height,
+    display.x,
+    display.y,
+    display.width,
+    display.height,
+    inset,
+  ];
+  if (!values.every(Number.isFinite)) {
+    throw new RangeError("Centered viewport geometry must contain finite numbers");
+  }
+  if (requested.width <= 0 || requested.height <= 0) {
+    throw new RangeError("Centered viewport size must be greater than zero");
+  }
+  if (display.width <= 0 || display.height <= 0) {
+    throw new RangeError("Display size must be greater than zero");
+  }
+
+  const safeInset = Math.max(0, inset);
+  const safeWidth = Math.max(1, display.width - safeInset * 2);
+  const safeHeight = Math.max(1, display.height - safeInset * 2);
+  const scale = Math.min(1, safeWidth / requested.width, safeHeight / requested.height);
+  const width = Math.round(requested.width * scale);
+  const height = Math.round(requested.height * scale);
+  return {
+    x: Math.round(display.x + (display.width - width) / 2),
+    y: Math.round(display.y + (display.height - height) / 2),
+    width,
+    height,
+  };
+}
+
 function containBounds(
   requested: StageViewport["bounds"],
   actual: StageViewport["bounds"],
@@ -315,6 +355,24 @@ export class MacOSCommandEngine implements CaptureEngine {
 
   async configureViewport(viewport: StageViewport): Promise<StageViewport> {
     let resolvedViewport = viewport;
+
+    if (viewport.placement === "centered-safe") {
+      const selector = {
+        x: viewport.bounds.x + viewport.bounds.width / 2,
+        y: viewport.bounds.y + viewport.bounds.height / 2,
+      };
+      const { stdout } = await this.runHost(
+        "get-display-frame",
+        "--x", String(selector.x),
+        "--y", String(selector.y),
+      );
+      const payload = JSON.parse(stdout) as { frame: Bounds };
+      resolvedViewport = {
+        ...viewport,
+        bounds: centeredSafeBounds(viewport.bounds, payload.frame, viewport.safeAreaInset),
+      };
+      viewport = resolvedViewport;
+    }
 
     const surfaceId = viewport.surfaceId ?? this.focusedSurfaceId;
     if (!surfaceId) {
