@@ -15,7 +15,11 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assessNavigation, shouldReuseCurrentTab } from "./navigation.ts";
+import {
+  assessNavigation,
+  navigationIsReady,
+  shouldReuseCurrentTab,
+} from "./navigation.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -889,29 +893,39 @@ type PageReadiness = {
   readyState?: string;
   documentUrl?: string;
   title?: string;
+  loaderId?: string;
   timedOut: boolean;
 };
 
-async function waitUntilReady(session: CDPSession, timeoutMs: number): Promise<PageReadiness> {
+async function waitUntilReady(
+  session: CDPSession,
+  timeoutMs: number,
+  expectedLoaderId?: string,
+): Promise<PageReadiness> {
   const started = Date.now();
   let last: PageReadiness = { timedOut: true };
   while (true) {
     try {
+      const frameTreeResult = await session.call("Page.getFrameTree");
       const result = await session.call("Runtime.evaluate", {
         expression: "({ readyState: document.readyState, documentUrl: location.href, title: document.title })",
         returnByValue: true,
       });
       const value = (result.result as JsonObject | undefined)?.value as JsonObject | undefined;
+      const frameTree = frameTreeResult.frameTree as JsonObject | undefined;
+      const frame = frameTree?.frame as JsonObject | undefined;
       last = {
         readyState: typeof value?.readyState === "string" ? value.readyState : undefined,
         documentUrl: typeof value?.documentUrl === "string" ? value.documentUrl : undefined,
         title: typeof value?.title === "string" ? value.title : undefined,
+        loaderId: typeof frame?.loaderId === "string" ? frame.loaderId : undefined,
         timedOut: true,
       };
-      if (
-        (last.readyState === "complete" || last.readyState === "interactive")
-        && last.documentUrl !== "about:blank"
-      ) return { ...last, timedOut: false };
+      if (navigationIsReady({
+        ...last,
+        expectedLoaderId,
+        observedLoaderId: last.loaderId,
+      })) return { ...last, timedOut: false };
     } catch {
       // Navigation may replace the execution context between polls.
     }
@@ -1091,9 +1105,11 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
         const navigateErrorText = typeof navigation.errorText === "string"
           ? navigation.errorText
           : undefined;
+        const loaderId = typeof navigation.loaderId === "string" ? navigation.loaderId : undefined;
         const readiness = await waitUntilReady(
           session,
           navigateErrorText ? Math.min(timeoutMs, 1_500) : timeoutMs,
+          loaderId,
         );
         let page: JsonObject = {};
         try {

@@ -47,6 +47,18 @@ export function shouldReuseCurrentTab(input: {
   return Boolean(input.currentTargetId) && input.newTab !== true;
 }
 
+export function navigationIsReady(input: {
+  readyState?: string;
+  documentUrl?: string;
+  expectedLoaderId?: string;
+  observedLoaderId?: string;
+}): boolean {
+  const documentReady = input.readyState === "complete" || input.readyState === "interactive";
+  const hasDocument = Boolean(input.documentUrl && input.documentUrl !== "about:blank");
+  const loaderReady = !input.expectedLoaderId || input.observedLoaderId === input.expectedLoaderId;
+  return documentReady && hasDocument && loaderReady;
+}
+
 function nonEmpty(value: string | undefined): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

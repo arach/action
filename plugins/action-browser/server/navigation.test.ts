@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   assessNavigation,
   isChromeNavigationErrorPage,
+  navigationIsReady,
   shouldReuseCurrentTab,
 } from "./navigation.ts";
 
@@ -14,6 +15,26 @@ describe("Action Browser tab reuse", () => {
   test("creates a tab for the first open or when explicitly requested", () => {
     expect(shouldReuseCurrentTab({})).toBe(false);
     expect(shouldReuseCurrentTab({ currentTargetId: "tab-1", newTab: true })).toBe(false);
+  });
+});
+
+describe("Action Browser navigation readiness", () => {
+  test("does not accept the previous document while a reused tab is navigating", () => {
+    expect(navigationIsReady({
+      readyState: "complete",
+      documentUrl: "https://previous.example/",
+      expectedLoaderId: "new-loader",
+      observedLoaderId: "old-loader",
+    })).toBe(false);
+  });
+
+  test("accepts the ready document after Chrome commits the expected loader", () => {
+    expect(navigationIsReady({
+      readyState: "interactive",
+      documentUrl: "https://next.example/",
+      expectedLoaderId: "new-loader",
+      observedLoaderId: "new-loader",
+    })).toBe(true);
   });
 });
 
