@@ -6,6 +6,8 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { DriverIdentityContext } from "./driver-identity.js";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -34,6 +36,9 @@ import {
   MacOSCommandEngine,
   ocrScreenshot,
   pointFromBounds,
+  revalidatePointerFocusLease,
+  requiresPointerFocusWarning,
+  runPointerFocusCountdown,
   searchOCRText,
   startAgentCursor,
   stopAgentCursor,
@@ -41,6 +46,7 @@ import {
 } from "@action/runtime";
 
 export const toolFamilies = [
+  "driver",
   "session",
   "drive",
   "observe",
@@ -86,6 +92,7 @@ const nativeHostPath = resolve(
   process.env.ACTION_NATIVE_HOST ?? resolve(actionRoot, "native/engine/scripts/run-app-host.sh"),
 );
 const driveClient = new DriveAgentClient({ launcherPath: nativeHostPath });
+const driverIdentity = new DriverIdentityContext();
 const activeCursorLeaseIDs = new Set<string>();
 const activeRecordings = new Map<string, RecordingEntry>();
 
@@ -437,9 +444,10 @@ async function ensureDriveLeaseForAct(input: {
   });
 
   if (!lease) {
+    const identity = driverIdentity.get();
     const begun = await driveClient.begin({
-      agent: "Action MCP",
-      task: input.description || input.actionKind,
+      agent: identity.agent,
+      task: identity.task ?? input.description ?? input.actionKind,
       mode: "background",
       implicit: true,
     });
@@ -725,6 +733,16 @@ async function listFiles(root: string): Promise<JsonObject[]> {
 
 const tools: Tool[] = [
   tool(
+    "action.driver.identify",
+    "Identify Driver",
+    "Set a stable human-readable identity for implicit drive leases on this MCP connection.",
+    objectSchema({
+      agent: textProperty("Stable caller label shown to the operator, for example Codex · checkout audit."),
+      task: textProperty("Optional default task label for implicit drive leases."),
+    }, ["agent"]),
+    { readOnlyHint: false, idempotentHint: true },
+  ),
+  tool(
     "action.health",
     "Action Health",
     "Check native Action permissions and host availability.",
@@ -934,6 +952,19 @@ async function runCompanionJobIfAvailable(kind: string, payload: JsonObject, dir
 }
 
 const handlers: Record<string, ToolHandler> = {
+  async "action.driver.identify"(args) {
+    const agent = optionalString(args.agent);
+    if (!agent) {
+      throw new Error("agent is required");
+    }
+    const identity = driverIdentity.identify(agent, optionalString(args.task));
+    return {
+      ok: true,
+      identity,
+      note: "Identity will be used for implicit drive leases on this MCP connection.",
+    };
+  },
+
   async "action.health"() {
     const engine = newEngine();
     const diagnostics = await engine.diagnostics();
@@ -993,6 +1024,7 @@ const handlers: Record<string, ToolHandler> = {
     if (!agent || !task) {
       throw new Error("agent and task are required");
     }
+    driverIdentity.identify(agent, task);
     const result = await driveClient.begin({
       agent,
       task,
@@ -1248,10 +1280,65 @@ const handlers: Record<string, ToolHandler> = {
       description: action.description,
     });
 
+    let pointerFocusWarningShown = false;
+    if (
+      activeCursorLeaseIDs.has(lease.leaseId)
+      && requiresPointerFocusWarning({ action, target, axTier, channel })
+    ) {
+      const bounds = target?.bounds;
+      const point = bounds
+        ? pointFromBounds(bounds)
+        : action.target?.point
+          ? {
+              x: Number((action.target.point as { x?: number }).x),
+              y: Number((action.target.point as { y?: number }).y),
+            }
+          : undefined;
+      const safePoint = point && Number.isFinite(point.x) && Number.isFinite(point.y)
+        ? point
+        : undefined;
+      pointerFocusWarningShown = await runPointerFocusCountdown({
+        leaseId: lease.leaseId,
+        agent: lease.agent,
+        point: safePoint,
+        label: (action.description || action.kind).slice(0, 40),
+      });
+    }
+    await revalidatePointerFocusLease({
+      warningShown: pointerFocusWarningShown,
+      isLeaseActive: async () => Boolean(await heartbeatDrive({
+        leaseId: lease.leaseId,
+        axTier,
+        actionKind: action.kind,
+      })),
+      onLeaseEnded: async () => {
+        // The native terminal transition owns the lease stop signal; only forget
+        // the local presentation handle so we do not recreate an orphan marker.
+        activeCursorLeaseIDs.delete(lease.leaseId);
+      },
+      onCheckFailed: async () => releaseAgentCursor(lease.leaseId),
+    });
+
     // performAction throws for anything it could not carry out — including an action kind the
     // runtime has no handler for — and the tool dispatcher turns a throw into an isError reply.
     // Reaching this line is therefore the success signal; the literal below is not an assumption.
-    await engine.performAction(action, target);
+    try {
+      await engine.performAction(action, target);
+    } catch (error) {
+      if (pointerFocusWarningShown) {
+        try {
+          await updateAgentCursor({
+            leaseId: lease.leaseId,
+            agent: lease.agent,
+            phase: "idle",
+            label: "driving",
+          });
+        } catch {
+          // The native lease expiry remains the independent cleanup path.
+        }
+      }
+      throw error;
+    }
     await presentActCue({ lease, action, target });
 
     return {
@@ -1456,6 +1543,7 @@ function createServer(): Server {
         tools: {},
       },
       instructions: [
+        "Call action.driver.identify once when the connection label is not already supplied by the environment.",
         "Use Action tools to observe, resolve, act, record, and inspect native macOS surfaces.",
         "Before multi-step UI work, call action.drive.begin with an agent identity and short task.",
         "Pass the returned leaseId to observe and act calls, then call action.drive.release when the work ends.",
