@@ -16,3 +16,13 @@ Installer/*-temp.dmg
 # Rust supervisor build output
 target
 crates/*/target
+
+# Generated character and brand exploration output
+/assets/brand/explorations/midjourney/
+/assets/brand/project-logos/analyze-state.json
+/assets/brand/project-logos/midjourney/
+/assets/brand/project-logos/reviews/
+/assets/brand/project-logos/sprint-state.json
+/assets/characters/cast/
+/assets/characters/midjourney/
+/assets/characters/sprites/
