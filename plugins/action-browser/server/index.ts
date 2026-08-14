@@ -15,6 +15,12 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  assessNavigation,
+  navigationIsReady,
+  shouldReuseCurrentTab,
+} from "./navigation.ts";
+
 type JsonObject = Record<string, unknown>;
 
 type JsonRpcRequest = {
@@ -276,7 +282,7 @@ const tools = [
   {
     name: "browser_open",
     title: "Open in Action Browser",
-    description: "Open a URL in a named Action-owned Chrome profile. Chrome starts on demand and stays in the background by default. Optional profile switches identity first.",
+    description: "Open a URL in the session's current Action Browser tab, creating one on the first call. Chrome starts on demand and stays in the background by default. Set newTab only when a separate tab is intentional.",
     inputSchema: {
       type: "object",
       properties: {
@@ -287,6 +293,7 @@ const tools = [
         },
         background: { type: "boolean", description: "Keep Chrome hidden in the background. Defaults to true." },
         waitMs: { type: "number", description: "Maximum time to wait for the page to become ready. Defaults to 15000." },
+        newTab: { type: "boolean", description: "Create a separate tab instead of reusing this session's current tab. Defaults to false." },
       },
       required: ["url"],
       additionalProperties: false,
@@ -882,22 +889,48 @@ async function withTarget<T>(tabId: unknown, work: (session: CDPSession, target:
   }
 }
 
-async function waitUntilReady(session: CDPSession, timeoutMs: number): Promise<void> {
+type PageReadiness = {
+  readyState?: string;
+  documentUrl?: string;
+  title?: string;
+  loaderId?: string;
+  timedOut: boolean;
+};
+
+async function waitUntilReady(
+  session: CDPSession,
+  timeoutMs: number,
+  expectedLoaderId?: string,
+): Promise<PageReadiness> {
   const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const result = await session.call("Runtime.evaluate", {
-      expression: "({ state: document.readyState, url: location.href })",
-      returnByValue: true,
-    });
-    const value = (result.result as JsonObject | undefined)?.value as JsonObject | undefined;
-    const state = value?.state;
-    const url = value?.url;
-    if (
-      (state === "complete" || state === "interactive")
-      && typeof url === "string"
-      && url !== "about:blank"
-    ) return;
-    await Bun.sleep(150);
+  let last: PageReadiness = { timedOut: true };
+  while (true) {
+    try {
+      const frameTreeResult = await session.call("Page.getFrameTree");
+      const result = await session.call("Runtime.evaluate", {
+        expression: "({ readyState: document.readyState, documentUrl: location.href, title: document.title })",
+        returnByValue: true,
+      });
+      const value = (result.result as JsonObject | undefined)?.value as JsonObject | undefined;
+      const frameTree = frameTreeResult.frameTree as JsonObject | undefined;
+      const frame = frameTree?.frame as JsonObject | undefined;
+      last = {
+        readyState: typeof value?.readyState === "string" ? value.readyState : undefined,
+        documentUrl: typeof value?.documentUrl === "string" ? value.documentUrl : undefined,
+        title: typeof value?.title === "string" ? value.title : undefined,
+        loaderId: typeof frame?.loaderId === "string" ? frame.loaderId : undefined,
+        timedOut: true,
+      };
+      if (navigationIsReady({
+        ...last,
+        expectedLoaderId,
+        observedLoaderId: last.loaderId,
+      })) return { ...last, timedOut: false };
+    } catch {
+      // Navigation may replace the execution context between polls.
+    }
+    if (Date.now() - started >= timeoutMs) return last;
+    await Bun.sleep(Math.min(150, Math.max(1, timeoutMs - (Date.now() - started))));
   }
 }
 
@@ -935,6 +968,14 @@ function optionalNumber(value: unknown, fallback: number): number {
 
 function textResult(data: JsonObject): ToolResult {
   return {
+    content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+    structuredContent: data,
+  };
+}
+
+function errorResult(data: JsonObject): ToolResult {
+  return {
+    isError: true,
     content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
     structuredContent: data,
   };
@@ -1036,23 +1077,78 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
       if (typeof args.profile === "string" && args.profile.trim()) {
         await useProfile(args.profile);
       }
-      const url = normalizeURL(asString(args.url, "url"));
+      const inputUrl = asString(args.url, "url");
+      const url = normalizeURL(inputUrl);
       const background = args.background !== false;
+      const timeoutMs = Math.max(0, optionalNumber(args.waitMs, 15_000));
       await ensureChrome(background);
-      const target = await fetchJson<ChromeTarget>("/json/new?about%3Ablank", { method: "PUT" });
-      if (!target.webSocketDebuggerUrl) {
-        throw new Error("Chrome created a tab without a DevTools endpoint.");
+      let target: ChromeTarget | undefined;
+      let reusedTab = false;
+      if (shouldReuseCurrentTab({
+        currentTargetId,
+        newTab: args.newTab === true,
+      })) {
+        target = (await listTargets()).find((candidate) => candidate.id === currentTargetId);
+        reusedTab = Boolean(target);
+      }
+      if (!target) {
+        target = await fetchJson<ChromeTarget>("/json/new?about%3Ablank", { method: "PUT" });
+        if (!target.webSocketDebuggerUrl) {
+          throw new Error("Chrome created a tab without a DevTools endpoint.");
+        }
       }
       currentTargetId = target.id;
       const session = await CDPSession.connect(target.webSocketDebuggerUrl);
       try {
         await session.call("Page.enable");
-        await session.call("Page.navigate", { url });
-        await waitUntilReady(session, optionalNumber(args.waitMs, 15_000));
-        const page = await evaluateValue(session, "({ title: document.title, url: location.href })") as JsonObject;
-        return textResult({
-          ok: true,
-          tab: { id: target.id, title: page.title ?? target.title, url: page.url ?? url },
+        const navigation = await session.call("Page.navigate", { url });
+        const navigateErrorText = typeof navigation.errorText === "string"
+          ? navigation.errorText
+          : undefined;
+        const loaderId = typeof navigation.loaderId === "string" ? navigation.loaderId : undefined;
+        const readiness = await waitUntilReady(
+          session,
+          navigateErrorText ? Math.min(timeoutMs, 1_500) : timeoutMs,
+          loaderId,
+        );
+        let page: JsonObject = {};
+        try {
+          page = await evaluateValue(
+            session,
+            "({ title: document.title, documentUrl: location.href, readyState: document.readyState, pageText: (document.body?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1000) })",
+          ) as JsonObject;
+        } catch {
+          // The target metadata and readiness observation still provide a useful failure contract.
+        }
+        let observedTarget: ChromeTarget | undefined;
+        try {
+          observedTarget = (await fetchJson<ChromeTarget[]>("/json/list"))
+            .find((candidate) => candidate.id === target.id);
+        } catch {
+          // Chrome can briefly withhold target metadata while replacing an error document.
+        }
+        const outcome = assessNavigation({
+          requestedUrl: url,
+          documentUrl: typeof page.documentUrl === "string"
+            ? page.documentUrl
+            : readiness.documentUrl,
+          targetUrl: observedTarget?.url ?? target.url,
+          title: typeof page.title === "string" ? page.title : readiness.title,
+          readyState: typeof page.readyState === "string" ? page.readyState : readiness.readyState,
+          timedOut: readiness.timedOut,
+          timeoutMs,
+          navigateErrorText,
+          pageText: typeof page.pageText === "string" ? page.pageText : undefined,
+        });
+        const result: JsonObject = {
+          ...outcome,
+          ...(inputUrl === url ? {} : { inputUrl }),
+          reusedTab,
+          tab: {
+            id: target.id,
+            title: page.title ?? readiness.title ?? observedTarget?.title ?? target.title,
+            url: outcome.finalUrl,
+          },
           chrome: {
             profile: profileName,
             profileDir,
@@ -1060,7 +1156,8 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
             debugPort,
             session: sessionName,
           },
-        });
+        };
+        return outcome.ok ? textResult(result) : errorResult(result);
       } finally {
         session.close();
       }

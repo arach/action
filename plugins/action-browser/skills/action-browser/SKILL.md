@@ -12,8 +12,10 @@ Action-owned Chrome profile** (not the user's daily Chrome).
 
 1. If the user names an identity (`coding`, `mira`, …), call `browser_use_profile`
    or pass `profile` to `browser_open`.
-2. Call `browser_open` with the requested URL. Leave `background` set to `true`
-   unless the user asks to see the Chrome window.
+2. Call `browser_open` with the requested URL. It reuses this agent session's
+   current tab by default. Leave `background` set to `true` unless the user asks
+   to see the Chrome window, and set `newTab: true` only when parallel page state
+   is intentional.
 3. Call `browser_screenshot` and show the returned image to the user.
 4. Call `browser_snapshot` before interacting with unfamiliar pages.
 5. Use selectors returned by the snapshot for `browser_click` and
@@ -41,6 +43,8 @@ Action-owned Chrome profile** (not the user's daily Chrome).
 ## Important behavior
 
 - Real Chrome with CDP — not headless.
+- `browser_open` creates one working tab per agent session, then navigates that
+  tab on later calls. Use `newTab: true` for an intentional additional tab.
 - `browser_screenshot` saves a PNG artifact and returns the image in the tool response.
 - Prefer a stable CSS selector from `browser_snapshot` over text matching.
 - Use `browser_close` when a temporary tab is no longer useful.
