@@ -3,7 +3,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
-import type { DriveLease, Point } from "@action/protocol";
+import type {
+  AxActionTier,
+  DriveLease,
+  Point,
+  ResolvedTarget,
+  RuntimeAction,
+} from "@action/protocol";
 
 export const AGENT_CURSOR_IDLE_EXPIRY_MS = 90_000;
 
@@ -12,9 +18,10 @@ export interface AgentCursorState {
   y?: number;
   agent?: string;
   label?: string;
-  phase?: "idle" | "click" | "type" | "key" | string;
+  phase?: "idle" | "click" | "type" | "key" | "countdown" | string;
   typingText?: string;
   keyLabel?: string;
+  countdown?: number;
   cueId?: string;
   expiresAt?: string;
   updatedAt?: string;
@@ -95,9 +102,10 @@ export async function updateAgentCursor(input: {
   agent?: string;
   point?: Point;
   label?: string;
-  phase?: "idle" | "click" | "type" | "key";
+  phase?: "idle" | "click" | "type" | "key" | "countdown";
   typingText?: string;
   keyLabel?: string;
+  countdown?: number;
   cueId?: string;
 }): Promise<void> {
   const statePath = agentCursorStatePath(input.leaseId);
@@ -118,6 +126,7 @@ export async function updateAgentCursor(input: {
     phase: input.phase ?? "idle",
     typingText: input.typingText,
     keyLabel: input.keyLabel,
+    countdown: input.countdown,
     cueId: input.cueId ?? previous.cueId,
     expiresAt: agentCursorExpiration(updatedAt),
     updatedAt,
@@ -125,8 +134,73 @@ export async function updateAgentCursor(input: {
   if (next.phase === "idle") {
     next.typingText = undefined;
     next.keyLabel = undefined;
+    next.countdown = undefined;
   }
   await writeFile(statePath, `${JSON.stringify(next, null, 2)}\n`);
+}
+
+export const POINTER_FOCUS_COUNTDOWN_SECONDS = 3;
+export const POINTER_FOCUS_COUNTDOWN_STEP_MS = 800;
+
+/** Return true only for acts likely to move the real pointer or steal foreground focus. */
+export function requiresPointerFocusWarning(input: {
+  action: RuntimeAction;
+  target?: ResolvedTarget;
+  axTier: AxActionTier;
+  channel: string;
+}): boolean {
+  if (input.axTier === "attention" || input.axTier === "target-focus") {
+    return true;
+  }
+  if (input.channel === "hid" || input.target?.mode === "coordinate") {
+    return true;
+  }
+
+  const kind = input.action.kind;
+  if (kind === "focus-window" || kind === "open-app") {
+    return true;
+  }
+  return (
+    (kind === "click" || kind === "drag" || kind === "scroll")
+    && Boolean(input.action.target?.point || input.action.input?.point)
+  );
+}
+
+/** Show a 3-2-1 cursor warning before an attention-taking act. */
+export async function runPointerFocusCountdown(input: {
+  leaseId: string;
+  agent?: string;
+  point?: Point;
+  label?: string;
+  seconds?: number;
+  stepMs?: number;
+}): Promise<boolean> {
+  const seconds = input.seconds ?? POINTER_FOCUS_COUNTDOWN_SECONDS;
+  const stepMs = input.stepMs ?? POINTER_FOCUS_COUNTDOWN_STEP_MS;
+  if (!Number.isInteger(seconds) || seconds < 1) {
+    throw new Error("countdown seconds must be a positive integer");
+  }
+  if (!Number.isFinite(stepMs) || stepMs < 0) {
+    throw new Error("countdown stepMs must be a non-negative number");
+  }
+  if (!(await pathExists(agentCursorStatePath(input.leaseId)))) {
+    return false;
+  }
+
+  const cueBase = `countdown_${Date.now()}`;
+  for (let remaining = seconds; remaining >= 1; remaining -= 1) {
+    await updateAgentCursor({
+      leaseId: input.leaseId,
+      agent: input.agent,
+      point: input.point,
+      label: input.label ?? "taking pointer",
+      phase: "countdown",
+      countdown: remaining,
+      cueId: `${cueBase}_${remaining}`,
+    });
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, stepMs));
+  }
+  return true;
 }
 
 export async function stopAgentCursor(leaseId: string): Promise<void> {
