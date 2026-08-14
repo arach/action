@@ -122,7 +122,7 @@ Server: `plugins/action-browser/server/index.ts`
 | `browser_profile_info` | Active path, cookies readiness, companion hints |
 | `browser_import_cookies` | Dry-run or confirm seed from personal Chrome |
 | `browser_companion_status` | Extension dist + bridge health |
-| `browser_open` | Open URL; optional `profile` argument |
+| `browser_open` | Open URL in the session's working tab; optional `profile` or `newTab: true` |
 | `browser_tabs` / `browser_snapshot` / `browser_click` / `browser_fill` / `browser_screenshot` / `browser_close` | Page automation via CDP |
 
 ### Claude Code (native Action MCP vs browser)
