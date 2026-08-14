@@ -6,7 +6,7 @@
 
 The project is built around a signed AppKit application, a local agent runtime, and shared CLI/MCP interfaces. Its strongest path today is native capture and replay; live inspection and durable companion jobs are the active development edge.
 
-Demo: [Mira uses Action to make the Action logo](https://arach.github.io/action/#demo) · [MP4](https://arach.github.io/action/assets/action-mira-midjourney-logo.mp4)
+Demo: [Watch Action record the work](https://arach.github.io/action/#demo) · [MP4](https://arach.github.io/action/assets/action-record-the-work.mp4)
 
 ## Status At A Glance
 
