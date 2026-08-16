@@ -26,6 +26,7 @@
     "inspect:surface:vision": "secret run MINIMAX_API_KEY -- bun packages/cli/src/main.ts inspect current-surface --vision",
     "secrets:status": "scripts/secret-setup.sh status",
     "secrets:setup": "scripts/secret-setup.sh setup",
+    "plugin:version": "bun scripts/plugin-version.mjs",
     "release:tag": "scripts/tag-release",
     "release:ship": "scripts/ship-release",
     "media:chroma-window": "bun scripts/chroma-window-video.mjs",

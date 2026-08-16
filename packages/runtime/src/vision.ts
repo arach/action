@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { access, mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -125,8 +126,7 @@ async function resolveMoondreamPython(): Promise<string | undefined> {
   const candidates = [
     process.env.ACTION_MOONDREAM_PYTHON,
     process.env.MOONDREAM_PYTHON,
-    "/Users/arach/dev/moondream-local-poc/.venv/bin/python",
-    "/Users/art/dev/moondream-local-poc/.venv/bin/python",
+    join(homedir(), "dev/moondream-local-poc/.venv/bin/python"),
   ].filter((value): value is string => Boolean(value));
 
   for (const candidate of candidates) {

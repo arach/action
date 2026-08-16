@@ -42,50 +42,51 @@ settings deterministic and avoids mutating the user's daily Chrome profile.
 For authenticated tools, use a named persistent Action profile and either:
 
 1. sign in once interactively in that profile, or
-2. **selectively import cookies** from personal Chrome (domain allowlists).
+2. **selectively import cookies** from a regular Chrome profile (domain allowlists).
 
-Attaching to the user's existing Chrome profile should be an explicit mode, not
-the default. Full product docs: [docs/browser-profiles.md](../../docs/browser-profiles.md).
+The user's regular Chrome is never an automation target here. It is reachable
+only as an open-only handoff, and is driven with Action's native screen and
+accessibility tools instead. Full product docs: [docs/browser-profiles.md](../../docs/browser-profiles.md).
 
 Create and prepare a named profile with:
 
 ```bash
-bun run profile -- setup coding
-# or the historical example:
+bun run profile -- setup work
+# or the creative identity used by the companion tooling:
 bun run profile -- setup mira
 ```
 
 This builds the extension, creates the profile directory, opens that profile to
 `chrome://extensions`, and reveals the extension `dist/` folder in Finder.
-Named identities (for example `coding` or `mira`) are persistent Chrome profiles
-for observing and acting in web tools without touching the daily browser.
+Named identities (for example `work` or `mira`) are persistent Chrome profiles
+for observing and acting in web tools without touching the regular browser.
 
 ### Cookie seeding
 
 ```bash
 bun run import:cookies -- --list-profiles
 bun run import:cookies -- --list-action-profiles
-bun run import:cookies -- list --into coding --domains github.com
-bun run import:cookies -- import --into coding --domains github.com --confirm
+bun run import:cookies -- list --into work --source "Profile 1" --domains github.com
+bun run import:cookies -- import --into work --source "Profile 1" --domains github.com --confirm
 ```
 
 Also available as:
 
 ```bash
-bun run profile -- import-cookies import --into coding --domains github.com --confirm
+bun run profile -- import-cookies import --into work --source "Profile 1" --domains github.com --confirm
 ```
 
 ### Launch and check
 
 ```bash
-bun run profile -- launch coding
-bun run profile -- check coding
+bun run profile -- launch work
+bun run profile -- check work
 ```
 
 If `check` reports a companion extension id, open the persistent bridge page:
 
 ```bash
-bun run profile -- bridge coding --extension-id <id-from-check>
+bun run profile -- bridge work --extension-id <id-from-check>
 ```
 
 Profiles live under:
@@ -95,7 +96,7 @@ Profiles live under:
 Examples:
 
 - `.../ChromeProfiles/agent-browser` — Action Browser MCP default
-- `.../ChromeProfiles/coding`
+- `.../ChromeProfiles/work` — seeded from a regular Chrome profile
 - `.../ChromeProfiles/mira`
 
 Override the root with `ACTION_CHROME_COMPANION_PROFILE_ROOT` or a single profile

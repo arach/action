@@ -85,27 +85,27 @@ function splitList(raw) {
 }
 
 function printHelp() {
-  console.log(`Copy selected cookies from personal Chrome into a named Action profile.
+  console.log(`Copy selected cookies from a regular Chrome profile into a named Action identity.
 
-  # list personal Chrome profiles
+  # list your Chrome profiles: directory name, then display name
   bun scripts/import-cookies.mjs --list-profiles
 
-  # list Action-owned profiles
+  # list Action-owned identities
   bun scripts/import-cookies.mjs --list-action-profiles
 
-  # dry-run against coding profile
-  bun scripts/import-cookies.mjs list --into coding --domains github.com
+  # dry-run: seed the "work" identity from the "Work" browser (dir "Profile 1")
+  bun scripts/import-cookies.mjs list --into work --source "Profile 1" --domains github.com
 
   # import (requires --confirm)
-  bun scripts/import-cookies.mjs import --into coding --domains github.com --confirm
+  bun scripts/import-cookies.mjs import --into work --source "Profile 1" --domains github.com --confirm
 
   # narrow to specific cookie names
   bun scripts/import-cookies.mjs import --into mira --domains midjourney.com \\
     --only cf_clearance --confirm
 
 Options:
-  --into <name>          Action profile identity (default: agent-browser or env)
-  --source <profile>     Personal Chrome profile dir name (Default, Profile 1, ...)
+  --into <name>          Action identity to seed (default: agent-browser or env)
+  --source <profile>     Chrome profile DIR name, not its display name (Default, Profile 1, ...)
   --domains <sites>      Limit by host suffix (comma-separated)
   --only <cookies>       Cookie names, or host:name for one exact cookie
   --confirm              Actually write cookies (otherwise dry-run)
@@ -116,8 +116,9 @@ Options:
   --list-action-profiles List Action ChromeProfiles/*
 
 Policy:
-  Prefer named Action profiles + selective domain seeds.
-  Do not attach automation to your daily Chrome user-data-dir.
+  Prefer named Action identities + selective domain seeds.
+  Do not attach automation to your regular Chrome user-data-dir; that browser is
+  driven with Action's native screen + accessibility tools instead.
 `);
 }
 

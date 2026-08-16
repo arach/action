@@ -23,6 +23,7 @@
 - V0: /docs/V0
 - VISION: /docs/VISION
 - Api: /docs/api
+- Browser-profiles: /docs/browser-profiles
 - Native-runtime.agent: /docs/native-runtime.agent
 - Overview.agent: /docs/overview.agent
 - Recording.agent: /docs/recording.agent
@@ -120,6 +121,11 @@ runtime that can observe, act, reflect, and record.
 ## Api
 
 This page documents the current local agent protocol for `action`.
+
+## Browser-profiles
+
+How Action gives an agent a **browser identity** without taking over your daily
+Chrome — and which kind of control you get in each case.
 
 ## Native-runtime.agent
 

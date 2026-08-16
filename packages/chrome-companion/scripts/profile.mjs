@@ -224,10 +224,10 @@ Named Action profiles live under:
   ~/Library/Application Support/Action/ChromeProfiles/<name>
 
 Cookie seeding (selective, not full-profile clone):
-  bun run profile -- import-cookies import --into coding --domains github.com --confirm
+  bun run profile -- import-cookies import --into work --source "Profile 1" --domains github.com --confirm
 
 Companion extension (load unpacked once per profile):
-  bun run profile -- setup coding
+  bun run profile -- setup work
   # then Load unpacked -> packages/chrome-companion/dist
 
 Environment:
