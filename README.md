@@ -186,16 +186,23 @@ repository URL installs the latest release, which may predate the manifest:
 Run `/plugins info action-browser` to confirm the plugin loaded, then use the
 same example prompt above.
 
-This starter requires macOS, Google Chrome, and Bun. It uses **named Action-owned
-Chrome profiles** (default `agent-browser`), not your daily Chrome. Seed logins
-with selective cookie import; optionally load the Chrome Companion extension for
-richer DOM tools. See [docs/browser-profiles.md](docs/browser-profiles.md).
+This starter requires macOS, Google Chrome, and Bun. It drives **named Action-owned
+Chrome identities** (default `agent-browser`), never your regular Chrome. To act on
+a site you are signed in to, seed an identity with a selective cookie import rather
+than handing the URL to your own browser; optionally load the Chrome Companion
+extension for richer DOM tools.
 
 ```bash
-# prepare a coding identity + companion load-unpacked once
-bun run chrome:companion:profile -- setup coding
-bun run chrome:companion:import:cookies -- import --into coding --domains github.com --confirm
+# prepare a "work" identity + companion load-unpacked once
+bun run chrome:companion:profile -- setup work
+bun run chrome:companion:import:cookies -- import --into work --source "Profile 1" --domains github.com --confirm
 ```
+
+Three browsers can be in play — your regular Chrome (open-only handoff, driven by
+Action's native screen + accessibility tools), a blank Action browser, and an
+Action identity seeded from one of your Chrome profiles (DOM tools, already signed
+in). See [docs/browser-profiles.md](docs/browser-profiles.md) for the decision
+table and the full `Profile 1` → `work` example.
 
 Action Browser MCP tools include `browser_profiles`, `browser_use_profile`,
 `browser_import_cookies`, and `browser_companion_status` in addition to open /

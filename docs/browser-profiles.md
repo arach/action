@@ -1,86 +1,145 @@
-# Browser Profiles, Cookies, and Companion
+# Browser Identity: Regular Chrome, Action Browsers, Seeded Identities
 
-How Action gives agents a **browser identity** without taking over your daily
-Chrome.
+How Action gives an agent a **browser identity** without taking over your daily
+Chrome — and which kind of control you get in each case.
 
-## Policy
+## Three browsers, two kinds of control
 
-| Mode | Use |
-|------|-----|
-| **Named Action profile** (default) | `~/Library/Application Support/Action/ChromeProfiles/<name>` |
-| **Selective cookie seed** | Copy only allowlisted domains/names from personal Chrome |
-| **Chrome Companion extension** | Optional richer DOM observe/act via localhost bridge |
-| **Daily personal Chrome** | Explicit `mode: "regular"` open-only handoff; never an automation target |
+When an agent says "I'll open it in Chrome", it can mean one of three things.
+They are not interchangeable.
 
-Do **not** point automation at your everyday Chrome user-data-dir while you are
-browsing. Chrome locks that directory, and agents should not inherit your full
-history, extensions, and sessions by accident.
+| | What it is | What the agent can do |
+|---|---|---|
+| **1. Your regular Chrome** | The browser you use all day. Your real profiles (`Default`, `Profile 1` / "Work"), your tabs, history, extensions, and logins. | **Open a URL, and that's it.** `browser_open { mode: "regular" }` is a visible handoff with no DevTools attachment. To make the agent *act* there, use Action's native macOS control: screen capture + accessibility (`action.observe.snapshot`, `action.resolve.target`, `action.act.execute`). |
+| **2. An Action browser** | A real, non-headless Chrome that Action owns, on its own user-data-dir under `~/Library/Application Support/Action/ChromeProfiles/`. The default identity `agent-browser` is blank and signed into nothing. | **Full DOM control** over CDP: `browser_snapshot`, `browser_click`, `browser_fill`, `browser_screenshot`, `browser_tabs`. |
+| **3. An Action browser identity seeded from one of your Chrome profiles** | The same Action-owned Chrome under a name you choose (`work`, `mira`, …), carrying cookies copied from one of your real profiles for an explicit allowlist of domains. | **Full DOM control, on sites you're already signed in to.** |
+
+The tradeoff in one line: **your regular Chrome has your session but only
+screen-and-accessibility control; an Action browser has DOM control but starts
+as a stranger.** Seeding (option 3) is how you get both.
+
+This is a boundary Action does not try to cross. [Chrome 136 and later ignore
+remote-debugging switches for the default personal data
+directory](https://developer.chrome.com/blog/remote-debugging-port), and Action
+does not attempt to bypass it. Pointing automation at your everyday user-data-dir
+would also fight Chrome's directory lock and hand an agent your full history,
+extensions, and sessions by accident.
+
+### Picking one
+
+- The user wants to *look* at something in their own browser → **regular**.
+- The agent needs to click through a public site → **Action browser**.
+- The agent needs to click through a site you're logged into → **seeded identity**.
+- The agent needs to act inside your real signed-in session, and cookies aren't
+  enough (passkeys, SSO device trust, an extension's state) → **regular Chrome
+  plus Action's native observe/act**, not the browser tools.
+
+## The canonical example: seed "Profile 1" into `work`, then drive it
+
+Your Chrome profile *directory* names are `Default`, `Profile 1`, `Profile 2`, …
+and are not the display names you see in Chrome's avatar menu. A browser you
+call "Work" is usually the `Profile 1` directory. Map them first, then seed.
+
+From an agent, over MCP:
+
+```text
+browser_import_cookies { listSourceProfiles: true }
+# -> [{ dir: "Default", name: "Personal" }, { dir: "Profile 1", name: "Work" }, ...]
+
+browser_import_cookies { into: "work", source: "Profile 1", domains: ["github.com"] }
+# dry run: lists exactly which cookies would be copied
+
+browser_import_cookies { into: "work", source: "Profile 1", domains: ["github.com"], confirm: true }
+# writes them into the Action identity `work`
+
+browser_open { url: "https://github.com/notifications", profile: "work" }
+browser_snapshot
+browser_screenshot
+```
+
+The same thing from the terminal:
+
+```bash
+# map display names to profile directories
+bun run chrome:companion:import:cookies -- --list-profiles
+
+# dry run
+bun run chrome:companion:import:cookies -- list --into work --source "Profile 1" --domains github.com
+
+# write
+bun run chrome:companion:import:cookies -- import --into work --source "Profile 1" --domains github.com --confirm
+```
+
+After that, `work` is an ordinary Action identity: `browser_use_profile
+{ profile: "work" }` or `browser_open { url, profile: "work" }`, and every DOM
+tool works against it.
 
 ## Named identities
 
-Examples:
+Identities are created on first use — any unused name gives you a fresh blank
+one. Shipped conventions:
 
-- `agent-browser` — default blank agent profile
-- `coding` — seeded for GitHub / Linear / etc.
-- `mira` — Midjourney / creative tooling example
+- `agent-browser` — the default blank agent identity
+- `work` — seeded from your work Chrome profile, per the example above
+- `mira` — the creative/Midjourney identity used by the companion tooling
 
-Create and prepare:
+Create and prepare one with the companion extension loaded:
 
 ```bash
 # from repo root
-bun run chrome:companion:profile -- setup coding
+bun run chrome:companion:profile -- setup work
 ```
 
 This builds the companion extension, creates the profile directory, opens
 `chrome://extensions` in that profile, and reveals `packages/chrome-companion/dist`
 so you can **Load unpacked** once.
 
-Launch later:
+Later:
 
 ```bash
-bun run chrome:companion:profile -- launch coding
-bun run chrome:companion:profile -- check coding
-bun run chrome:companion:profile -- path coding
+bun run chrome:companion:profile -- launch work
+bun run chrome:companion:profile -- check work
+bun run chrome:companion:profile -- path work
 ```
 
 Environment aliases (shared between companion tooling and Action Browser MCP):
 
 | Variable | Meaning |
 |----------|---------|
-| `ACTION_BROWSER_PROFILE` / `ACTION_CHROME_COMPANION_PROFILE` | Active profile name |
+| `ACTION_BROWSER_PROFILE` / `ACTION_CHROME_COMPANION_PROFILE` | Active identity name |
 | `ACTION_BROWSER_PROFILE_DIR` / `ACTION_CHROME_COMPANION_PROFILE_DIR` | Absolute user-data-dir override |
-| `ACTION_BROWSER_PROFILE_ROOT` / `ACTION_CHROME_COMPANION_PROFILE_ROOT` | Root for named profiles |
+| `ACTION_BROWSER_PROFILE_ROOT` / `ACTION_CHROME_COMPANION_PROFILE_ROOT` | Root for named identities |
 | `ACTION_BROWSER_DEBUG_PORT` | CDP port (MCP default `9334`) |
 | `ACTION_ROOT` | Monorepo root (needed for cookie tools when MCP is not cwd-rooted) |
 
 ## Cookie seeding
 
-Copy **selected** cookies from personal Chrome into an Action profile:
+Copy **selected** cookies from a regular Chrome profile into an Action identity:
 
 ```bash
-# list personal Chrome profiles
+# list your Chrome profiles (directory + display name)
 bun run chrome:companion:import:cookies -- --list-profiles
 
-# list Action profiles
+# list Action identities
 bun run chrome:companion:import:cookies -- --list-action-profiles
 
 # dry-run
-bun run chrome:companion:import:cookies -- list --into coding --domains github.com
+bun run chrome:companion:import:cookies -- list --into work --domains github.com
 
 # write
-bun run chrome:companion:import:cookies -- import --into coding --domains github.com --confirm
+bun run chrome:companion:import:cookies -- import --into work --domains github.com --confirm
 
-# narrow cookies
+# narrow to specific cookies
 bun run chrome:companion:import:cookies -- import --into mira \
   --domains midjourney.com \
   --only cf_clearance \
   --confirm
 ```
 
-Or via profile CLI:
+Or via the profile CLI:
 
 ```bash
-bun run chrome:companion:profile -- import-cookies import --into coding --domains github.com --confirm
+bun run chrome:companion:profile -- import-cookies import --into work --domains github.com --confirm
 ```
 
 Notes:
@@ -89,7 +148,7 @@ Notes:
   the import path copies encrypted blobs as-is for same-machine use.
 - Prefer domain allowlists over full-jar dumps.
 - Cookies are not a complete identity (localStorage / passkeys may still need a
-  one-time interactive login in the Action profile).
+  one-time interactive login in the Action identity).
 
 ## Chrome Companion (generic extension)
 
@@ -97,17 +156,17 @@ Package: `packages/chrome-companion`
 
 - Manifest V3 extension with DOM observe / resolve / act helpers
 - Localhost bridge on `http://127.0.0.1:4321` (WebSocket for the extension)
-- One-time **Load unpacked** per Action profile (`dist/` after build)
+- One-time **Load unpacked** per Action identity (`dist/` after build)
 
 ```bash
 bun run chrome:companion:build
 bun run chrome:companion:bridge
 bun run chrome:companion:health
-bun run chrome:companion:profile -- setup coding
+bun run chrome:companion:profile -- setup work
 ```
 
 Chrome Stable often ignores `--load-extension`; the reliable path is manual
-unpacked install inside the Action-owned profile.
+unpacked install inside the Action-owned identity.
 
 ## Action Browser MCP
 
@@ -117,62 +176,79 @@ Server: `plugins/action-browser/server/index.ts`
 
 | Tool | Purpose |
 |------|---------|
-| `browser_profiles` | List Action profiles + policy summary |
-| `browser_use_profile` | Switch active identity (`coding`, `mira`, …) |
-| `browser_profile_info` | Active path, cookies readiness, companion hints |
-| `browser_import_cookies` | Dry-run or confirm seed from personal Chrome |
+| `browser_profiles` | List Action identities, the active one, and the three-surface policy |
+| `browser_use_profile` | Switch the active identity (`agent-browser`, `work`, `mira`, …) |
+| `browser_profile_info` | Active path, cookie readiness, companion hints |
+| `browser_import_cookies` | Dry-run or confirm a seed from a regular Chrome profile |
 | `browser_companion_status` | Extension dist + bridge health |
-| `browser_open` | Open in controlled Action Chrome, or use `mode: "regular"` for an open-only daily-Chrome handoff |
-| `browser_tabs` / `browser_snapshot` / `browser_click` / `browser_fill` / `browser_screenshot` / `browser_close` | Page automation via CDP |
+| `browser_open` | Open in an Action browser, or `mode: "regular"` for an open-only handoff |
+| `browser_tabs` / `browser_snapshot` / `browser_click` / `browser_fill` / `browser_screenshot` / `browser_close` | DOM automation via CDP — Action browsers only |
 
-### Claude Code (native Action MCP vs browser)
+### Two MCP surfaces
 
-- **Native runtime MCP** (`action`): observe/act/record on macOS via Action.app
-- **Browser MCP** (`action-browser` plugin or local stdio): Chrome identities + CDP
+- **Native runtime MCP** (`action`): observe / resolve / act / record on macOS
+  through Action.app. This is what controls your *regular* Chrome window, and
+  every other native app, via screen capture and accessibility.
+- **Browser MCP** (`action-browser` plugin): Action-owned Chrome identities plus
+  DOM-level tools over CDP.
 
-Install browser plugin (marketplace):
+Install the browser plugin from the marketplace:
 
 ```bash
 claude plugin marketplace add arach/action
 claude plugin install action-browser@action --scope user
 ```
 
-Or point Claude at the local server with a default identity:
+Or point Claude at the local server with a default identity (replace the paths
+with your own checkout and `bun` location):
 
 ```bash
 claude mcp add action-browser -s user \
-  -e ACTION_ROOT=/Users/arach/dev/action \
-  -e ACTION_BROWSER_PROFILE=coding \
-  -- /Users/arach/.bun/bin/bun /Users/arach/dev/action/plugins/action-browser/server/index.ts
+  -e ACTION_ROOT="$HOME/dev/action" \
+  -e ACTION_BROWSER_PROFILE=work \
+  -- "$(which bun)" "$HOME/dev/action/plugins/action-browser/server/index.ts"
 ```
 
 ### Agent workflow
 
 ```text
-browser_profiles
-browser_use_profile { profile: "coding" }
-# first time only: seed logins
-browser_import_cookies { into: "coding", domains: ["github.com"], confirm: false }
-browser_import_cookies { into: "coding", domains: ["github.com"], confirm: true }
-browser_open { url: "https://github.com", profile: "coding" }
+browser_profiles                                   # what identities exist
+browser_use_profile { profile: "work" }            # pick one
+browser_open { url: "https://github.com" }         # drive it
+browser_snapshot
 browser_screenshot
-browser_companion_status   # optional richer DOM path
+browser_companion_status                           # optional richer DOM path
+browser_close { scope: "browser" }                 # when the task is done
 ```
 
-To open a URL in the user's normal Chrome instead:
+To open a URL in the user's own Chrome instead:
 
 ```text
 browser_open { url: "https://github.com", mode: "regular" }
 ```
 
-Regular mode is deliberately not controllable. [Chrome 136 and later ignore
-remote-debugging switches for the default personal data directory](https://developer.chrome.com/blog/remote-debugging-port),
-and Action does not attempt to bypass that boundary. Snapshot, click, fill, and
-screenshot tools continue to target Action Chrome.
+Regular mode is deliberately not controllable, and the result says so:
+`controlAvailable: false`, plus the native control path. Snapshot, click, fill,
+and screenshot continue to target the Action browser.
+
+## Plugin versioning
+
+Harnesses cache installed plugin metadata — skills, interface copy, MCP entry —
+by version. Bumping one manifest and not the others leaves an install serving
+stale tool descriptions, so all of them move together:
+
+```bash
+bun run plugin:version              # check that every manifest agrees
+bun run plugin:version -- 0.3.0     # set them all
+```
+
+Covers `.claude-plugin/marketplace.json`, the Claude/Codex/Kimi plugin manifests,
+and `SERVER_VERSION` in the MCP server. After a bump, reinstall or refresh the
+plugin in each harness so the cached copy is replaced.
 
 ## What is intentionally not done
 
-- Automation attachment to the currently open personal Chrome window
+- Automation attachment to the currently open regular Chrome window
 - Silent full cookie jar import
 - Claiming a page is authenticated without observing it after seed/login
 

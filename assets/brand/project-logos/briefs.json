@@ -9,7 +9,7 @@
     {
       "id": "atelier",
       "name": "Atelier",
-      "path": "/Users/arach/dev/atelier",
+      "path": "~/dev/atelier",
       "category": "Hudson app-builder host",
       "truth": "Standalone Vite host for extracted Hudson apps — Hero font studio, Shaper vector, OG generator, Day Stack, Assets. Workshop surface for building and dogfooding Hudson apps.",
       "audience": "Arach + agent builders shipping Hudson-powered tools",
@@ -22,7 +22,7 @@
     {
       "id": "openscout",
       "name": "OpenScout",
-      "path": "/Users/arach/dev/openscout",
+      "path": "~/dev/openscout",
       "category": "Agent control plane",
       "truth": "Local-first broker/runtime for AI agents — discover, address, observe, compose harnesses (Claude, Codex) without reinventing state per surface.",
       "audience": "Developers running multi-agent workflows on one machine",
@@ -35,7 +35,7 @@
     {
       "id": "studio",
       "name": "Studio",
-      "path": "/Users/arach/dev/studio",
+      "path": "~/dev/studio",
       "category": "Design-studio primitives",
       "truth": "Shared registry/shell/doc/code primitives extracted from OpenScout, Talkie, Hudson design studios — internal devtools for numbered proposals and studies.",
       "audience": "Internal product/design engineers documenting decisions",
@@ -48,7 +48,7 @@
     {
       "id": "hudson",
       "name": "Hudson",
-      "path": "/Users/arach/dev/hudson",
+      "path": "~/dev/hudson",
       "category": "App shell framework",
       "truth": "Opinionated browser shell — nav, panels, command palette, terminal, canvas. AppShell for single products; WorkspaceShell for multi-app dotted-grid canvas. Also native macOS Canvas for tmux/terminals.",
       "audience": "Builders who want chrome once and apps that plug in",
@@ -61,7 +61,7 @@
     {
       "id": "talkie",
       "name": "Talkie",
-      "path": "/Users/arach/dev/talkie",
+      "path": "~/dev/talkie",
       "category": "Voice memo + dictation",
       "truth": "Voice memo and dictation workspace for Apple platforms — record, sync, transcribe, AI workflows on transcripts. MemoCard mark, Hot Mic dot, beam/wordmark system from Narrative Studio commissions.",
       "audience": "Operators capturing speech and turning it into durable text/workflows",
@@ -74,7 +74,7 @@
     {
       "id": "lattices",
       "name": "Lattices",
-      "path": "/Users/arach/dev/lattices",
+      "path": "~/dev/lattices",
       "category": "macOS workspace manager",
       "truth": "Agentic workspace manager — screen map, window tiling, terminal sessions, OCR scan, layouts via .lattices.json. Mac menu bar + CLI.",
       "audience": "macOS developers who want their desktop as a coherent API",
@@ -88,7 +88,7 @@
       "id": "missionwriter",
       "name": "Mission Writer",
       "slug": "mission-rider",
-      "path": "/Users/arach/dev/missionwriter",
+      "path": "~/dev/missionwriter",
       "category": "Writing/review CLI",
       "truth": "Light CLI for writing and review missions on Cursor SDK — markdown mission files, spawn agents, optional multi-LLM contributor synthesis for review-rewrite flows.",
       "audience": "Operators commissioning structured writing/review runs",
@@ -101,7 +101,7 @@
     {
       "id": "linea",
       "name": "Linea",
-      "path": "/Users/arach/dev/linea",
+      "path": "~/dev/linea",
       "category": "Reading-first document app",
       "truth": "Reading-first experience — PDFs, scans, OCR, voice, document chat. Paper themes (Monochrome, Dusk, Paper). iOS + macOS + web moving to Hudson.",
       "audience": "Readers who want listen, explain, and chat on documents",
@@ -114,7 +114,7 @@
     {
       "id": "fabric",
       "name": "Fabric",
-      "path": "/Users/arach/dev/fabric",
+      "path": "~/dev/fabric",
       "category": "Agent sandbox runtime",
       "truth": "Lightweight sandboxes for agentic workloads — one Sandbox interface across local, Daytona, E2B, exe.dev. exec, runCode, snapshot, handoff.",
       "audience": "Agent builders needing portable compute envelopes",

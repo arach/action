@@ -1550,6 +1550,7 @@ function createServer(): Server {
         "Background is the supported drive mode; attention approval is not available yet.",
         "Treat action.record.start as asynchronous; completion is represented by action.record.status and the finished file.",
         "Prefer action.observe.snapshot and action.resolve.target before action.act.execute.",
+        "These tools are also how you control the user's regular Chrome: it is a native window like any other, observed through screen capture and accessibility. The action-browser plugin's DOM tools (browser_snapshot / click / fill / screenshot) reach only Action-owned Chrome identities, never the user's own browser.",
       ].join("\n"),
     },
   );

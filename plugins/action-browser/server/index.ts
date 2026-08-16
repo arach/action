@@ -23,6 +23,9 @@ import {
   shouldReuseCurrentTab,
 } from "./navigation.ts";
 
+// Keep in step with every plugin manifest. `bun run plugin:version` checks and sets this.
+const SERVER_VERSION = "0.2.0";
+
 type JsonObject = Record<string, unknown>;
 
 type JsonRpcRequest = {
@@ -204,24 +207,53 @@ async function loadCookieModule(): Promise<{
   return await import(modulePath);
 }
 
+// The three browsers an agent can end up talking to. Keep this list, the tool
+// descriptions, docs/browser-profiles.md, and the skill saying the same thing.
+const BROWSER_SURFACES = [
+  {
+    id: "regular-chrome",
+    label: "The user's regular Chrome",
+    what: "Their everyday browser and its real profiles (Default, Profile 1 / \"Work\", ...), with their tabs, history, extensions, and logins.",
+    reach: "browser_open with mode=regular opens a URL there and stops. No CDP, no DOM tools.",
+    control: "Action native screen + accessibility control: action.observe.snapshot, action.resolve.target, action.act.execute.",
+    why: "Chrome 136 and later ignore remote-debugging switches for the user's default data directory, and Action does not try to bypass that.",
+  },
+  {
+    id: "action-browser",
+    label: "An Action browser",
+    what: "A real, non-headless Chrome that Action owns, running on its own user-data-dir. The default identity agent-browser starts blank and signed into nothing.",
+    reach: "Full DOM tooling: browser_snapshot, browser_click, browser_fill, browser_screenshot, browser_tabs.",
+    control: "CDP on a private debug port, plus the optional Chrome Companion extension for richer observe/act.",
+    why: "Isolated from the user's browsing, so an agent can drive it without touching their session.",
+  },
+  {
+    id: "action-identity",
+    label: "An Action browser identity seeded from a regular Chrome profile",
+    what: "The same Action-owned Chrome under a named identity (for example work), carrying cookies copied from one of the user's real Chrome profiles for an explicit domain allowlist.",
+    reach: "Full DOM tooling, on pages the user is already signed in to.",
+    control: "browser_import_cookies to seed, browser_use_profile or browser_open profile to drive.",
+    why: "The way to get signed-in DOM control without automating the user's own browser.",
+  },
+] as const;
+
 const tools = [
   {
     name: "browser_profiles",
-    title: "List Action Browser Profiles",
-    description: "List named Action-owned Chrome identities under ChromeProfiles, plus the currently active profile. These are not your daily Chrome profiles.",
+    title: "List Action Browser Identities",
+    description: "List the Action browser identities on this machine (named Chrome profiles Action owns under ChromeProfiles) and which one is active. These are not the user's regular Chrome profiles. Only an Action browser can be driven with browser_snapshot / browser_click / browser_fill / browser_screenshot.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, idempotentHint: true },
   },
   {
     name: "browser_use_profile",
-    title: "Use Action Browser Profile",
-    description: "Switch the active Action Chrome identity (named profile under ChromeProfiles). Closes the previous Action Chrome if it was owned by this session. Does not attach to daily personal Chrome.",
+    title: "Use Action Browser Identity",
+    description: "Switch the active Action browser identity to a named profile. Any name is valid; an unknown name creates a fresh blank identity on first open. Closes the Action Chrome this session owned. This never attaches to the user's regular Chrome, which is driven through Action's native screen + accessibility tools instead.",
     inputSchema: {
       type: "object",
       properties: {
         profile: {
           type: "string",
-          description: "Action profile name, e.g. agent-browser, coding, mira.",
+          description: "Action browser identity name. agent-browser is the blank default. Use a descriptive name such as work for an identity seeded from a regular Chrome profile via browser_import_cookies.",
         },
       },
       required: ["profile"],
@@ -231,25 +263,25 @@ const tools = [
   },
   {
     name: "browser_profile_info",
-    title: "Current Browser Profile Info",
-    description: "Report the active Action profile path, cookies readiness, companion extension dist, and optional companion bridge health.",
+    title: "Current Browser Identity Info",
+    description: "Report the active Action browser identity: profile name, user-data-dir, whether it already has a cookie store, CDP port, companion extension dist, and optional companion bridge health.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, idempotentHint: true },
   },
   {
     name: "browser_import_cookies",
-    title: "Import Cookies Into Action Profile",
-    description: "Selectively copy cookies from personal Chrome into a named Action profile. Dry-run unless confirm=true. Prefer domain allowlists; never dumps the full jar by default.",
+    title: "Seed Action Browser Identity From Regular Chrome",
+    description: "Copy selected cookies from one of the user's regular Chrome profiles into an Action browser identity, so that identity is signed in for those domains and can still be driven with DOM tools. Dry-run unless confirm=true. Always scope with a domain allowlist; this never dumps the full cookie jar by default. Canonical example: source \"Profile 1\" (the directory behind the user's Work browser) into \"work\" with domains [\"github.com\"].",
     inputSchema: {
       type: "object",
       properties: {
         into: {
           type: "string",
-          description: "Target Action profile name. Defaults to the active profile.",
+          description: "Action browser identity to seed, e.g. work. Created on first open if it does not exist. Defaults to the active identity.",
         },
         source: {
           type: "string",
-          description: "Personal Chrome profile directory name (Default, Profile 1, ...). Defaults to most recently used.",
+          description: "Regular Chrome profile DIRECTORY name, not its display name: Default, Profile 1, Profile 2, ... A browser the user calls \"Work\" is usually the Profile 1 directory. Call with listSourceProfiles=true to map display names to directories. Defaults to the most recently used.",
         },
         domains: {
           type: "array",
@@ -267,7 +299,7 @@ const tools = [
         },
         listSourceProfiles: {
           type: "boolean",
-          description: "When true, list personal Chrome profiles and return.",
+          description: "When true, list the user's regular Chrome profiles (directory name plus display name) and return.",
         },
       },
       additionalProperties: false,
@@ -284,7 +316,7 @@ const tools = [
   {
     name: "browser_open",
     title: "Open Browser URL",
-    description: "Open a URL in controlled Action Chrome by default, or hand it off to the user's regular Chrome with mode=regular. Regular Chrome is visible and intentionally unavailable to Action Browser inspection, clicks, fills, and screenshots.",
+    description: "Open a URL in one of two different browsers. mode=action (default) uses an Action browser identity that this plugin can then snapshot, click, fill, and screenshot over CDP. mode=regular hands the URL to the user's own everyday Chrome: visible, already signed in as them, and deliberately not DOM-controllable — drive that window with Action's native screen + accessibility tools (action.observe.* then action.act.execute) instead. To get DOM control of a signed-in session, seed an Action identity with browser_import_cookies rather than reaching for mode=regular.",
     inputSchema: {
       type: "object",
       properties: {
@@ -292,11 +324,11 @@ const tools = [
         mode: {
           type: "string",
           enum: ["action", "regular"],
-          description: "Use controlled Action Chrome (default) or open-only regular Chrome. Regular mode never attaches automation to the personal profile.",
+          description: "action = Action browser identity with DOM tools (default). regular = open-only handoff to the user's normal Chrome; browser_snapshot / browser_click / browser_fill / browser_screenshot do not reach it.",
         },
         profile: {
           type: "string",
-          description: "Optional Action profile name to use for this session (e.g. coding, mira). Only valid in action mode.",
+          description: "Action mode only. Action browser identity to use, e.g. agent-browser (blank) or work (seeded from a regular Chrome profile). Created on first use.",
         },
         background: { type: "boolean", description: "Action mode only: keep Chrome hidden in the background. Defaults to true. Regular mode is always visible." },
         waitMs: { type: "number", description: "Action mode only: maximum time to wait for the page to become ready. Defaults to 15000." },
@@ -310,14 +342,14 @@ const tools = [
   {
     name: "browser_tabs",
     title: "List Action Browser Tabs",
-    description: "List open page tabs in the active Action Chrome profile.",
+    description: "List open page tabs in the active Action browser identity. Tabs in the user's regular Chrome are not visible here.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, idempotentHint: true },
   },
   {
     name: "browser_snapshot",
     title: "Inspect Browser Page",
-    description: "Read page metadata, visible text, and stable selectors for interactive elements.",
+    description: "Read page metadata, visible text, and stable selectors for interactive elements in the active Action browser. Does not reach pages opened with mode=regular; use action.observe.snapshot for those.",
     inputSchema: {
       type: "object",
       properties: {
@@ -332,7 +364,7 @@ const tools = [
   {
     name: "browser_click",
     title: "Click Browser Element",
-    description: "Click a DOM element by CSS selector or visible text in the isolated Chrome page.",
+    description: "Click a DOM element by CSS selector or visible text in the active Action browser. Does not reach pages opened with mode=regular; use action.act.execute for those.",
     inputSchema: {
       type: "object",
       properties: {
@@ -347,7 +379,7 @@ const tools = [
   {
     name: "browser_fill",
     title: "Fill Browser Field",
-    description: "Set the value of an input, textarea, select, or contenteditable element and dispatch input/change events.",
+    description: "Set the value of an input, textarea, select, or contenteditable element in the active Action browser and dispatch input/change events. Does not reach pages opened with mode=regular.",
     inputSchema: {
       type: "object",
       properties: {
@@ -363,7 +395,7 @@ const tools = [
   {
     name: "browser_screenshot",
     title: "Capture Browser Screenshot",
-    description: "Capture the current Chrome page as a PNG, save it locally, and return the image directly to the agent.",
+    description: "Capture the current Action browser page as a PNG, save it locally, and return the image directly to the agent. Does not reach pages opened with mode=regular; capture those with Action's native screen tools.",
     inputSchema: {
       type: "object",
       properties: {
@@ -379,7 +411,7 @@ const tools = [
   {
     name: "browser_close",
     title: "Close Browser Tab or Session",
-    description: "Close a tab in the isolated Action Chrome profile, or release this session's browser entirely.",
+    description: "Close a tab in the active Action browser identity, or release this session's browser entirely. Never closes anything in the user's regular Chrome.",
     inputSchema: {
       type: "object",
       properties: {
@@ -996,11 +1028,12 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
         profileRoot,
         current: { profile: profileName, profileDir, fixedProfileDir: Boolean(fixedProfileDir) },
         profiles: listActionProfilesOnDisk(),
+        surfaces: BROWSER_SURFACES,
         policy: {
-          default: "Action-owned named profiles under ChromeProfiles",
-          dailyChrome: "explicit opt-in only; not supported by browser_use_profile",
-          cookies: "seed with browser_import_cookies using domain allowlists",
-          companion: "load packages/chrome-companion/dist unpacked once per profile",
+          default: "Action browser identities (named profiles under ChromeProfiles)",
+          regularChrome: "open-only handoff via browser_open mode=regular; controlled with Action native screen + AX tools, never with CDP",
+          cookies: "seed an identity with browser_import_cookies using domain allowlists",
+          companion: "load packages/chrome-companion/dist unpacked once per identity",
         },
       });
 
@@ -1110,7 +1143,9 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
             profileVerified: false,
             automated: false,
           },
-          message: "Opened in regular Chrome. Action Browser cannot inspect, click, fill, or screenshot this personal-profile tab.",
+          message: "Opened in the user's regular Chrome. Action Browser cannot inspect, click, fill, or screenshot this tab.",
+          nativeControlPath: "Drive this window with Action's native macOS tools instead: action.observe.snapshot (screen + accessibility), action.resolve.target, action.act.execute.",
+          domControlAlternative: "For DOM-level control of a signed-in session, seed an Action identity: browser_import_cookies { into: \"work\", source: \"Profile 1\", domains: [...], confirm: true } then browser_open { url, profile: \"work\" }.",
         });
       }
       if (typeof args.profile === "string" && args.profile.trim()) {
@@ -1399,8 +1434,14 @@ async function handleRequest(request: JsonRpcRequest): Promise<JsonObject | unde
           result: {
             protocolVersion: String(request.params?.protocolVersion ?? "2025-06-18"),
             capabilities: { tools: { listChanged: false } },
-            serverInfo: { name: "action-browser", version: "0.1.0" },
-            instructions: "Action Browser uses named Action-owned Chrome profiles (not daily Chrome). Prefer browser_profiles / browser_use_profile for identity, browser_import_cookies with domain allowlists to seed logins, and browser_companion_status for the extension bridge. Fast path: browser_open → browser_screenshot.",
+            serverInfo: { name: "action-browser", version: SERVER_VERSION },
+            instructions: [
+              "Action Browser drives Action-owned Chrome identities, never the user's regular Chrome.",
+              "Three browsers exist. (1) The user's regular Chrome: browser_open mode=regular opens a URL there and nothing else; control it with Action's native screen + accessibility tools (action.observe.* then action.act.execute). (2) An Action browser: the default agent-browser identity, blank and isolated, with full DOM tools. (3) An Action browser identity seeded from a regular Chrome profile: same DOM tools, already signed in.",
+              "To act on a signed-in site, seed rather than hand off: browser_import_cookies { into: \"work\", source: \"Profile 1\", domains: [\"github.com\"] } to preview, again with confirm: true to write, then browser_open { url, profile: \"work\" }.",
+              "Fast path for anything public: browser_open → browser_screenshot.",
+              "browser_profiles lists identities and surfaces; browser_companion_status reports the extension bridge.",
+            ].join("\n"),
           },
         };
       case "ping":

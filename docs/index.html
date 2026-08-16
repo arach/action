@@ -12,6 +12,7 @@
   <meta property="og:image" content="https://arach.github.io/action/assets/brand/action-og.jpg">
   <meta property="og:url" content="https://arach.github.io/action/">
   <meta name="twitter:card" content="summary_large_image">
+  <link rel="alternate" type="text/plain" href="llms.txt" title="llms.txt">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -209,6 +210,33 @@
     .button:hover { transform: translateY(-2px); background: var(--coral); border-color: var(--coral); }
     .button.secondary { background: rgb(243 235 221 / 0.66); color: var(--ink); }
     .button.secondary:hover { background: var(--paper-light); color: var(--coral); border-color: var(--coral); }
+
+    .agent-entry {
+      max-width: 46ch;
+      margin: 22px 0 0;
+      padding: 12px 16px;
+      border-left: 2px solid var(--cyan);
+      background: rgb(250 245 235 / 0.7);
+      color: var(--slate);
+      font: 500 0.68rem/1.6 var(--mono);
+    }
+    .agent-entry a {
+      color: var(--ink);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .agent-entry a:hover { color: var(--coral); }
+
+    .nav-links a.nav-agents { color: var(--ink); }
+    .nav-links a.nav-agents::before {
+      content: "";
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin: 0 7px 1px 0;
+      border-radius: 50%;
+      background: var(--cyan);
+    }
 
     .hero-meta {
       display: flex;
@@ -673,6 +701,7 @@
       <ul class="nav-links">
         <li><a href="#install">Install</a></li>
         <li><a href="#demo">Demo</a></li>
+        <li><a class="nav-agents" href="agents/">For agents</a></li>
         <li><a href="https://github.com/arach/action">GitHub</a></li>
       </ul>
     </nav>
@@ -692,6 +721,9 @@
             <a class="button" href="#install">Install for agents <span aria-hidden="true">→</span></a>
             <a class="button secondary" href="#demo">Watch the capture</a>
           </div>
+          <p class="agent-entry">
+            Reading this as an agent? <a href="agents/">Start here</a> — capabilities, connection, and which browser to drive.
+          </p>
           <div class="hero-meta" aria-label="Project status">
             <span>macOS native</span>
             <span>local first</span>
@@ -953,6 +985,8 @@ claude plugin install action-browser@action --scope user</pre>
       <p>Action · native macOS automation, capture, and review.</p>
       <div class="footer-links">
         <a href="#install">Install plugin</a>
+        <a href="agents/">For agents</a>
+        <a href="llms.txt">llms.txt</a>
         <a href="getting-started.md">Getting started</a>
         <a href="ARCHITECTURE.md">Architecture</a>
         <a href="https://github.com/arach/action">GitHub</a>
