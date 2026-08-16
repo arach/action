@@ -4044,9 +4044,7 @@ struct ActionHostMain {
         let command = options.command ?? .launcher
 
         if command == .agent {
-            MainActor.assumeIsolated {
-                ActionAgentRuntime.run(arguments: CommandLine.arguments)
-            }
+            ActionAgentRuntime.run(arguments: CommandLine.arguments)
         }
 
         if runUICommandIfNeeded(command: command, options: options) {
