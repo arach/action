@@ -77,6 +77,9 @@ public enum ActionNativeAutomationError: LocalizedError {
     case applicationNotRunning(String)
     case accessibilityLookupFailed(String)
     case accessibilityActionFailed(String)
+    /// The app accepted a value write and the value did not end up applied. Distinct from a
+    /// failed action so a caller can tell "refused" from "silently ignored".
+    case accessibilityValueNotApplied(String)
     case dragPathNotFound(String)
 
     public var errorDescription: String? {
@@ -86,6 +89,8 @@ public enum ActionNativeAutomationError: LocalizedError {
         case .accessibilityLookupFailed(let detail):
             return detail
         case .accessibilityActionFailed(let detail):
+            return detail
+        case .accessibilityValueNotApplied(let detail):
             return detail
         case .dragPathNotFound(let path):
             return "Drag source path not found: \(path)"
@@ -328,18 +333,12 @@ public enum ActionNativeAutomation {
             preferWritableText: true
         )
 
-        let result = AXUIElementSetAttributeValue(
-            match.element,
-            kAXValueAttribute as CFString,
-            value as CFTypeRef
+        return try writeAccessibilityValue(
+            to: match.element,
+            depth: match.depth,
+            value: value,
+            describing: "\(bundleId) element \(label)"
         )
-        guard result == .success else {
-            throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Accessibility value update failed for \(bundleId) element \(label): \(result.rawValue)"
-            )
-        }
-
-        return snapshot(of: match.element, depth: match.depth)
     }
 
     public static func setFocusedAccessibilityValue(
@@ -369,18 +368,12 @@ public enum ActionNativeAutomation {
             )
         }
 
-        let result = AXUIElementSetAttributeValue(
-            element,
-            kAXValueAttribute as CFString,
-            value as CFTypeRef
+        return try writeAccessibilityValue(
+            to: element,
+            depth: 0,
+            value: value,
+            describing: "focused \(bundleId) element"
         )
-        guard result == .success else {
-            throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Accessibility value update failed for focused \(bundleId) element: \(result.rawValue)"
-            )
-        }
-
-        return snapshot(of: element, depth: 0)
     }
 
     public static func setAccessibilityRoleValue(
@@ -399,18 +392,76 @@ public enum ActionNativeAutomation {
             kAXFocusedAttribute as CFString,
             kCFBooleanTrue
         )
+
+        return try writeAccessibilityValue(
+            to: match.element,
+            depth: match.depth,
+            value: value,
+            describing: "first \(role) in \(bundleId)"
+        )
+    }
+
+    /// Writes `kAXValue`, then reads it back and refuses to call an ignored write a success.
+    ///
+    /// `AXUIElementSetAttributeValue` returning `.success` only means the app accepted the
+    /// message. A terminal's text area accepts the write and does nothing with it, which surfaced
+    /// as `act.execute {kind:"type"}` reporting `succeeded` with no text anywhere — the expensive
+    /// failure, because a wrong error costs a retry while a false success costs the recording.
+    ///
+    /// The read-back is polled: some apps apply the value on their next run loop turn, so a single
+    /// immediate read would report a working write as ignored.
+    private static func writeAccessibilityValue(
+        to element: AXUIElement,
+        depth: Int,
+        value: String,
+        describing target: String
+    ) throws -> ActionAccessibilityNodeSnapshot {
+        let before = readableAccessibilityValue(of: element)
         let result = AXUIElementSetAttributeValue(
-            match.element,
+            element,
             kAXValueAttribute as CFString,
             value as CFTypeRef
         )
         guard result == .success else {
             throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Accessibility value update failed for first \(role) in \(bundleId): \(result.rawValue)"
+                "Accessibility value update failed for \(target): \(result.rawValue)"
             )
         }
 
-        return snapshot(of: match.element, depth: match.depth)
+        // A secure field echoes bullets or nothing by design, so there is no read-back to judge.
+        if isSecureTextElement(element) {
+            return snapshot(of: element, depth: depth)
+        }
+
+        var observed = before
+        var verdict = ActionAccessibilityValueVerdict.unchanged
+        for attempt in 0..<accessibilityValueReadBackAttempts {
+            if attempt > 0 {
+                usleep(accessibilityValueReadBackIntervalUs)
+            }
+            observed = readableAccessibilityValue(of: element)
+            verdict = actionAccessibilityValueVerdict(
+                requested: value,
+                before: before,
+                observed: observed
+            )
+            if verdict == .matched {
+                break
+            }
+        }
+
+        guard verdict == .matched else {
+            throw ActionNativeAutomationError.accessibilityValueNotApplied(
+                actionAccessibilityValueFailureDetail(
+                    verdict: verdict,
+                    requested: value,
+                    observed: observed,
+                    describing: target
+                )
+            )
+        }
+
+        return snapshot(of: element, depth: depth)
     }
 
     public static func drag(from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
@@ -619,6 +670,34 @@ private func axValue(_ element: AXUIElement, attribute: String) -> AnyObject? {
     }
 
     return value
+}
+
+/// Read-back budget for a value write: six reads spaced 40ms apart, so an app that applies the
+/// value on its next run loop turn still gets confirmed, and a write that is being ignored costs
+/// about 200ms before it is reported.
+private let accessibilityValueReadBackAttempts = 6
+private let accessibilityValueReadBackIntervalUs: UInt32 = 40_000
+
+/// Reads `kAXValue` as text. Numeric values (sliders, steppers) are compared by their string form
+/// rather than treated as unreadable, so setting one is still verifiable.
+private func readableAccessibilityValue(of element: AXUIElement) -> String? {
+    let raw = axValue(element, attribute: kAXValueAttribute)
+    if let text = raw as? String {
+        return text
+    }
+    if let number = raw as? NSNumber {
+        return number.stringValue
+    }
+    return nil
+}
+
+private func isSecureTextElement(_ element: AXUIElement) -> Bool {
+    let role = axValue(element, attribute: kAXRoleAttribute) as? String
+    let subrole = axValue(element, attribute: kAXSubroleAttribute) as? String
+    // AppKit exposes this as a subrole constant only; the same string is the role a plain
+    // secure field reports, so both are checked against the literal.
+    let secureRole = "AXSecureTextField"
+    return role == secureRole || subrole == secureRole
 }
 
 private func axChildren(of element: AXUIElement) -> [AXUIElement] {
