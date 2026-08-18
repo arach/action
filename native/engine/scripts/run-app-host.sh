@@ -9,8 +9,16 @@ APP_DIR="$ROOT_DIR/native/dist/Action.app"
 APP_EXECUTABLE="$ROOT_DIR/native/dist/Action.app/Contents/MacOS/Action"
 COMMAND="${1:-status}"
 
-run_direct() {
-  exec "$APP_EXECUTABLE" "$@"
+# The agent performs every ScreenCaptureKit and Accessibility call the runtime makes,
+# so it has to carry the bundle's TCC identity. A direct exec of the binary does not:
+# TCC attributes the request to the responsible process it inherits from the calling
+# shell, so the agent saw both permissions as denied while `status` — launched through
+# LaunchServices a moment earlier from the same bundle — reported them granted. That
+# split is what made observe.snapshot fail with a permission error nobody could
+# reproduce anywhere else. Launch it the way the recording probe already does.
+# -g keeps the launch from stealing focus; the agent demotes itself to .accessory.
+run_agent_via_open() {
+  open -n -g "$APP_DIR" --args "$@" >/dev/null
 }
 
 run_via_open() {
@@ -62,7 +70,8 @@ if [[ $needs_build -eq 1 ]]; then
 fi
 
 if [[ "$COMMAND" == "agent" ]]; then
-  run_direct "$@"
+  run_agent_via_open "$@"
+  exit 0
 fi
 
 run_via_open "$@"
