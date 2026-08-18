@@ -18,6 +18,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
         let finishedSignalPath: String?
         let fps: Double
         let scale: Double
+        let includeSupervisionOverlay: Bool
     }
 
     private let logger = Logger(subsystem: "dev.action.Action", category: "RecordingProbe")
@@ -107,7 +108,8 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
                         stopSignalPath: configuration.stopSignalPath,
                         finishedSignalPath: configuration.finishedSignalPath,
                         fps: configuration.fps,
-                        scale: configuration.scale
+                        scale: configuration.scale,
+                        includeSupervisionOverlay: configuration.includeSupervisionOverlay
                     )
                 case .appWindow(let bundleId):
                     try await recorder.recordAppWindow(

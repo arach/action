@@ -464,7 +464,16 @@ public enum ActionNativeAutomation {
         return snapshot(of: element, depth: depth)
     }
 
-    public static func drag(from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
+    /// Press and release go through `ActionPointerChannel` so a drag is recorded — and optionally
+    /// shown — by exactly the same path as a click. The interpolated `leftMouseDragged` motion in
+    /// between stays here: it carries no button transition, so it is not a pointer event.
+    @discardableResult
+    public static func drag(
+        from start: CGPoint,
+        to end: CGPoint,
+        durationMs: Int = 300,
+        pointerEventLogPath: String? = nil
+    ) throws -> ActionPointerGesture {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")
         }
@@ -475,15 +484,13 @@ public enum ActionNativeAutomation {
         let deltaX = end.x - start.x
         let deltaY = end.y - start.y
 
-        CGWarpMouseCursorPosition(start)
-        usleep(10000)
-
-        guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
-              let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left) else {
-            throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create mouse drag events")
-        }
-
-        down.post(tap: .cghidEventTap)
+        let press = try ActionPointerChannel.beginPrimaryPress(
+            at: start,
+            gesture: .drag,
+            source: "drag",
+            eventSource: source,
+            log: ActionPointerEventLog.active(explicitPath: pointerEventLogPath)
+        )
         usleep(15000)
 
         for index in 1...steps {
@@ -500,7 +507,7 @@ public enum ActionNativeAutomation {
             usleep(stepDelayUs)
         }
 
-        up.post(tap: .cghidEventTap)
+        return try ActionPointerChannel.endPrimaryPress(press, at: end)
     }
 
     /// Scrolls at a screen point using pixel-unit scroll wheel events.
@@ -569,12 +576,24 @@ public enum ActionNativeAutomation {
         }
     }
 
-    public static func dragFile(path: String, from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
+    @discardableResult
+    public static func dragFile(
+        path: String,
+        from start: CGPoint,
+        to end: CGPoint,
+        durationMs: Int = 300,
+        pointerEventLogPath: String? = nil
+    ) throws -> ActionPointerGesture {
         guard FileManager.default.fileExists(atPath: path) else {
             throw ActionNativeAutomationError.dragPathNotFound(path)
         }
 
-        try drag(from: start, to: end, durationMs: durationMs)
+        return try drag(
+            from: start,
+            to: end,
+            durationMs: durationMs,
+            pointerEventLogPath: pointerEventLogPath
+        )
     }
 
     public static func calculatorDisplayValue() throws -> String {

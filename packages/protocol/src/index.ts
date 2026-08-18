@@ -369,6 +369,8 @@ export interface DriveLease {
   outcome?: DriveOutcome | "expired";
   summary?: string;
   implicit?: boolean;
+  showSupervisionLabel?: boolean;
+  pointerControl?: boolean;
   stopFile: string;
   lastAxTier?: AxActionTier;
 }
@@ -687,11 +689,76 @@ export interface GuidedSessionEvent<TPayload extends Record<string, unknown> = R
   payload: TPayload;
 }
 
+/**
+ * Visible feedback for Action-driven clicks. Off by default: a recording shows nothing beyond the
+ * normal macOS pointer unless the operator opts in here. Enabling it never replaces or hides the
+ * system cursor — it adds one short pulse at the press point.
+ */
+export interface ClickFeedbackConfig {
+  enabled: boolean;
+  /** Only "pulse" exists today. */
+  style?: "pulse";
+  /** Lifetime of one pulse. Defaults to 320ms. */
+  durationMs?: number;
+  /** Outer radius the pulse expands to, in points. Defaults to 34. */
+  radius?: number;
+}
+
+/** Phase of a pointer button transition. Intermediate drag motion is not a pointer event. */
+export type PointerEventPhase = "down" | "up";
+
+/**
+ * One row of a recording's `<recordingId>.pointer-events.jsonl` artifact, written natively by the
+ * same code path that posts the CGEvent. The visible pulse is rendered from these same rows, so
+ * the metadata and the pixels describe one event rather than two.
+ */
+export interface PointerEventRecord {
+  kind: "pointer";
+  recordingId: string;
+  sessionId?: string;
+  /** Shared by the down and up of one gesture. */
+  correlationId: string;
+  gesture: "click" | "drag";
+  phase: PointerEventPhase;
+  button: "left" | "right";
+  /** CoreGraphics global screen coordinates, origin top-left — the space the event was posted in. */
+  x: number;
+  y: number;
+  /** Monotonic milliseconds since the recording's pointer log was opened. */
+  recordingElapsedMs: number;
+  /** Wall-clock ISO 8601 with fractional seconds. */
+  at: string;
+  /** Raw macOS system uptime at the post, so elapsed time can be re-derived. */
+  uptime: number;
+  /** Measured press duration; present on "up" only. */
+  holdMs?: number;
+  /** Which Action surface posted it, e.g. "click-point" or "drag". */
+  source: string;
+}
+
+/** First line of the pointer event log. Carries the clock every later row is relative to. */
+export interface PointerEventLogHeader {
+  kind: "header";
+  version: number;
+  recordingId: string;
+  sessionId?: string;
+  startedAt: string;
+  startedAtUptime: number;
+  feedback: {
+    enabled: boolean;
+    style: string;
+    durationMs: number;
+    radius: number;
+  };
+}
+
 export interface CaptureStartRequest {
   sessionId: string;
   outputPath: string;
   viewport?: StageViewport;
   profile?: CaptureProfile;
+  /** Opt-in visible click feedback for this capture. Absent means off. */
+  clickFeedback?: ClickFeedbackConfig;
 }
 
 export interface CaptureEngine {

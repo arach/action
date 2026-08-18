@@ -36,6 +36,9 @@ export interface DriveBeginInput {
   mode?: DriveMode;
   sessionId?: string;
   implicit?: boolean;
+  showSupervisionLabel?: boolean;
+  /** Opt in to attention-tier control (pointer drags, coordinate targeting). */
+  pointerControl?: boolean;
 }
 
 export interface DriveBeginResult {
@@ -80,6 +83,8 @@ export class DriveAgentClient {
       mode: input.mode ?? "background",
       sessionId: input.sessionId,
       implicit: input.implicit === true ? "true" : undefined,
+      showSupervisionLabel: input.showSupervisionLabel === false ? "false" : "true",
+      pointerControl: input.pointerControl === true ? "true" : "false",
     });
     return {
       status: result.status === "denied" ? "denied" : "granted",

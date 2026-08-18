@@ -67,9 +67,9 @@ final class AgentCursorOverlayController: NSObject {
     private static let iso8601Format = Date.ISO8601FormatStyle()
     private static let fractionalISO8601Format = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
-    /// Resting counter-clockwise lean keeps the mark from reading like an upright arrow.
-    private let brandLean: CGFloat = -11.0 * .pi / 180.0
-    /// Bicycle micro-sway layered on top of brand lean (radians).
+    /// Familiar macOS pointer angle: the arrow points counter-clockwise toward the upper-left.
+    private let brandLean: CGFloat = -22.0 * .pi / 180.0
+    /// Restrained operator-only motion, layered on top of the pointer angle.
     private var leanAngle: CGFloat = 0
     private var leanVelocity: CGFloat = 0
 
@@ -538,11 +538,8 @@ final class AgentCursorOverlayView: NSView {
     private static let brandPaper = NSColor(calibratedRed: 0.953, green: 0.922, blue: 0.867, alpha: 1)
     private static let brandCanvas = NSColor(calibratedRed: 0.055, green: 0.071, blue: 0.074, alpha: 0.88)
 
-    /// Tip is the hotspot. Slightly A-like: taller, more oblique base, soft concave edge.
-    private static let triangleHeight: CGFloat = 21
-    private static let halfWidth: CGFloat = 8.2
-    /// Stronger left bias so the mark reads like a slanted A, not a UI chevron.
-    private static let asymmetry: CGFloat = 1.15
+    /// Tip is the hotspot; dimensions stay close to the standard macOS pointer.
+    private static let triangleHeight: CGFloat = 19
 
     var model: AgentCursorRenderModel?
 
@@ -731,7 +728,7 @@ final class AgentCursorOverlayView: NSView {
             segment.stroke()
 
             segment.lineWidth = width
-            Self.brandCoralHot.withAlphaComponent(alpha).setStroke()
+            NSColor.white.withAlphaComponent(alpha * 0.72).setStroke()
             segment.stroke()
         }
     }
@@ -749,53 +746,27 @@ final class AgentCursorOverlayView: NSView {
             )
         )
         path.lineWidth = CGFloat(1.7 - 0.8 * progress)
-        Self.brandCoral.withAlphaComponent(alpha).setStroke()
+        NSColor.black.withAlphaComponent(alpha).setStroke()
         path.stroke()
     }
 
     private func drawTriangle(at point: CGPoint, lean: CGFloat) {
         let h = Self.triangleHeight
-        let half = Self.halfWidth
-        // The hotspot remains at the visual tip, but a short Bézier shoulder avoids
-        // the needle-like point that became harsh at HUD scale.
-        let tipLeft = CGPoint(x: -1.35, y: -1.7)
-        let tipRight = CGPoint(x: 1.55, y: -1.9)
-        // A-lean silhouette: left leg a touch longer, base slightly skewed.
-        let left = CGPoint(x: -half - Self.asymmetry, y: -h)
-        let right = CGPoint(x: half - Self.asymmetry * 0.55, y: -h * 0.94)
-        // Concave base — soft, product-y, not a hard glyph.
-        let baseY = -h * 0.74
-
         let path = NSBezierPath()
-        path.move(to: tipLeft)
-        path.curve(
-            to: tipRight,
-            controlPoint1: CGPoint(x: -0.75, y: -0.45),
-            controlPoint2: CGPoint(x: 0.65, y: -0.45)
-        )
-        path.line(to: right)
-        path.curve(
-            to: left,
-            controlPoint1: CGPoint(x: right.x - half * 0.28, y: baseY + 0.4),
-            controlPoint2: CGPoint(x: left.x + half * 0.42, y: baseY)
-        )
-        path.line(to: tipLeft)
+        path.move(to: .zero)
+        path.line(to: CGPoint(x: 0, y: -h))
+        path.line(to: CGPoint(x: 4.8, y: -14.2))
+        path.line(to: CGPoint(x: 8.2, y: -20.2))
+        path.line(to: CGPoint(x: 11.0, y: -18.5))
+        path.line(to: CGPoint(x: 7.6, y: -12.7))
+        path.line(to: CGPoint(x: 14.4, y: -11.9))
         path.close()
         path.lineJoinStyle = .round
         path.lineCapStyle = .round
 
-        // Tiny crossbar hint (the A bar) — very light, only reads up close.
-        let bar = NSBezierPath()
-        let barY = -h * 0.48
-        bar.move(to: CGPoint(x: left.x * 0.38, y: barY))
-        bar.line(to: CGPoint(x: right.x * 0.42, y: barY + 0.35))
-        bar.lineWidth = 1.15
-        bar.lineCapStyle = .round
-
         var transform = AffineTransform(translationByX: point.x, byY: point.y)
         transform.rotate(byRadians: lean)
         path.transform(using: transform)
-        bar.transform(using: transform)
 
         NSGraphicsContext.saveGraphicsState()
         let ambient = NSShadow()
@@ -813,32 +784,12 @@ final class AgentCursorOverlayView: NSView {
         contact.shadowOffset = CGSize(width: 0, height: -1.0)
         contact.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.32)
         contact.set()
-        Self.brandCoral.withAlphaComponent(0.98).setFill()
+        NSColor.black.withAlphaComponent(0.98).setFill()
         path.fill()
         NSGraphicsContext.restoreGraphicsState()
-
-        if let gradient = NSGradient(colors: [
-            Self.brandCoralHot.withAlphaComponent(0.62),
-            Self.brandCoral.withAlphaComponent(0.0),
-        ]) {
-            NSGraphicsContext.saveGraphicsState()
-            path.addClip()
-            gradient.draw(in: path.bounds, angle: 250)
-            NSGraphicsContext.restoreGraphicsState()
-        }
-
-        // Warm paper edge — brand paper, not pure white.
-        Self.brandPaper.withAlphaComponent(0.92).setStroke()
-        path.lineWidth = 1.05
+        NSColor.white.withAlphaComponent(0.96).setStroke()
+        path.lineWidth = 1.35
         path.stroke()
-
-        NSColor(calibratedWhite: 0.05, alpha: 0.26).setStroke()
-        path.lineWidth = 0.55
-        path.stroke()
-
-        // Crossbar in paper tone at low opacity — A suggestion without logo noise.
-        Self.brandPaper.withAlphaComponent(0.42).setStroke()
-        bar.stroke()
     }
 
     /// Angular metal plaque — thin grotesque/mono type, near-sharp corners, brushed surface.

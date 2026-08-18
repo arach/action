@@ -311,7 +311,9 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 task: request.params["task"] ?? "",
                 mode: request.params["mode"],
                 sessionID: request.params["sessionId"],
-                implicit: request.params["implicit"] == "true"
+                implicit: request.params["implicit"] == "true",
+                showSupervisionLabel: request.params["showSupervisionLabel"] != "false",
+                pointerControl: request.params["pointerControl"] == "true"
             )
             var response = [
                 "status": result.status,
@@ -392,7 +394,8 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 finishedSignalPath: request.params["finishedFile"],
                 debugLogPath: request.params["debugLog"],
                 fps: request.params["fps"].flatMap(Double.init) ?? 15,
-                scale: request.params["scale"].flatMap(Double.init) ?? 1
+                scale: request.params["scale"].flatMap(Double.init) ?? 1,
+                includeSupervisionOverlay: request.params["includeSupervisionOverlay"] != "false"
             )
         case .screenshotAppWindow:
             guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {

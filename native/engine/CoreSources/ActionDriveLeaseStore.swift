@@ -40,8 +40,18 @@ struct ActionDriveLease: Codable, Equatable, Sendable {
     var outcome: String?
     var summary: String?
     var implicit: Bool?
+    var showSupervisionLabel: Bool?
     var stopFile: String
     var lastAxTier: String?
+    /// Explicit opt-in to attention-tier control (pointer drags, coordinate
+    /// targeting) on a background lease.
+    ///
+    /// Some real work has no accessibility element to aim at — dragging a
+    /// selection rectangle across the desktop is coordinate-only by nature.
+    /// Prohibiting it entirely made those flows impossible, so the caller
+    /// declares the need up front instead. The flag rides on the lease, so the
+    /// supervision surface can show that this driver holds pointer control.
+    var pointerControl: Bool?
 }
 
 struct ActionDriveBeginResult: Sendable {
@@ -62,7 +72,14 @@ private struct ActionStoredDriveLease: Codable, Sendable {
 }
 
 actor ActionDriveLeaseStore {
-    static let idleExpiry: TimeInterval = 90
+    /// Idle window before a lease is swept.
+    ///
+    /// Was 90s, which is shorter than a single realistic step: waiting on a
+    /// text-to-speech call, a build, or a screen recording all blow past it, and
+    /// the driver only finds out via "Unknown lease" on the next call. The
+    /// maximum duration below is the real safety bound; this is just a
+    /// disconnect detector.
+    static let idleExpiry: TimeInterval = 300
     static let maximumDuration: TimeInterval = 30 * 60
     static let terminalRetention: TimeInterval = 8
 
@@ -113,7 +130,9 @@ actor ActionDriveLeaseStore {
         task rawTask: String,
         mode rawMode: String?,
         sessionID rawSessionID: String?,
-        implicit: Bool
+        implicit: Bool,
+        showSupervisionLabel: Bool = true,
+        pointerControl: Bool = false
     ) throws -> ActionDriveBeginResult {
         let at = now()
         try sweep(at: at)
@@ -153,8 +172,10 @@ actor ActionDriveLeaseStore {
                 outcome: "cancelled",
                 summary: reason,
                 implicit: implicit ? true : nil,
+                showSupervisionLabel: showSupervisionLabel,
                 stopFile: stopFile,
-                lastAxTier: nil
+                lastAxTier: nil,
+                pointerControl: pointerControl ? true : nil
             )
             let record = ActionStoredDriveLease(ownerID: ownerID, lease: lease)
             records[leaseID] = record
@@ -175,8 +196,10 @@ actor ActionDriveLeaseStore {
             outcome: nil,
             summary: nil,
             implicit: implicit ? true : nil,
+            showSupervisionLabel: showSupervisionLabel,
             stopFile: stopFile,
-            lastAxTier: nil
+            lastAxTier: nil,
+            pointerControl: pointerControl ? true : nil
         )
         let record = ActionStoredDriveLease(ownerID: ownerID, lease: lease)
         records[leaseID] = record
@@ -204,7 +227,9 @@ actor ActionDriveLeaseStore {
         guard var record = try resolveActiveRecord(ownerID: ownerID, leaseID: leaseID) else {
             return nil
         }
-        if axTier == "attention" && record.lease.mode != "attention" {
+        if axTier == "attention"
+            && record.lease.mode != "attention"
+            && record.lease.pointerControl != true {
             throw ActionDriveLeaseError.attentionApprovalRequired
         }
 
@@ -400,6 +425,10 @@ actor ActionDriveLeaseStore {
 
     private func publishPresence(for lease: ActionDriveLease, at: Date) throws {
         guard publishesPresence else {
+            return
+        }
+        guard lease.showSupervisionLabel != false else {
+            ActionDrivePresencePublisher.remove(leaseID: lease.leaseId)
             return
         }
         try ActionDrivePresencePublisher.publish(

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { DriverIdentityContext } from "./driver-identity.js";
+import { DriveCursorPresenter, parseDriveCursorStyle } from "./drive-cursor-presenter.js";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -21,6 +22,7 @@ import type {
   DriveLease,
   DriveMode,
   DriveOutcome,
+  ClickFeedbackConfig,
   ResolvedTarget,
   RuntimeAction,
   SessionMode,
@@ -36,13 +38,18 @@ import {
   MacOSCommandEngine,
   ocrScreenshot,
   pointFromBounds,
+  publishPointerEventLog,
+  readPointerEventLog,
   revalidatePointerFocusLease,
   requiresPointerFocusWarning,
   runPointerFocusCountdown,
   searchOCRText,
   startAgentCursor,
+  startPointerEventLog,
   stopAgentCursor,
+  stopPointerEventLog,
   updateAgentCursor,
+  type PointerEventLogHandle,
 } from "@action/runtime";
 
 export const toolFamilies = [
@@ -82,6 +89,10 @@ interface RecordingEntry {
   nativeDetail?: string;
   bundleId?: string;
   bounds?: Bounds;
+  /** Path to this recording's pointer event artifact, written by the native click path. */
+  pointerEventLog?: string;
+  /** Whether the operator opted in to a visible pulse for each Action-driven click. */
+  clickFeedback?: boolean;
 }
 
 const execFileAsync = promisify(execFile);
@@ -93,8 +104,13 @@ const nativeHostPath = resolve(
 );
 const driveClient = new DriveAgentClient({ launcherPath: nativeHostPath });
 const driverIdentity = new DriverIdentityContext();
-const activeCursorLeaseIDs = new Set<string>();
+const cursorPresenter = new DriveCursorPresenter({
+  start: async ({ lease, label }) => startAgentCursor({ nativeHostPath, lease, label }),
+  update: updateAgentCursor,
+  stop: stopAgentCursor,
+});
 const activeRecordings = new Map<string, RecordingEntry>();
+const activePointerEventLogs = new Map<string, PointerEventLogHandle>();
 
 function now(): string {
   return new Date().toISOString();
@@ -386,50 +402,8 @@ async function heartbeatDrive(input: {
     axTier: input.axTier,
     actionKind: input.actionKind,
   }]);
-  await renewAgentCursor(lease);
+  await cursorPresenter.renew(lease);
   return lease;
-}
-
-async function ensureAgentCursor(lease: DriveLease): Promise<void> {
-  try {
-    if (activeCursorLeaseIDs.has(lease.leaseId)) {
-      await renewAgentCursor(lease);
-      return;
-    }
-    await startAgentCursor({
-      nativeHostPath,
-      lease,
-      label: lease.task,
-    });
-    activeCursorLeaseIDs.add(lease.leaseId);
-  } catch {
-    // Cursor presence is presentation. The native lease remains authoritative.
-  }
-}
-
-async function renewAgentCursor(lease: DriveLease): Promise<void> {
-  if (!activeCursorLeaseIDs.has(lease.leaseId)) {
-    return;
-  }
-  try {
-    await updateAgentCursor({
-      leaseId: lease.leaseId,
-      agent: lease.agent,
-      label: lease.task,
-      phase: "idle",
-    });
-  } catch {
-    activeCursorLeaseIDs.delete(lease.leaseId);
-  }
-}
-
-async function releaseAgentCursor(leaseId: string): Promise<void> {
-  activeCursorLeaseIDs.delete(leaseId);
-  try {
-    await stopAgentCursor(leaseId);
-  } catch {
-    // The native lease stop marker is the independent shutdown path.
-  }
 }
 
 async function ensureDriveLeaseForAct(input: {
@@ -477,7 +451,7 @@ async function ensureDriveLeaseForAct(input: {
     axTier: input.axTier,
     actionKind: input.actionKind,
   }]);
-  await ensureAgentCursor(lease);
+  await cursorPresenter.ensure(lease);
   return lease;
 }
 
@@ -505,7 +479,7 @@ async function presentActCue(input: {
 
     if (kind === "type") {
       const text = String(input.action.input?.text ?? description);
-      await updateAgentCursor({
+      await cursorPresenter.update({
         leaseId: input.lease.leaseId,
         agent: input.lease.agent,
         point: safePoint,
@@ -516,7 +490,7 @@ async function presentActCue(input: {
       });
       const holdMs = Math.min(3200, 420 + text.length * 55);
       setTimeout(() => {
-        void updateAgentCursor({
+        void cursorPresenter.update({
           leaseId: input.lease.leaseId,
           agent: input.lease.agent,
           phase: "idle",
@@ -532,7 +506,7 @@ async function presentActCue(input: {
         : [];
       const key = String(input.action.input?.key ?? keys.at(-1) ?? "key");
       const chord = (keys.length > 1 ? keys : [key]).join(" + ");
-      await updateAgentCursor({
+      await cursorPresenter.update({
         leaseId: input.lease.leaseId,
         agent: input.lease.agent,
         point: safePoint,
@@ -542,7 +516,7 @@ async function presentActCue(input: {
         cueId,
       });
       setTimeout(() => {
-        void updateAgentCursor({
+        void cursorPresenter.update({
           leaseId: input.lease.leaseId,
           agent: input.lease.agent,
           phase: "idle",
@@ -552,7 +526,7 @@ async function presentActCue(input: {
       return;
     }
 
-    await updateAgentCursor({
+    await cursorPresenter.update({
       leaseId: input.lease.leaseId,
       agent: input.lease.agent,
       point: safePoint,
@@ -562,7 +536,7 @@ async function presentActCue(input: {
     });
     if (safePoint) {
       setTimeout(() => {
-        void updateAgentCursor({
+        void cursorPresenter.update({
           leaseId: input.lease.leaseId,
           agent: input.lease.agent,
           phase: "idle",
@@ -769,6 +743,9 @@ const tools: Tool[] = [
       task: textProperty("Short description of the work shown to the operator."),
       mode: enumProperty(["background", "attention"], "Drive mode. Background is the supported default; attention approval is not available yet."),
       sessionId: textProperty("Optional Action session id for drive artifacts."),
+      showSupervisionLabel: booleanProperty("Show the driver identity label to the operator. Defaults to true."),
+      pointerControl: booleanProperty("Allow pointer drags and coordinate targeting on this background lease. Some work has no accessibility element to aim at \u2014 dragging a selection rectangle is coordinate-only by nature. Defaults to false; the lease records the grant so supervision can show it."),
+      cursorStyle: enumProperty(["synthetic", "system"], "Cursor presentation. Defaults to synthetic; system uses the normal macOS cursor."),
     }, ["agent", "task"]),
     { readOnlyHint: false, idempotentHint: false },
   ),
@@ -883,6 +860,10 @@ const tools: Tool[] = [
       bundleId: textProperty("Bundle id for app-window recording."),
       bounds: objectProperty("Bounds for region recording: x, y, width, height."),
       profile: enumProperty(["draft", "final"], "Region recording quality profile. Defaults to draft."),
+      includeSupervisionOverlay: booleanProperty("Include the operator supervision label in recorded pixels. Defaults to true; false keeps it visible only to the operator."),
+      clickFeedback: booleanProperty("Show a short pulse at each Action-driven click. Defaults to false. The normal macOS cursor is preserved either way; click metadata is recorded either way."),
+      clickFeedbackDurationMs: numberProperty("Lifetime of one click pulse in milliseconds. Defaults to 320."),
+      clickFeedbackRadius: numberProperty("Outer radius the click pulse expands to, in points. Defaults to 34."),
     }),
     { readOnlyHint: false, idempotentHint: false },
   ),
@@ -1030,6 +1011,8 @@ const handlers: Record<string, ToolHandler> = {
       task,
       mode: parseDriveMode(args.mode),
       sessionId: optionalString(args.sessionId),
+      showSupervisionLabel: optionalBoolean(args.showSupervisionLabel) ?? true,
+      pointerControl: optionalBoolean(args.pointerControl) ?? false,
     });
     if (result.status === "denied") {
       return {
@@ -1051,7 +1034,8 @@ const handlers: Record<string, ToolHandler> = {
       sessionId: result.lease.sessionId,
       implicit: result.lease.implicit,
     }]);
-    await ensureAgentCursor(result.lease);
+    cursorPresenter.recordStyle(result.lease.leaseId, parseDriveCursorStyle(args.cursorStyle));
+    await cursorPresenter.ensure(result.lease);
     return {
       ok: true,
       status: result.status,
@@ -1070,7 +1054,7 @@ const handlers: Record<string, ToolHandler> = {
       outcome: parseDriveOutcome(args.outcome),
       summary: optionalString(args.summary),
     });
-    await releaseAgentCursor(lease.leaseId);
+    await cursorPresenter.release(lease.leaseId);
     await persistDriveSession(lease, [{
       type: "drive.lease_released",
       at: lease.releasedAt ?? lease.lastActAt,
@@ -1091,9 +1075,9 @@ const handlers: Record<string, ToolHandler> = {
     const drivingIDs = new Set(
       snapshot.leases.filter((lease) => lease.status === "driving").map((lease) => lease.leaseId),
     );
-    for (const leaseId of activeCursorLeaseIDs) {
+    for (const leaseId of cursorPresenter.presentingLeaseIDs()) {
       if (!drivingIDs.has(leaseId)) {
-        await releaseAgentCursor(leaseId);
+        await cursorPresenter.release(leaseId);
       }
     }
     const leaseId = optionalString(args.leaseId);
@@ -1282,7 +1266,7 @@ const handlers: Record<string, ToolHandler> = {
 
     let pointerFocusWarningShown = false;
     if (
-      activeCursorLeaseIDs.has(lease.leaseId)
+      cursorPresenter.isPresenting(lease.leaseId)
       && requiresPointerFocusWarning({ action, target, axTier, channel })
     ) {
       const bounds = target?.bounds;
@@ -1314,9 +1298,9 @@ const handlers: Record<string, ToolHandler> = {
       onLeaseEnded: async () => {
         // The native terminal transition owns the lease stop signal; only forget
         // the local presentation handle so we do not recreate an orphan marker.
-        activeCursorLeaseIDs.delete(lease.leaseId);
+        cursorPresenter.forget(lease.leaseId);
       },
-      onCheckFailed: async () => releaseAgentCursor(lease.leaseId),
+      onCheckFailed: async () => cursorPresenter.release(lease.leaseId),
     });
 
     // performAction throws for anything it could not carry out — including an action kind the
@@ -1327,7 +1311,7 @@ const handlers: Record<string, ToolHandler> = {
     } catch (error) {
       if (pointerFocusWarningShown) {
         try {
-          await updateAgentCursor({
+          await cursorPresenter.update({
             leaseId: lease.leaseId,
             agent: lease.agent,
             phase: "idle",
@@ -1394,6 +1378,25 @@ const handlers: Record<string, ToolHandler> = {
     await rm(finishedFile, { force: true });
     await rm(debugLog, { force: true });
 
+    const clickFeedback: ClickFeedbackConfig = {
+      enabled: optionalBoolean(args.clickFeedback) ?? false,
+      style: "pulse",
+      durationMs: optionalNumber(args.clickFeedbackDurationMs),
+      radius: optionalNumber(args.clickFeedbackRadius),
+    };
+    // Opened before the recorder so a click in the first frames is already covered, and published
+    // to the environment so every host subprocess this server spawns records into it.
+    const pointerLog = await startPointerEventLog({
+      runHost: (command, ...hostArgs) => runHost(command, ...hostArgs),
+      nativeHostPath,
+      outputPath,
+      recordingId,
+      sessionId,
+      clickFeedback,
+    });
+    activePointerEventLogs.set(recordingId, pointerLog);
+    await publishPointerEventLog(pointerLog.path);
+
     let nativeResponse: JsonObject;
     let bundleId = optionalString(args.bundleId);
     let bounds: Bounds | undefined;
@@ -1411,9 +1414,9 @@ const handlers: Record<string, ToolHandler> = {
         stopFile,
         "--finished-file",
         finishedFile,
-        "--debug-log",
-        debugLog,
-      );
+      "--debug-log",
+      debugLog,
+    );
     } else if (scope === "app-window") {
       if (!bundleId) {
         throw new Error("bundleId is required for app-window recording");
@@ -1445,9 +1448,11 @@ const handlers: Record<string, ToolHandler> = {
         "--height",
         String(bounds.height),
         "--fps",
-        profile === "final" ? "30" : "15",
+        profile === "final" ? "60" : "15",
         "--scale",
         profile === "final" ? "1" : "0.75",
+        "--include-supervision-overlay",
+        String(optionalBoolean(args.includeSupervisionOverlay) ?? true),
         "--output",
         outputPath,
         "--stop-file",
@@ -1472,6 +1477,8 @@ const handlers: Record<string, ToolHandler> = {
       nativeDetail: optionalString(nativeResponse.detail),
       bundleId,
       bounds,
+      pointerEventLog: pointerLog.path,
+      clickFeedback: pointerLog.feedbackEnabled,
     };
     activeRecordings.set(recordingId, entry);
     await persistRecording(entry);
@@ -1481,6 +1488,13 @@ const handlers: Record<string, ToolHandler> = {
       status: "recording-started",
       recording: entry,
       nativeResponse,
+      pointerEvents: {
+        path: pointerLog.path,
+        clickFeedback: pointerLog.feedbackEnabled,
+        note: pointerLog.feedbackEnabled && scope !== "region"
+          ? "Click feedback is drawn as a screen overlay. Only the region scope records the whole display, so app-window and current-surface captures will not contain the pulse."
+          : "Every Action-driven click and drag press/release is appended to this JSONL artifact.",
+      },
       completion: {
         note: "Recording start is an acknowledgement only. Use action.record.status or the finishedFile marker for completion.",
         finishedFile,
@@ -1500,14 +1514,34 @@ const handlers: Record<string, ToolHandler> = {
     await mkdir(dirname(entry.stopFile), { recursive: true });
     await writeFile(entry.stopFile, "stop\n");
 
+    // Clicks after this belong to no recording, and the pulse has nothing left to appear in.
+    const pointerLog = activePointerEventLogs.get(entry.recordingId);
+    if (pointerLog) {
+      await stopPointerEventLog(pointerLog);
+      activePointerEventLogs.delete(entry.recordingId);
+    }
+    await publishPointerEventLog(undefined);
+
     const status = wait
       ? await waitForRecordingFinished(entry, timeoutMs)
       : await statusForRecording(entry);
+
+    const pointerEvents = entry.pointerEventLog
+      ? await readPointerEventLog(entry.pointerEventLog)
+      : undefined;
 
     return {
       ok: true,
       stopRequested: true,
       ...status,
+      pointerEvents: entry.pointerEventLog
+        ? {
+            path: entry.pointerEventLog,
+            clickFeedback: entry.clickFeedback === true,
+            eventCount: pointerEvents?.events.length ?? 0,
+            startedAt: pointerEvents?.header?.startedAt,
+          }
+        : undefined,
     };
   },
 
