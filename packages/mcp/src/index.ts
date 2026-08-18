@@ -842,6 +842,7 @@ const tools: Tool[] = [
       color: textProperty("Sheet color as RRGGBB. Defaults to 0e0d0a."),
       level: enumProperty(["normal", "desktop"], "normal (default) can be beaten by AXRaise. desktop sits under all app windows."),
       bounds: objectProperty("Optional top-left region { x, y, width, height }. Omit to cover every screen."),
+      seconds: numberProperty("Optional lifetime. The drape dismisses itself when it expires. Omit to keep it up until action.stage.clear or until this server exits."),
       subjects: {
         type: "array",
         description: "Windows to raise above the sheet. Each item is { bundleId, title? }.",
@@ -1593,6 +1594,10 @@ const handlers: Record<string, ToolHandler> = {
       level: optionalString(args.level),
       bounds: args.bounds,
       subjects: args.subjects,
+      seconds: optionalNumber(args.seconds),
+      // This server outlives the call, so the drape can watch it and dismiss itself if
+      // the server dies before action.stage.clear runs.
+      owner: "caller",
     });
     return { ok: true, stage: status };
   },

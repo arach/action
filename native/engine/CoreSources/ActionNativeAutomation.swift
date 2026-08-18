@@ -133,8 +133,20 @@ public enum ActionNativeAutomation {
         let app = try runningApplication(bundleId: bundleId)
         let application = AXUIElementCreateApplication(app.processIdentifier)
 
-        guard let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
-              !windows.isEmpty else {
+        // AXWindows often fails the Swift `[AXUIElement]` cast (it arrives as a CFArray),
+        // and a freshly launched host can see an empty list for a tick. Walk every
+        // known source — attribute, children, focused/main — before giving up.
+        var windows = collectWindows(of: application)
+        if windows.isEmpty {
+            for _ in 0..<8 {
+                usleep(50_000)
+                windows = collectWindows(of: application)
+                if !windows.isEmpty {
+                    break
+                }
+            }
+        }
+        guard !windows.isEmpty else {
             throw ActionNativeAutomationError.accessibilityLookupFailed(
                 "No accessibility windows found for \(bundleId)"
             )
@@ -161,10 +173,22 @@ public enum ActionNativeAutomation {
         let window = windows[match]
         _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
         let raise = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-        guard raise == .success else {
-            throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Failed to raise window \"\(titles[match])\" in \(bundleId): \(raise.rawValue)"
+        if raise != .success {
+            // Some windows advertise AXRaise and then refuse it. Calculator returns
+            // kAXErrorAttributeUnsupported (-25205). Mark the window main and bring
+            // the app forward so that window is the one that lands above a same-level
+            // drape. This can also lift sibling windows of the same app.
+            _ = AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            let front = AXUIElementSetAttributeValue(
+                application,
+                kAXFrontmostAttribute as CFString,
+                kCFBooleanTrue
             )
+            guard front == .success else {
+                throw ActionNativeAutomationError.accessibilityActionFailed(
+                    "Failed to raise window \"\(titles[match])\" in \(bundleId): raise=\(raise.rawValue) frontmost=\(front.rawValue)"
+                )
+            }
         }
 
         return titles[match]
@@ -694,6 +718,63 @@ private func axValue(_ element: AXUIElement, attribute: String) -> AnyObject? {
     }
 
     return value
+}
+
+private func collectWindows(of application: AXUIElement) -> [AXUIElement] {
+    var seen = Set<ObjectIdentifier>()
+    var windows: [AXUIElement] = []
+
+    func append(_ element: AXUIElement) {
+        let id = ObjectIdentifier(element)
+        guard !seen.contains(id) else { return }
+        seen.insert(id)
+        windows.append(element)
+    }
+
+    for element in axElementArray(application, attribute: kAXWindowsAttribute) {
+        append(element)
+    }
+    for child in axChildren(of: application) {
+        let role = axValue(child, attribute: kAXRoleAttribute) as? String
+        if role == (kAXWindowRole as String) {
+            append(child)
+        }
+    }
+    for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+        if let raw = axValue(application, attribute: attribute),
+           CFGetTypeID(raw) == AXUIElementGetTypeID() {
+            append(unsafeDowncast(raw, to: AXUIElement.self))
+        }
+    }
+    return windows
+}
+
+/// `AXWindows` arrives as a CFArray of AXUIElements. The Swift `as? [AXUIElement]`
+/// cast loses that array, which is why raise-window saw no windows while inspect
+/// still found the focused one.
+private func axElementArray(_ element: AXUIElement, attribute: String) -> [AXUIElement] {
+    var value: CFTypeRef?
+    let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+    guard error == .success, let value else {
+        return []
+    }
+    if let windows = value as? [AXUIElement] {
+        return windows
+    }
+    guard CFGetTypeID(value) == CFArrayGetTypeID() else {
+        return []
+    }
+    let array = value as! CFArray
+    var windows: [AXUIElement] = []
+    let count = CFArrayGetCount(array)
+    windows.reserveCapacity(count)
+    for index in 0..<count {
+        guard let pointer = CFArrayGetValueAtIndex(array, index) else { continue }
+        let element = unsafeBitCast(pointer, to: AXUIElement.self)
+        guard CFGetTypeID(element) == AXUIElementGetTypeID() else { continue }
+        windows.append(element)
+    }
+    return windows
 }
 
 /// Read-back budget for a value write: six reads spaced 40ms apart, so an app that applies the

@@ -442,11 +442,31 @@ export interface StageWorld {
   level: StageDrapeLevel;
   bounds?: Bounds;
   subjects: StageSubject[];
+  /**
+   * Wall-clock lifetime in seconds. The drape dismisses itself when it expires.
+   * Omitted means the drape stays up until `stage.clear` or until its owner dies,
+   * which is only a real backstop when the owner outlives the call (see `owner`).
+   */
+  seconds?: number;
 }
+
+/**
+ * Who the drape dies with.
+ *
+ * - `caller`: the drape watches the calling process and dismisses itself when that
+ *   process goes away. Correct for a long-lived host such as the MCP server.
+ * - `detached`: nothing to watch. Correct for a one-shot CLI invocation, which exits
+ *   the moment it has put the drape up — a `caller`-owned drape would take itself
+ *   down within one poll interval. Pair it with `seconds` so a forgotten drape still
+ *   expires on its own.
+ */
+export type StageOwner = "caller" | "detached";
 
 export interface StageWorldStatus extends StageWorld {
   active: boolean;
   pid?: number;
+  owner: StageOwner;
+  ownerPid?: number;
   stopFile?: string;
   raised: Array<StageSubject & { title: string }>;
 }

@@ -8,6 +8,7 @@ import Foundation
 /// and they land above the sheet; everything else stays buried. Same level is what
 /// makes AXRaise able to beat it. `--level desktop` sits under app windows instead.
 /// `--space space` keeps the sheet on the current Space only.
+@MainActor
 final class ActionDrapeController: NSObject {
     private let color: NSColor
     private let levelMode: String
@@ -59,6 +60,8 @@ final class ActionDrapeController: NSObject {
             if spaceMode != "space" {
                 behavior.insert(.canJoinAllSpaces)
             }
+            window.title = "Action Drape"
+            window.animationBehavior = .none
             window.collectionBehavior = behavior
             window.orderFrontRegardless()
             windows.append(window)
@@ -68,7 +71,9 @@ final class ActionDrapeController: NSObject {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
             source.setEventHandler { [weak self] in
-                self?.shutdown()
+                Task { @MainActor in
+                    self?.shutdown()
+                }
             }
             source.resume()
             signalSources.append(source)
@@ -76,12 +81,16 @@ final class ActionDrapeController: NSObject {
 
         if lifetime > 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + lifetime) { [weak self] in
-                self?.shutdown()
+                Task { @MainActor in
+                    self?.shutdown()
+                }
             }
         }
 
         let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
-            self?.tick()
+            Task { @MainActor in
+                self?.tick()
+            }
         }
         pollTimer = timer
         RunLoop.main.add(timer, forMode: .common)
@@ -116,7 +125,16 @@ final class ActionDrapeController: NSObject {
             window.orderOut(nil)
         }
         windows.removeAll()
-        NSApplication.shared.stop(nil)
+
+        // `NSApplication.stop` only sets a flag that the event loop checks after it
+        // dequeues the next event. This process is an .accessory app whose only window
+        // ignores mouse events, so no next event ever arrives and `app.run()` never
+        // returns: the sheet came down but the process stayed alive holding a window
+        // server connection, `stage status` kept reporting it active, and SIGTERM could
+        // not kill it because the handler above routes SIGTERM here. A drape has no
+        // state to flush, so leaving is the whole teardown.
+        logger.log("drape: down")
+        Darwin.exit(0)
     }
 
     /// Top-left origin, same space as screencapture and Action region recording.

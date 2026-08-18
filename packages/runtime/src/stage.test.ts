@@ -38,6 +38,17 @@ describe("parseStageWorld", () => {
     assert.equal(parseStageWorld({ mode: "space" }).mode, "space");
   });
 
+  test("space mode reports the level it actually launches with", () => {
+    assert.equal(parseStageWorld({ mode: "space", level: "desktop" }).level, "normal");
+  });
+
+  test("carries an optional lifetime and rejects a nonsense one", () => {
+    assert.equal(parseStageWorld({ seconds: 900 }).seconds, 900);
+    assert.equal(parseStageWorld({}).seconds, undefined);
+    assert.throws(() => parseStageWorld({ seconds: 0 }), /seconds must be a positive number/);
+    assert.throws(() => parseStageWorld({ seconds: "soon" }), /seconds must be a positive number/);
+  });
+
   test("rejects a wallpaper-shaped color", () => {
     assert.throws(() => normalizeHexColor("not-a-color"), /Invalid stage color/);
   });

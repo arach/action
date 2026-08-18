@@ -26,7 +26,16 @@ run_via_open() {
   local attempt
   reply_file=$(mktemp "${TMPDIR:-/tmp}/action-host.XXXXXX")
 
-  open -n "$APP_DIR" --args "$@" --reply-file "$reply_file" >/dev/null
+  # The drape must not steal focus. open(1) without -g activates Action, and a
+  # later raise-window instance exiting can hand activation back to the still-
+  # running drape — burying the subject that was just put on the sheet.
+  # raise-window itself cannot use -g: a background Action process sees an
+  # empty AX window list, so the raise would never land.
+  local open_flags=(-n)
+  if [[ "$COMMAND" == "drape" ]]; then
+    open_flags+=(-g)
+  fi
+  open "${open_flags[@]}" "$APP_DIR" --args "$@" --reply-file "$reply_file" >/dev/null
 
   for attempt in {1..100}; do
     if [[ -s "$reply_file" ]]; then
