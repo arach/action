@@ -277,6 +277,12 @@ export class MacOSCommandEngine implements CaptureEngine {
       paths.stopPath,
       "--debug-log",
       paths.logPath,
+      // clearStage is the normal way the drape comes down, but it never runs if this
+      // process is killed. The overlay is launched through open(1), so it is not our
+      // child and nothing else will take it down. Give it our pid so it can dismiss
+      // itself rather than leaving an opaque sheet over the operator's screen.
+      "--parent-pid",
+      String(process.pid),
       ...(this.enableStageControls ? ["--control-file", paths.controlPath] : []),
     );
     const response = JSON.parse(stdout) as { detail?: string };

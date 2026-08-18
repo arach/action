@@ -142,9 +142,14 @@ public enum ActionNativeAutomation {
 
         let titles = windows.map { stringValue(axValue($0, attribute: kAXTitleAttribute)) ?? "" }
         let needle = title.lowercased()
-        let match = titles.firstIndex(of: title)
-            ?? titles.firstIndex { $0.lowercased() == needle }
-            ?? titles.firstIndex { $0.lowercased().contains(needle) }
+        let match: Int?
+        if title.isEmpty {
+            match = titles.indices.first
+        } else {
+            match = titles.firstIndex(of: title)
+                ?? titles.firstIndex { $0.lowercased() == needle }
+                ?? titles.firstIndex { $0.lowercased().contains(needle) }
+        }
 
         guard let match else {
             let available = titles.filter { !$0.isEmpty }.map { "\"\($0)\"" }.joined(separator: ", ")

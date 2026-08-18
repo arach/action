@@ -37,6 +37,7 @@ import {
   inspectCurrentSurface,
   MacOSCommandEngine,
   ocrScreenshot,
+  StageDirector,
   pointFromBounds,
   publishPointerEventLog,
   readPointerEventLog,
@@ -59,6 +60,7 @@ export const toolFamilies = [
   "observe",
   "resolve",
   "act",
+  "stage",
   "record",
   "artifacts",
   "compose",
@@ -103,6 +105,7 @@ const nativeHostPath = resolve(
   process.env.ACTION_NATIVE_HOST ?? resolve(actionRoot, "native/engine/scripts/run-app-host.sh"),
 );
 const driveClient = new DriveAgentClient({ launcherPath: nativeHostPath });
+const stageDirector = new StageDirector(nativeHostPath);
 const driverIdentity = new DriverIdentityContext();
 const cursorPresenter = new DriveCursorPresenter({
   start: async ({ lease, label }) => startAgentCursor({ nativeHostPath, lease, label }),
@@ -831,6 +834,44 @@ const tools: Tool[] = [
     { readOnlyHint: true, idempotentHint: true },
   ),
   tool(
+    "action.stage.set",
+    "Set Stage",
+    "Declare what the world should look like for a take. Puts up a flat color drape and raises only the listed windows above it. Does not write the wallpaper, hide apps, or change Spaces unless mode is space (sheet stays on the current Space).",
+    objectSchema({
+      mode: enumProperty(["drape", "space"], "drape (default) buries other windows under a same-level sheet. space keeps the sheet on this Space only."),
+      color: textProperty("Sheet color as RRGGBB. Defaults to 0e0d0a."),
+      level: enumProperty(["normal", "desktop"], "normal (default) can be beaten by AXRaise. desktop sits under all app windows."),
+      bounds: objectProperty("Optional top-left region { x, y, width, height }. Omit to cover every screen."),
+      subjects: {
+        type: "array",
+        description: "Windows to raise above the sheet. Each item is { bundleId, title? }.",
+        items: {
+          type: "object",
+          properties: {
+            bundleId: { type: "string" },
+            title: { type: "string" },
+          },
+          required: ["bundleId"],
+        },
+      },
+    }),
+    { readOnlyHint: false, idempotentHint: true },
+  ),
+  tool(
+    "action.stage.clear",
+    "Clear Stage",
+    "Take the drape down. Subject windows stay where they are.",
+    objectSchema(),
+    { readOnlyHint: false, idempotentHint: true },
+  ),
+  tool(
+    "action.stage.status",
+    "Stage Status",
+    "Read whether a drape is up, its pid, and which windows were last raised.",
+    objectSchema(),
+    { readOnlyHint: true, idempotentHint: true },
+  ),
+  tool(
     "action.act.execute",
     "Execute Action",
     "Execute a deterministic runtime action. Prefer resolved targets over raw coordinates.",
@@ -1545,6 +1586,27 @@ const handlers: Record<string, ToolHandler> = {
     };
   },
 
+  async "action.stage.set"(args) {
+    const status = await stageDirector.set({
+      mode: optionalString(args.mode),
+      color: optionalString(args.color),
+      level: optionalString(args.level),
+      bounds: args.bounds,
+      subjects: args.subjects,
+    });
+    return { ok: true, stage: status };
+  },
+
+  async "action.stage.clear"() {
+    const status = await stageDirector.clear();
+    return { ok: true, stage: status };
+  },
+
+  async "action.stage.status"() {
+    const status = await stageDirector.status();
+    return { ok: true, stage: status };
+  },
+
   async "action.artifacts.list"(args) {
     const outputDir = resolve(
       actionRoot,
@@ -1584,6 +1646,7 @@ function createServer(): Server {
         "Background is the supported drive mode; attention approval is not available yet.",
         "Treat action.record.start as asynchronous; completion is represented by action.record.status and the finished file.",
         "Prefer action.observe.snapshot and action.resolve.target before action.act.execute.",
+        "Use action.stage.set to declare the world for a take: a color drape plus the windows that sit on it. Never write the desktop picture.",
       ].join("\n"),
     },
   );

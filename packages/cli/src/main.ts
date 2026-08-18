@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
 import { compileScenario } from "@action/compiler";
-import { CompanionClient, inspectCurrentSurface, settleCurrentSurfaceViewport } from "@action/runtime";
+import { CompanionClient, inspectCurrentSurface, settleCurrentSurfaceViewport, StageDirector } from "@action/runtime";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { runScenarioGuidedCaptureDemo } from "./index.js";
 import { loadScenario } from "./scenarios.js";
@@ -146,6 +148,46 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  if (command === "stage") {
+    const nativeHostPath = resolve(
+      process.env.ACTION_NATIVE_HOST
+        ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../native/engine/scripts/run-app-host.sh"),
+    );
+    const director = new StageDirector(nativeHostPath);
+    if (arg === "set") {
+      const subjects = (flags.subjects ?? flags.subject ?? "")
+        .split(",")
+        .map((token) => token.trim())
+        .filter((token) => token.length > 0)
+        .map((token) => {
+          const [bundleId, title] = token.split(":");
+          return title ? { bundleId, title } : { bundleId };
+        });
+      const status = await director.set({
+        mode: flags.mode,
+        color: flags.color,
+        level: flags.level,
+        subjects,
+        bounds: flags.x
+          ? {
+              x: requiredNumber(flags, "x"),
+              y: requiredNumber(flags, "y"),
+              width: requiredNumber(flags, "width"),
+              height: requiredNumber(flags, "height"),
+            }
+          : undefined,
+      });
+      printJson({ ok: true, stage: status });
+      return;
+    }
+    if (arg === "clear") {
+      printJson({ ok: true, stage: await director.clear() });
+      return;
+    }
+    printJson({ ok: true, stage: await director.status() });
+    return;
+  }
+
   if (command === "settle" && arg === "current-surface") {
     const result = await settleCurrentSurfaceViewport({
       targetViewport: {
@@ -163,6 +205,9 @@ async function main(argv: string[]): Promise<void> {
 
   printJson({
     commands: [
+      "bun packages/cli/src/main.ts stage set [--mode drape|space] [--color RRGGBB] [--level normal|desktop] [--subjects bundleId:title,bundleId]",
+      "bun packages/cli/src/main.ts stage clear",
+      "bun packages/cli/src/main.ts stage status",
       "bun packages/cli/src/main.ts inspect current-surface [--direct] [--mock] [--no-ocr] [--vision] [--vision-provider minimax|moondream] [--vision-prompt <prompt>]",
       "bun packages/cli/src/main.ts vision log [--session-id <id>] [--limit <n>]",
       "bun packages/cli/src/main.ts companion status",

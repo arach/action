@@ -30,6 +30,7 @@
     "release:ship": "scripts/ship-release",
     "media:chroma-window": "bun scripts/chroma-window-video.mjs",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "check:no-wallpaper-writes": "zsh scripts/check-no-wallpaper-writes.sh",
     "docs:generate": "dewey generate",
     "docs:agent": "dewey agent",
     "docs:audit": "dewey audit",

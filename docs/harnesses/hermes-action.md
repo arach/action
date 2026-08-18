@@ -38,6 +38,9 @@ ACTION_ROOT=/Users/art/dev/action
 - `action.observe.ax`
 - `action.resolve.target`
 - `action.act.execute`
+- `action.stage.set`
+- `action.stage.clear`
+- `action.stage.status`
 - `action.record.start`
 - `action.record.status`
 - `action.record.stop`

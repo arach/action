@@ -417,6 +417,40 @@ export type GuidedSessionPhase = (typeof guidedSessionPhases)[number];
 
 export type BackdropPreset = "neutral" | "spotlight" | "studio" | "gradient" | "matte";
 
+/**
+ * How Action stages the screen for a take.
+ *
+ * - `drape`: a flat color sheet at ordinary window level. AXRaise the listed
+ *   subjects and they land above it; everything else stays buried. Same level
+ *   is what makes AXRaise able to beat the sheet. Wallpaper is never written.
+ * - `space`: same sheet, but it stays on the current Space only. Other Spaces
+ *   are untouched. Instantiate subjects on this Space rather than adopting
+ *   windows that live elsewhere.
+ */
+export type StageMode = "drape" | "space";
+
+export type StageDrapeLevel = "normal" | "desktop";
+
+export interface StageSubject {
+  bundleId: string;
+  title?: string;
+}
+
+export interface StageWorld {
+  mode: StageMode;
+  color: string;
+  level: StageDrapeLevel;
+  bounds?: Bounds;
+  subjects: StageSubject[];
+}
+
+export interface StageWorldStatus extends StageWorld {
+  active: boolean;
+  pid?: number;
+  stopFile?: string;
+  raised: Array<StageSubject & { title: string }>;
+}
+
 export interface TargetApp {
   name: string;
   bundleId: string;

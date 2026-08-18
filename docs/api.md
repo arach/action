@@ -64,6 +64,7 @@ Fields:
 | `settings.openAccessibility` | open Accessibility settings pane | none |
 | `settings.openScreenRecording` | open Screen Recording settings pane | none |
 | `app.activate` | bring an app forward | `bundleId` |
+| `drape` / `raise-window` | host commands behind `action.stage.set` | color, level, subjects |
 | `window.setFrame` | move/resize an app window | `bundleId`, `x`, `y`, `width`, `height` |
 | `window.getFrame` | inspect current app window frame | `bundleId` |
 | `capture.recordAppWindow` | record a target app window | `bundleId`, `output`, optional `stopFile`, `finishedFile`, `debugLog` |

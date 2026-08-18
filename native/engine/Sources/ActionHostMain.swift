@@ -41,6 +41,8 @@ enum ActionHostCommand: String {
     case supervisionOverlay = "supervision-overlay"
     case supervisorStop = "supervisor-stop"
     case stageOverlay = "stage-overlay"
+    case drape
+    case raiseWindow = "raise-window"
     case demoCursorOverlay = "demo-cursor-overlay"
     case agentCursorOverlay = "agent-cursor-overlay"
     case clickFeedbackOverlay = "click-feedback-overlay"
@@ -3170,6 +3172,7 @@ final class StageOverlayController: NSObject {
     private let writer: ResponseWriter
     private let logger: DebugLogger
     private let controlFile: String?
+    private let parentProcessID: pid_t?
     private var overlayWindow: NSWindow?
     private var controlWindow: StageHUDPanel?
     private var overlayView: StageOverlayView?
@@ -3179,12 +3182,20 @@ final class StageOverlayController: NSObject {
     private var currentPhase: String = "staging"
     private var supervisionRegistrationID: String?
 
-    init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?, controlFile: String?) {
+    init(
+        stateFile: String,
+        stopFile: String,
+        replyFile: String?,
+        debugLogPath: String?,
+        controlFile: String?,
+        parentProcessID: pid_t?
+    ) {
         self.stateFile = stateFile
         self.stopFile = stopFile
         self.writer = ResponseWriter(replyFile: replyFile)
         self.logger = DebugLogger(path: debugLogPath)
         self.controlFile = controlFile
+        self.parentProcessID = parentProcessID
     }
 
     func run() throws {
@@ -3329,6 +3340,18 @@ final class StageOverlayController: NSObject {
     private func tick() {
         if FileManager.default.fileExists(atPath: stopFile) {
             logger.log("stage-overlay: stop signal received")
+            shutdown()
+            return
+        }
+
+        // The drape is an opaque sheet over the operator's screen, and it is launched
+        // through open(1), so it is not a child of the runtime and the OS will not reap
+        // it. The stop file is written by clearStage, which a crashed or killed
+        // orchestrator never reaches — leaving the desktop covered with no way to
+        // dismiss it and no indication of what put it there. Outliving the process that
+        // asked for it is the one thing a drape must not do.
+        if let parentProcessID, kill(parentProcessID, 0) != 0 {
+            logger.log("stage-overlay: orchestrator \(parentProcessID) is gone, dismissing")
             shutdown()
             return
         }
@@ -3523,6 +3546,8 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         throw ActionHostError.unsupportedOS("webkit-smoke should be started via runUICommand")
     case .stageOverlay:
         throw ActionHostError.unsupportedOS("stage-overlay should be started via runUICommand")
+    case .drape:
+        throw ActionHostError.unsupportedOS("drape should be started via runUICommand")
     case .demoCursorOverlay:
         throw ActionHostError.unsupportedOS("demo-cursor-overlay should be started via runUICommand")
     case .agentCursorOverlay:
@@ -3749,6 +3774,23 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
                 status: "focused",
                 outputPath: nil,
                 detail: focusedTitle.map { "\(bundleId): \($0)" } ?? bundleId
+            )
+        )
+    case .raiseWindow:
+        let bundleId = try options.required("bundle-id")
+        let requestedTitle = options.options["title"].flatMap { $0.isEmpty ? nil : $0 }
+        let raisedTitle: String
+        if let requestedTitle {
+            raisedTitle = try ActionNativeAutomation.raiseWindow(bundleId: bundleId, matching: requestedTitle)
+        } else {
+            raisedTitle = try ActionNativeAutomation.raiseWindow(bundleId: bundleId, matching: "")
+        }
+        logger.log("raise-window: bundle=\(bundleId) title=\(raisedTitle)")
+        try writer.write(
+            ActionHostResponse(
+                status: "raised",
+                outputPath: nil,
+                detail: "\(bundleId): \(raisedTitle)"
             )
         )
     case .requestApplicationActivation:
@@ -4171,6 +4213,17 @@ struct ActionHostMain {
                 }
             }
             return true
+        case .drape:
+            MainActor.assumeIsolated {
+                do {
+                    let controller = try ActionDrapeController(options: options)
+                    try controller.run()
+                } catch {
+                    FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                    Darwin.exit(1)
+                }
+            }
+            return true
         case .stageOverlay:
             let stateFile: String
             let stopFile: String
@@ -4190,7 +4243,8 @@ struct ActionHostMain {
                     stopFile: stopFile,
                     replyFile: replyFile,
                     debugLogPath: debugLogPath,
-                    controlFile: controlFile
+                    controlFile: controlFile,
+                    parentProcessID: options.options["parent-pid"].flatMap { pid_t($0) }
                 )
                 do {
                     try controller.run()
