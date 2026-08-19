@@ -13,6 +13,11 @@ struct ActionSupervisionRegistration: Codable {
     let updatedAt: String
 }
 
+private struct ActionSupervisionNote: Codable {
+    let at: String
+    let line: String
+}
+
 enum ActionSupervisionRegistry {
     private static let driveIdleExpirySeconds: TimeInterval = 90
     private static let encoder: JSONEncoder = {
@@ -39,6 +44,149 @@ enum ActionSupervisionRegistry {
 
     static var overlayStopSignalURL: URL {
         baseDirectoryURL.appendingPathComponent("overlay.stop")
+    }
+
+    static var notesURL: URL {
+        baseDirectoryURL.appendingPathComponent("notes.jsonl")
+    }
+
+    private struct PlayHudFilter: Codable {
+        var show: Bool?
+        var events: [String]?
+    }
+
+    private struct PlayLogEvent: Codable {
+        var event: String
+        var play: String?
+        var index: Int?
+        var of: Int?
+        var `do`: String?
+        var detail: String?
+        var ms: Int?
+        var error: String?
+    }
+
+    private static let defaultPlayHudEvents: Set<String> = [
+        "play-start",
+        "step-start",
+        "step-fail",
+        "play-fail",
+        "play-ok",
+    ]
+
+    private static var playsDirectoryURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Action/runtime/plays", isDirectory: true)
+    }
+
+    /// Filtered play-log lines for the HUD. The files always record every event;
+    /// `hud-filter.json` chooses what Action shows.
+    static func recentHudLines(limit: Int = 4) -> [String] {
+        let filter = loadPlayHudFilter()
+        if filter.show {
+            let playLines = recentPlayLines(limit: limit, allowed: filter.events)
+            if !playLines.isEmpty {
+                return playLines
+            }
+        }
+        return recentNotes(limit: limit)
+    }
+
+    private static func loadPlayHudFilter() -> (show: Bool, events: Set<String>) {
+        let url = playsDirectoryURL.appendingPathComponent("hud-filter.json")
+        guard let data = try? Data(contentsOf: url),
+              let parsed = try? JSONDecoder().decode(PlayHudFilter.self, from: data) else {
+            return (true, defaultPlayHudEvents)
+        }
+        let show = parsed.show ?? true
+        let events = Set((parsed.events?.isEmpty == false ? parsed.events : nil) ?? Array(defaultPlayHudEvents))
+        return (show, events)
+    }
+
+    private static func recentPlayLines(limit: Int, allowed: Set<String>) -> [String] {
+        let url = playsDirectoryURL.appendingPathComponent("current.jsonl")
+        guard let raw = try? String(contentsOf: url, encoding: .utf8), !raw.isEmpty else {
+            return []
+        }
+        let decoder = JSONDecoder()
+        var lines: [String] = []
+        for row in raw.split(whereSeparator: \.isNewline) {
+            guard let data = String(row).data(using: .utf8),
+                  let event = try? decoder.decode(PlayLogEvent.self, from: data),
+                  allowed.contains(event.event) else {
+                continue
+            }
+            let line = displayLine(for: event)
+            if !line.isEmpty {
+                lines.append(line)
+            }
+        }
+        if lines.count > limit {
+            return Array(lines.suffix(limit))
+        }
+        return lines
+    }
+
+    private static func displayLine(for event: PlayLogEvent) -> String {
+        switch event.event {
+        case "play-start":
+            let count = event.of.map(String.init) ?? "0"
+            return "\(event.play ?? "play") · \(count) steps"
+        case "play-ok":
+            return "\(event.play ?? "play") · done"
+        case "play-fail":
+            if let error = event.error, !error.isEmpty {
+                return "\(event.play ?? "play") · failed: \(error)"
+            }
+            return "\(event.play ?? "play") · failed"
+        case "step-fail":
+            let n = stepIndex(event)
+            let verb = event.do ?? "step"
+            if let error = event.error, !error.isEmpty {
+                return "\(n) fail \(verb): \(error)"
+            }
+            return "\(n) fail \(verb)"
+        case "step-ok":
+            let n = stepIndex(event)
+            let verb = event.do ?? "step"
+            if let ms = event.ms {
+                return "\(n) \(verb) \(ms)ms"
+            }
+            return "\(n) \(verb)"
+        default:
+            let n = stepIndex(event)
+            return "\(n) \(event.do ?? "step")"
+        }
+    }
+
+    private static func stepIndex(_ event: PlayLogEvent) -> String {
+        guard let index = event.index, let of = event.of else {
+            return "?"
+        }
+        return "\(index + 1)/\(of)"
+    }
+
+    static func recentNotes(limit: Int = 4) -> [String] {
+        guard let raw = try? String(contentsOf: notesURL, encoding: .utf8), !raw.isEmpty else {
+            return []
+        }
+
+        let decoder = JSONDecoder()
+        var lines: [String] = []
+        for row in raw.split(whereSeparator: \.isNewline) {
+            guard let data = String(row).data(using: .utf8),
+                  let note = try? decoder.decode(ActionSupervisionNote.self, from: data) else {
+                continue
+            }
+            let line = note.line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !line.isEmpty {
+                lines.append(line)
+            }
+        }
+        if lines.count > limit {
+            return Array(lines.suffix(limit))
+        }
+        return lines
     }
 
     static func register(

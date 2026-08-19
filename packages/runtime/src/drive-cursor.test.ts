@@ -6,6 +6,7 @@ import {
   POINTER_FOCUS_COUNTDOWN_SECONDS,
   POINTER_FOCUS_COUNTDOWN_STEP_MS,
   agentCursorExpiration,
+  cursorTravelMs,
   pointFromBounds,
   revalidatePointerFocusLease,
   requiresPointerFocusWarning,
@@ -111,5 +112,13 @@ describe("agent cursor lifecycle", () => {
       /agent disconnected/,
     );
     assert.equal(cleanupCalls, 1);
+  });
+
+  test("waits for the overlay warp before the next act", () => {
+    assert.equal(cursorTravelMs({ x: 10, y: 10 }, { x: 10, y: 10 }), 80);
+    assert.equal(cursorTravelMs(undefined, { x: 10, y: 10 }), 220);
+    const far = cursorTravelMs({ x: 0, y: 0 }, { x: 2000, y: 0 });
+    assert.equal(far, 470);
+    assert.ok(far > cursorTravelMs({ x: 0, y: 0 }, { x: 100, y: 0 }));
   });
 });
