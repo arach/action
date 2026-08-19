@@ -1634,6 +1634,18 @@ const handlers: Record<string, ToolHandler> = {
   },
 };
 
+/** Grok (and the MCP 2025 name grammar) reject dots in tool names. Keep the
+ *  action.* names for Hermes; also publish health / observe_snapshot / … */
+const specToolAliases: Record<string, string> = {};
+for (const existing of [...tools]) {
+  const alias = existing.name.replace(/^action\./, "").replaceAll(".", "_");
+  if (alias === existing.name) {
+    continue;
+  }
+  specToolAliases[alias] = existing.name;
+  tools.push({ ...existing, name: alias });
+}
+
 function createServer(): Server {
   const server = new Server(
     {
@@ -1642,7 +1654,7 @@ function createServer(): Server {
     },
     {
       capabilities: {
-        tools: {},
+        tools: { listChanged: true },
       },
       instructions: [
         "Call action.driver.identify once when the connection label is not already supplied by the environment.",
@@ -1662,9 +1674,11 @@ function createServer(): Server {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const handler = handlers[request.params.name];
+    const requested = request.params.name;
+    const canonical = specToolAliases[requested] ?? requested;
+    const handler = handlers[canonical];
     if (!handler) {
-      return mcpError(`Unknown tool: ${request.params.name}`);
+      return mcpError(`Unknown tool: ${requested}`);
     }
 
     try {
