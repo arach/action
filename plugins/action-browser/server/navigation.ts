@@ -40,6 +40,18 @@ type NavigationInput = {
   pageText?: string;
 };
 
+export type BrowserOpenMode = "action" | "regular";
+
+export function browserOpenMode(value: unknown): BrowserOpenMode {
+  if (value === undefined || value === "action") return "action";
+  if (value === "regular") return "regular";
+  throw new Error("mode must be either action or regular.");
+}
+
+export function regularChromeLaunchArgs(chromeAppName: string, url: string): string[] {
+  return ["/usr/bin/open", "-n", "-a", chromeAppName, url];
+}
+
 export function shouldReuseCurrentTab(input: {
   currentTargetId?: string;
   newTab?: boolean;

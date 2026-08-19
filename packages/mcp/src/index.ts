@@ -1665,6 +1665,7 @@ function createServer(): Server {
         "Treat action.record.start as asynchronous; completion is represented by action.record.status and the finished file.",
         "Prefer action.observe.snapshot and action.resolve.target before action.act.execute.",
         "Use action.stage.set to declare the world for a take: a color drape plus the windows that sit on it. Never write the desktop picture.",
+        "These tools are also how you control the user's regular Chrome: it is a native window like any other, observed through screen capture and accessibility. The action-browser plugin's DOM tools (browser_snapshot / click / fill / screenshot) reach only Action-owned Chrome identities, never the user's own browser.",
       ].join("\n"),
     },
   );

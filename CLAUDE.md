@@ -4,10 +4,10 @@ This repo has agent-oriented documentation generated with Dewey.
 
 Read first:
 
-- [AGENTS.md](/Users/arach/dev/action/AGENTS.md)
-- [docs/overview.agent.md](/Users/arach/dev/action/docs/overview.agent.md)
-- [docs/native-runtime.agent.md](/Users/arach/dev/action/docs/native-runtime.agent.md)
-- [docs/recording.agent.md](/Users/arach/dev/action/docs/recording.agent.md)
+- [AGENTS.md](AGENTS.md)
+- [docs/overview.agent.md](docs/overview.agent.md)
+- [docs/native-runtime.agent.md](docs/native-runtime.agent.md)
+- [docs/recording.agent.md](docs/recording.agent.md)
 
 Critical rules:
 

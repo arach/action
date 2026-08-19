@@ -2,10 +2,34 @@ import { describe, expect, test } from "bun:test";
 
 import {
   assessNavigation,
+  browserOpenMode,
   isChromeNavigationErrorPage,
   navigationIsReady,
+  regularChromeLaunchArgs,
   shouldReuseCurrentTab,
 } from "./navigation.ts";
+
+describe("Action Browser open modes", () => {
+  test("defaults to the controlled Action Chrome mode", () => {
+    expect(browserOpenMode(undefined)).toBe("action");
+    expect(browserOpenMode("action")).toBe("action");
+  });
+
+  test("builds an isolated launch handoff for regular Chrome", () => {
+    expect(browserOpenMode("regular")).toBe("regular");
+    expect(regularChromeLaunchArgs("Google Chrome", "https://example.com/")).toEqual([
+      "/usr/bin/open",
+      "-n",
+      "-a",
+      "Google Chrome",
+      "https://example.com/",
+    ]);
+  });
+
+  test("rejects unknown modes", () => {
+    expect(() => browserOpenMode("personal")).toThrow("mode must be either action or regular");
+  });
+});
 
 describe("Action Browser tab reuse", () => {
   test("reuses the session's current tab by default", () => {
