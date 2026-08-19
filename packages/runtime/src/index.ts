@@ -1,6 +1,7 @@
 export * from "./guided.js";
 export * from "./inspection.js";
 export * from "./macos.js";
+export * from "./stage.js";
 export * from "./adapters/index.js";
 export * from "./providers/index.js";
 export * from "./interaction/index.js";
@@ -12,3 +13,4 @@ export * from "./characters.js";
 export * from "./companion-client.js";
 export * from "./drive-client.js";
 export * from "./drive-cursor.js";
+export * from "./pointer-events.js";

@@ -41,8 +41,13 @@ enum ActionHostCommand: String {
     case supervisionOverlay = "supervision-overlay"
     case supervisorStop = "supervisor-stop"
     case stageOverlay = "stage-overlay"
+    case drape
+    case raiseWindow = "raise-window"
+    case windowOrder = "window-order"
     case demoCursorOverlay = "demo-cursor-overlay"
     case agentCursorOverlay = "agent-cursor-overlay"
+    case clickFeedbackOverlay = "click-feedback-overlay"
+    case pointerEventLogInit = "pointer-event-log-init"
     case terminalSession = "terminal-session"
     case prepareNotesNote = "prepare-notes-note"
     case getCaptureWindowFrame = "get-capture-window-frame"
@@ -169,6 +174,11 @@ struct CommandOptions {
             return defaultValue
         }
         return number
+    }
+
+    func bool(_ key: String, default defaultValue: Bool) -> Bool {
+        guard let value = options[key]?.lowercased() else { return defaultValue }
+        return value == "true" || value == "1" || value == "yes"
     }
 }
 
@@ -525,18 +535,22 @@ let defaultClickHoldMilliseconds = 30
 /// Clicks at a screen point, holding the button down for `holdMs` before releasing.
 /// The default is a plain click; larger values produce a press-and-hold, which is how
 /// watch-face editing, context menus, and other long-press affordances are triggered.
-func clickPoint(_ point: CGPoint, holdMs: Int = defaultClickHoldMilliseconds) throws {
-    CGWarpMouseCursorPosition(point)
-    usleep(10000)
-
-    guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-          let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
-        throw ActionHostError.accessibilityActionFailed("Unable to create mouse events")
-    }
-
-    down.post(tap: .cghidEventTap)
-    usleep(useconds_t(max(1, holdMs) * 1000))
-    up.post(tap: .cghidEventTap)
+///
+/// The button events themselves are posted by `ActionPointerChannel`, the shared boundary that
+/// also records the event and drives any opt-in click feedback, so the click a viewer sees and
+/// the click the artifact describes are the same event.
+@discardableResult
+func clickPoint(
+    _ point: CGPoint,
+    holdMs: Int = defaultClickHoldMilliseconds,
+    pointerEventLogPath: String? = nil
+) throws -> ActionPointerGesture {
+    try ActionPointerChannel.primaryClick(
+        at: point,
+        holdMs: holdMs,
+        source: "click-point",
+        log: ActionPointerEventLog.active(explicitPath: pointerEventLogPath)
+    )
 }
 
 func postText(_ text: String, delayMs: Int?) throws {
@@ -720,6 +734,54 @@ struct CurrentSurfaceResponse: Encodable {
     let bundleId: String
     let appName: String
     let frame: OverlayBounds?
+}
+
+struct WindowOrderEntry: Encodable {
+    let pid: Int
+    let bundleId: String?
+    let owner: String
+    let title: String
+    let layer: Int
+    let bounds: OverlayBounds
+}
+
+struct WindowOrderResponse: Encodable {
+    let status: String
+    let windows: [WindowOrderEntry]
+}
+
+func windowOrder(bounds: CGRect?) -> WindowOrderResponse {
+    let windowList = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [[String: Any]] ?? []
+
+    var windows: [WindowOrderEntry] = []
+    windows.reserveCapacity(windowList.count)
+    for windowInfo in windowList {
+        guard let frame = rect(from: windowInfo), frame.width >= 32, frame.height >= 32 else {
+            continue
+        }
+        if let bounds, !frame.intersects(bounds) {
+            continue
+        }
+        let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? pid_t ?? 0
+        let app = ownerPID > 0 ? NSRunningApplication(processIdentifier: ownerPID) : nil
+        let owner = (windowInfo[kCGWindowOwnerName as String] as? String)
+            ?? app?.localizedName
+            ?? ""
+        windows.append(
+            WindowOrderEntry(
+                pid: Int(ownerPID),
+                bundleId: app?.bundleIdentifier,
+                owner: owner,
+                title: windowInfo[kCGWindowName as String] as? String ?? "",
+                layer: windowInfo[kCGWindowLayer as String] as? Int ?? 0,
+                bounds: overlayBounds(from: frame)
+            )
+        )
+    }
+    return WindowOrderResponse(status: "window-order", windows: windows)
 }
 
 func overlayBounds(from rect: CGRect) -> OverlayBounds {
@@ -1147,7 +1209,7 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         )
     }
 
-    func recordRegion(rect: CGRect, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, fps: Double, scale: Double) async throws {
+    func recordRegion(rect: CGRect, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?, fps: Double, scale: Double, includeSupervisionOverlay: Bool = true) async throws {
         logger.log("record-region: begin rect=\(rect) outputPath=\(outputPath)")
         self.finishedSignalPath = finishedSignalPath
         let outputURL = URL(fileURLWithPath: outputPath)
@@ -1163,14 +1225,14 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
 
         logger.log("record-region: display frame=\(selection.display.frame) sourceRect=\(selection.sourceRect)")
         let supervisionWindows: [SCWindow]
-        if let overlayPID = ActionSupervisionRegistry.overlayPID() {
+        if !includeSupervisionOverlay, let overlayPID = ActionSupervisionRegistry.overlayPID() {
             supervisionWindows = content.windows.filter {
                 $0.owningApplication?.processID == overlayPID
             }
         } else {
             supervisionWindows = []
         }
-        logger.log("record-region: excluding supervision windows=\(supervisionWindows.count)")
+        logger.log("record-region: includeSupervisionOverlay=\(includeSupervisionOverlay) excluding supervision windows=\(supervisionWindows.count)")
         let filter = SCContentFilter(display: selection.display, excludingWindows: supervisionWindows)
         let configuration = SCStreamConfiguration()
         configuration.width = max(Int(selection.sourceRect.width * scale), 1)
@@ -1184,6 +1246,7 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         recordingConfiguration.outputURL = outputURL
         recordingConfiguration.outputFileType = .mov
         recordingConfiguration.videoCodecType = .h264
+        logger.log("record-region: encoding container=mov codec=h264 fps=\(fps) dimensions=\(configuration.width)x\(configuration.height)")
 
         let recordingOutput = SCRecordingOutput(configuration: recordingConfiguration, delegate: self)
         try stream.addRecordingOutput(recordingOutput)
@@ -3158,6 +3221,7 @@ final class StageOverlayController: NSObject {
     private let writer: ResponseWriter
     private let logger: DebugLogger
     private let controlFile: String?
+    private let parentProcessID: pid_t?
     private var overlayWindow: NSWindow?
     private var controlWindow: StageHUDPanel?
     private var overlayView: StageOverlayView?
@@ -3167,12 +3231,20 @@ final class StageOverlayController: NSObject {
     private var currentPhase: String = "staging"
     private var supervisionRegistrationID: String?
 
-    init(stateFile: String, stopFile: String, replyFile: String?, debugLogPath: String?, controlFile: String?) {
+    init(
+        stateFile: String,
+        stopFile: String,
+        replyFile: String?,
+        debugLogPath: String?,
+        controlFile: String?,
+        parentProcessID: pid_t?
+    ) {
         self.stateFile = stateFile
         self.stopFile = stopFile
         self.writer = ResponseWriter(replyFile: replyFile)
         self.logger = DebugLogger(path: debugLogPath)
         self.controlFile = controlFile
+        self.parentProcessID = parentProcessID
     }
 
     func run() throws {
@@ -3317,6 +3389,18 @@ final class StageOverlayController: NSObject {
     private func tick() {
         if FileManager.default.fileExists(atPath: stopFile) {
             logger.log("stage-overlay: stop signal received")
+            shutdown()
+            return
+        }
+
+        // The drape is an opaque sheet over the operator's screen, and it is launched
+        // through open(1), so it is not a child of the runtime and the OS will not reap
+        // it. The stop file is written by clearStage, which a crashed or killed
+        // orchestrator never reaches — leaving the desktop covered with no way to
+        // dismiss it and no indication of what put it there. Outliving the process that
+        // asked for it is the one thing a drape must not do.
+        if let parentProcessID, kill(parentProcessID, 0) != 0 {
+            logger.log("stage-overlay: orchestrator \(parentProcessID) is gone, dismissing")
             shutdown()
             return
         }
@@ -3511,10 +3595,14 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         throw ActionHostError.unsupportedOS("webkit-smoke should be started via runUICommand")
     case .stageOverlay:
         throw ActionHostError.unsupportedOS("stage-overlay should be started via runUICommand")
+    case .drape:
+        throw ActionHostError.unsupportedOS("drape should be started via runUICommand")
     case .demoCursorOverlay:
         throw ActionHostError.unsupportedOS("demo-cursor-overlay should be started via runUICommand")
     case .agentCursorOverlay:
         throw ActionHostError.unsupportedOS("agent-cursor-overlay should be started via runUICommand")
+    case .clickFeedbackOverlay:
+        throw ActionHostError.unsupportedOS("click-feedback-overlay should be started via runUICommand")
     case .terminalSession:
         throw ActionHostError.unsupportedOS("terminal-session should be started via runUICommand")
     case .guidedCalculatorDemo:
@@ -3614,6 +3702,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             "height": String(describing: rect.size.height),
             "fps": String(describing: options.double("fps", default: 15)),
             "scale": String(describing: options.double("scale", default: 1)),
+            "includeSupervisionOverlay": String(options.bool("include-supervision-overlay", default: true)),
         ]
         if let debugLog = options.options["debug-log"] {
             params["debugLog"] = debugLog
@@ -3647,7 +3736,8 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             stopSignalPath: options.options["stop-file"],
             finishedSignalPath: options.options["finished-file"],
             fps: options.double("fps", default: 15),
-            scale: options.double("scale", default: 1)
+            scale: options.double("scale", default: 1),
+            includeSupervisionOverlay: options.bool("include-supervision-overlay", default: true)
         )
     case .recordingProbe:
         throw ActionHostError.unsupportedOS("recording-probe must be started through the UI command path")
@@ -3735,6 +3825,35 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
                 detail: focusedTitle.map { "\(bundleId): \($0)" } ?? bundleId
             )
         )
+    case .raiseWindow:
+        let bundleId = try options.required("bundle-id")
+        let requestedTitle = options.options["title"].flatMap { $0.isEmpty ? nil : $0 }
+        let raisedTitle: String
+        if let requestedTitle {
+            raisedTitle = try ActionNativeAutomation.raiseWindow(bundleId: bundleId, matching: requestedTitle)
+        } else {
+            raisedTitle = try ActionNativeAutomation.raiseWindow(bundleId: bundleId, matching: "")
+        }
+        logger.log("raise-window: bundle=\(bundleId) title=\(raisedTitle)")
+        try writer.write(
+            ActionHostResponse(
+                status: "raised",
+                outputPath: nil,
+                detail: "\(bundleId): \(raisedTitle)"
+            )
+        )
+    case .windowOrder:
+        let bounds: CGRect?
+        if let spec = options.options["bounds"] {
+            let numbers = spec.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard numbers.count == 4, numbers[2] > 0, numbers[3] > 0 else {
+                throw ActionHostError.missingOption("--bounds x,y,width,height")
+            }
+            bounds = CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
+        } else {
+            bounds = nil
+        }
+        try writer.write(windowOrder(bounds: bounds))
     case .requestApplicationActivation:
         let bundleId = try options.required("bundle-id")
         try ActionNativeAutomation.activateApplication(bundleId: bundleId)
@@ -3820,6 +3939,29 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         try postKeyPressToApp(bundleId: bundleId, key: key, modifiers: modifiers)
         let detail = modifiers.isEmpty ? "\(bundleId) \(key)" : "\(bundleId) \(modifiers.joined(separator: "+"))+\(key)"
         try writer.write(ActionHostResponse(status: "pressed-app-key", outputPath: nil, detail: detail))
+    case .pointerEventLogInit:
+        // Written natively so the header's monotonic reference comes from the same clock the
+        // click processes will stamp against. A JS caller cannot produce a comparable reading.
+        let path = try options.required("path")
+        let feedback = ActionPointerFeedbackSettings(
+            enabled: options.bool("click-feedback", default: false),
+            style: options.options["click-feedback-style"] ?? "pulse",
+            durationMs: options.double("click-feedback-duration-ms", default: 320),
+            radius: options.double("click-feedback-radius", default: 34)
+        )
+        let created = try ActionPointerEventLog.create(
+            at: path,
+            recordingId: try options.required("recording-id"),
+            sessionId: options.options["session-id"],
+            feedback: feedback
+        )
+        try writer.write(
+            ActionHostResponse(
+                status: "pointer-event-log-created",
+                outputPath: created.path,
+                detail: created.header.startedAt
+            )
+        )
     case .clickPoint:
         let x = options.double("x", default: .nan)
         let y = options.double("y", default: .nan)
@@ -3827,10 +3969,17 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             throw ActionHostError.missingOption("--x/--y")
         }
         let holdMs = Int(options.double("hold-ms", default: Double(defaultClickHoldMilliseconds)))
-        try clickPoint(CGPoint(x: x, y: y), holdMs: holdMs)
-        let clickDetail = holdMs > defaultClickHoldMilliseconds
+        let gesture = try clickPoint(
+            CGPoint(x: x, y: y),
+            holdMs: holdMs,
+            pointerEventLogPath: options.options["pointer-event-log"]
+        )
+        var clickDetail = holdMs > defaultClickHoldMilliseconds
             ? "\(Int(x)),\(Int(y)) hold=\(holdMs)ms"
             : "\(Int(x)),\(Int(y))"
+        if gesture.recorded {
+            clickDetail += " pointerEvent=\(gesture.correlationId)"
+        }
         try writer.write(ActionHostResponse(status: "clicked", outputPath: nil, detail: clickDetail))
     case .drag:
         let fromX = options.double("from-x", default: .nan)
@@ -3846,12 +3995,31 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
         if let filePath, !filePath.isEmpty, !FileManager.default.fileExists(atPath: filePath) {
             throw ActionHostError.fileNotFound(filePath)
         }
+        let pointerEventLogPath = options.options["pointer-event-log"]
         if let filePath, !filePath.isEmpty {
-            try ActionNativeAutomation.dragFile(path: filePath, from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), durationMs: durationMs)
-            try writer.write(ActionHostResponse(status: "dragged", outputPath: nil, detail: "file=\(filePath)"))
+            let gesture = try ActionNativeAutomation.dragFile(
+                path: filePath,
+                from: CGPoint(x: fromX, y: fromY),
+                to: CGPoint(x: toX, y: toY),
+                durationMs: durationMs,
+                pointerEventLogPath: pointerEventLogPath
+            )
+            let detail = gesture.recorded
+                ? "file=\(filePath) pointerEvent=\(gesture.correlationId)"
+                : "file=\(filePath)"
+            try writer.write(ActionHostResponse(status: "dragged", outputPath: nil, detail: detail))
         } else {
-            try ActionNativeAutomation.drag(from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), durationMs: durationMs)
-            try writer.write(ActionHostResponse(status: "dragged", outputPath: nil, detail: "\(Int(fromX)),\(Int(fromY))->\(Int(toX)),\(Int(toY))"))
+            let gesture = try ActionNativeAutomation.drag(
+                from: CGPoint(x: fromX, y: fromY),
+                to: CGPoint(x: toX, y: toY),
+                durationMs: durationMs,
+                pointerEventLogPath: pointerEventLogPath
+            )
+            var detail = "\(Int(fromX)),\(Int(fromY))->\(Int(toX)),\(Int(toY))"
+            if gesture.recorded {
+                detail += " pointerEvent=\(gesture.correlationId)"
+            }
+            try writer.write(ActionHostResponse(status: "dragged", outputPath: nil, detail: detail))
         }
     case .scroll:
         let x = options.double("x", default: .nan)
@@ -4106,6 +4274,17 @@ struct ActionHostMain {
                 }
             }
             return true
+        case .drape:
+            MainActor.assumeIsolated {
+                do {
+                    let controller = try ActionDrapeController(options: options)
+                    try controller.run()
+                } catch {
+                    FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                    Darwin.exit(1)
+                }
+            }
+            return true
         case .stageOverlay:
             let stateFile: String
             let stopFile: String
@@ -4125,7 +4304,31 @@ struct ActionHostMain {
                     stopFile: stopFile,
                     replyFile: replyFile,
                     debugLogPath: debugLogPath,
-                    controlFile: controlFile
+                    controlFile: controlFile,
+                    parentProcessID: options.options["parent-pid"].flatMap { pid_t($0) }
+                )
+                do {
+                    try controller.run()
+                } catch {
+                    FileHandle.standardError.write(Data("ActionHost failed: \(error.localizedDescription)\n".utf8))
+                    Darwin.exit(1)
+                }
+            }
+            return true
+        case .clickFeedbackOverlay:
+            let replyFile = options.options["reply-file"]
+            let debugLogPath = options.options["debug-log"]
+            guard let eventLog = options.options["event-log"], !eventLog.isEmpty else {
+                FileHandle.standardError.write(Data("ActionHost failed: --event-log is required for click-feedback-overlay\n".utf8))
+                Darwin.exit(1)
+            }
+            let stopFile = options.options["stop-file"] ?? "\(eventLog).stop"
+            MainActor.assumeIsolated {
+                let controller = ClickFeedbackOverlayController(
+                    eventLogPath: eventLog,
+                    stopFile: stopFile,
+                    replyFile: replyFile,
+                    debugLogPath: debugLogPath
                 )
                 do {
                     try controller.run()
@@ -4285,7 +4488,8 @@ struct ActionHostMain {
                 stopSignalPath: options.options["stop-file"],
                 finishedSignalPath: options.options["finished-file"],
                 fps: options.double("fps", default: 15),
-                scale: options.double("scale", default: 1)
+                scale: options.double("scale", default: 1),
+                includeSupervisionOverlay: options.bool("include-supervision-overlay", default: true)
             )
             MainActor.assumeIsolated {
                 let runner = RecordingProbeAppRunner(configuration: config, writer: writer, debugLogger: logger)

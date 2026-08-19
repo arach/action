@@ -8,6 +8,7 @@ import type {
   Bounds,
   CaptureEngine,
   CaptureProfile,
+  ClickFeedbackConfig,
   EngineDiagnostics,
   Point,
   ResolvedTarget,
@@ -20,6 +21,12 @@ import type {
   TargetQuery,
 } from "@action/protocol";
 import { executeInteractionAction } from "./interaction/index.js";
+import {
+  publishPointerEventLog,
+  startPointerEventLog,
+  stopPointerEventLog,
+  type PointerEventLogHandle,
+} from "./pointer-events.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -192,6 +199,7 @@ export class MacOSCommandEngine implements CaptureEngine {
   private activeCapturePath?: string;
   private activeCaptureStopPath?: string;
   private activeCaptureFinishedPath?: string;
+  private activePointerEventLog?: PointerEventLogHandle;
   private activeViewport?: StageViewport;
   private focusedSurfaceId?: string;
   private overlayStatePath?: string;
@@ -269,6 +277,12 @@ export class MacOSCommandEngine implements CaptureEngine {
       paths.stopPath,
       "--debug-log",
       paths.logPath,
+      // clearStage is the normal way the drape comes down, but it never runs if this
+      // process is killed. The overlay is launched through open(1), so it is not our
+      // child and nothing else will take it down. Give it our pid so it can dismiss
+      // itself rather than leaving an opaque sheet over the operator's screen.
+      "--parent-pid",
+      String(process.pid),
       ...(this.enableStageControls ? ["--control-file", paths.controlPath] : []),
     );
     const response = JSON.parse(stdout) as { detail?: string };
@@ -471,7 +485,13 @@ export class MacOSCommandEngine implements CaptureEngine {
     return resolvedViewport;
   }
 
-  async startCapture(request: { outputPath: string; viewport?: StageViewport; profile?: CaptureProfile }): Promise<void> {
+  async startCapture(request: {
+    sessionId?: string;
+    outputPath: string;
+    viewport?: StageViewport;
+    profile?: CaptureProfile;
+    clickFeedback?: ClickFeedbackConfig;
+  }): Promise<void> {
     const viewport = request.viewport ?? this.activeViewport;
     if (!viewport) {
       throw new Error("No viewport is configured for capture.");
@@ -480,6 +500,16 @@ export class MacOSCommandEngine implements CaptureEngine {
     await mkdir(dirname(request.outputPath), { recursive: true });
     await rm(request.outputPath, { force: true });
     this.activeCapturePath = request.outputPath;
+    // Opened before the recorder starts so a click in the first frames is already covered.
+    this.activePointerEventLog = await startPointerEventLog({
+      runHost: (command, ...args) => this.runHost(command, ...args),
+      nativeHostPath: this.nativeHostPath,
+      outputPath: request.outputPath,
+      recordingId: request.sessionId ?? "capture",
+      sessionId: request.sessionId,
+      clickFeedback: request.clickFeedback,
+    });
+    await publishPointerEventLog(this.activePointerEventLog.path);
     this.activeCaptureStopPath = `${request.outputPath}.stop`;
     this.activeCaptureFinishedPath = `${request.outputPath}.finished`;
     this.geometryReportPath = resolve(dirname(request.outputPath), "geometry-report.json");
@@ -516,6 +546,15 @@ export class MacOSCommandEngine implements CaptureEngine {
     const path = this.activeCapturePath ?? resolve(process.cwd(), "artifacts", "sessions", "macos", "capture.mov");
     const stopPath = this.activeCaptureStopPath;
     const finishedPath = this.activeCaptureFinishedPath;
+    const pointerEventLog = this.activePointerEventLog;
+
+    // Clicks after this point belong to no recording, and the pulse overlay has nothing left to
+    // show. Both are torn down before the placeholder branch so neither leaks past a failed run.
+    if (pointerEventLog) {
+      await stopPointerEventLog(pointerEventLog);
+      await publishPointerEventLog(undefined);
+      this.activePointerEventLog = undefined;
+    }
 
     if (!stopPath) {
       await mkdir(dirname(path), { recursive: true });
@@ -549,6 +588,12 @@ export class MacOSCommandEngine implements CaptureEngine {
     return {
       kind: "raw-capture",
       path,
+      metadata: pointerEventLog
+        ? {
+            pointerEventLog: pointerEventLog.path,
+            clickFeedback: pointerEventLog.feedbackEnabled,
+          }
+        : undefined,
     };
   }
 
@@ -857,7 +902,7 @@ export class MacOSCommandEngine implements CaptureEngine {
     finishedPath: string,
     profile: CaptureProfile,
   ): Promise<void> {
-    const fps = profile === "draft" ? "15" : "30";
+    const fps = profile === "draft" ? "15" : "60";
     const scale = profile === "draft" ? "0.75" : "1";
 
     await this.runHost(

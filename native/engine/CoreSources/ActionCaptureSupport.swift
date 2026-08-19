@@ -134,6 +134,15 @@ public func actionCaptureRegionScreenshot(rect: CGRect, outputPath: String) asyn
 }
 
 public func actionCaptureScreenScreenshot(outputPath: String) throws {
+    // The window and region paths reach this guard through actionShareableContent().
+    // This one talks to CGDisplayCreateImage directly, which does not fail without
+    // Screen Recording permission — it returns a desktop-only image with every window
+    // missing. So the caller got a black PNG reported as a successful capture, and OCR
+    // and vision then ran on it. Refusing is the honest answer.
+    guard CGPreflightScreenCaptureAccess() else {
+        throw ActionCaptureError.screenRecordingPermissionMissing
+    }
+
     let outputURL = URL(fileURLWithPath: outputPath)
     try FileManager.default.createDirectory(
         at: outputURL.deletingLastPathComponent(),

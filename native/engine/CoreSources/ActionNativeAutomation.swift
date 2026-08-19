@@ -77,6 +77,9 @@ public enum ActionNativeAutomationError: LocalizedError {
     case applicationNotRunning(String)
     case accessibilityLookupFailed(String)
     case accessibilityActionFailed(String)
+    /// The app accepted a value write and the value did not end up applied. Distinct from a
+    /// failed action so a caller can tell "refused" from "silently ignored".
+    case accessibilityValueNotApplied(String)
     case dragPathNotFound(String)
 
     public var errorDescription: String? {
@@ -86,6 +89,8 @@ public enum ActionNativeAutomationError: LocalizedError {
         case .accessibilityLookupFailed(let detail):
             return detail
         case .accessibilityActionFailed(let detail):
+            return detail
+        case .accessibilityValueNotApplied(let detail):
             return detail
         case .dragPathNotFound(let path):
             return "Drag source path not found: \(path)"
@@ -128,8 +133,20 @@ public enum ActionNativeAutomation {
         let app = try runningApplication(bundleId: bundleId)
         let application = AXUIElementCreateApplication(app.processIdentifier)
 
-        guard let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
-              !windows.isEmpty else {
+        // AXWindows often fails the Swift `[AXUIElement]` cast (it arrives as a CFArray),
+        // and a freshly launched host can see an empty list for a tick. Walk every
+        // known source — attribute, children, focused/main — before giving up.
+        var windows = collectWindows(of: application)
+        if windows.isEmpty {
+            for _ in 0..<8 {
+                usleep(50_000)
+                windows = collectWindows(of: application)
+                if !windows.isEmpty {
+                    break
+                }
+            }
+        }
+        guard !windows.isEmpty else {
             throw ActionNativeAutomationError.accessibilityLookupFailed(
                 "No accessibility windows found for \(bundleId)"
             )
@@ -137,9 +154,14 @@ public enum ActionNativeAutomation {
 
         let titles = windows.map { stringValue(axValue($0, attribute: kAXTitleAttribute)) ?? "" }
         let needle = title.lowercased()
-        let match = titles.firstIndex(of: title)
-            ?? titles.firstIndex { $0.lowercased() == needle }
-            ?? titles.firstIndex { $0.lowercased().contains(needle) }
+        let match: Int?
+        if title.isEmpty {
+            match = titles.indices.first
+        } else {
+            match = titles.firstIndex(of: title)
+                ?? titles.firstIndex { $0.lowercased() == needle }
+                ?? titles.firstIndex { $0.lowercased().contains(needle) }
+        }
 
         guard let match else {
             let available = titles.filter { !$0.isEmpty }.map { "\"\($0)\"" }.joined(separator: ", ")
@@ -151,10 +173,22 @@ public enum ActionNativeAutomation {
         let window = windows[match]
         _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
         let raise = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-        guard raise == .success else {
-            throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Failed to raise window \"\(titles[match])\" in \(bundleId): \(raise.rawValue)"
+        if raise != .success {
+            // Some windows advertise AXRaise and then refuse it. Calculator returns
+            // kAXErrorAttributeUnsupported (-25205). Mark the window main and bring
+            // the app forward so that window is the one that lands above a same-level
+            // drape. This can also lift sibling windows of the same app.
+            _ = AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            let front = AXUIElementSetAttributeValue(
+                application,
+                kAXFrontmostAttribute as CFString,
+                kCFBooleanTrue
             )
+            guard front == .success else {
+                throw ActionNativeAutomationError.accessibilityActionFailed(
+                    "Failed to raise window \"\(titles[match])\" in \(bundleId): raise=\(raise.rawValue) frontmost=\(front.rawValue)"
+                )
+            }
         }
 
         return titles[match]
@@ -328,18 +362,12 @@ public enum ActionNativeAutomation {
             preferWritableText: true
         )
 
-        let result = AXUIElementSetAttributeValue(
-            match.element,
-            kAXValueAttribute as CFString,
-            value as CFTypeRef
+        return try writeAccessibilityValue(
+            to: match.element,
+            depth: match.depth,
+            value: value,
+            describing: "\(bundleId) element \(label)"
         )
-        guard result == .success else {
-            throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Accessibility value update failed for \(bundleId) element \(label): \(result.rawValue)"
-            )
-        }
-
-        return snapshot(of: match.element, depth: match.depth)
     }
 
     public static func setFocusedAccessibilityValue(
@@ -369,18 +397,12 @@ public enum ActionNativeAutomation {
             )
         }
 
-        let result = AXUIElementSetAttributeValue(
-            element,
-            kAXValueAttribute as CFString,
-            value as CFTypeRef
+        return try writeAccessibilityValue(
+            to: element,
+            depth: 0,
+            value: value,
+            describing: "focused \(bundleId) element"
         )
-        guard result == .success else {
-            throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Accessibility value update failed for focused \(bundleId) element: \(result.rawValue)"
-            )
-        }
-
-        return snapshot(of: element, depth: 0)
     }
 
     public static func setAccessibilityRoleValue(
@@ -399,21 +421,88 @@ public enum ActionNativeAutomation {
             kAXFocusedAttribute as CFString,
             kCFBooleanTrue
         )
+
+        return try writeAccessibilityValue(
+            to: match.element,
+            depth: match.depth,
+            value: value,
+            describing: "first \(role) in \(bundleId)"
+        )
+    }
+
+    /// Writes `kAXValue`, then reads it back and refuses to call an ignored write a success.
+    ///
+    /// `AXUIElementSetAttributeValue` returning `.success` only means the app accepted the
+    /// message. A terminal's text area accepts the write and does nothing with it, which surfaced
+    /// as `act.execute {kind:"type"}` reporting `succeeded` with no text anywhere — the expensive
+    /// failure, because a wrong error costs a retry while a false success costs the recording.
+    ///
+    /// The read-back is polled: some apps apply the value on their next run loop turn, so a single
+    /// immediate read would report a working write as ignored.
+    private static func writeAccessibilityValue(
+        to element: AXUIElement,
+        depth: Int,
+        value: String,
+        describing target: String
+    ) throws -> ActionAccessibilityNodeSnapshot {
+        let before = readableAccessibilityValue(of: element)
         let result = AXUIElementSetAttributeValue(
-            match.element,
+            element,
             kAXValueAttribute as CFString,
             value as CFTypeRef
         )
         guard result == .success else {
             throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Accessibility value update failed for first \(role) in \(bundleId): \(result.rawValue)"
+                "Accessibility value update failed for \(target): \(result.rawValue)"
             )
         }
 
-        return snapshot(of: match.element, depth: match.depth)
+        // A secure field echoes bullets or nothing by design, so there is no read-back to judge.
+        if isSecureTextElement(element) {
+            return snapshot(of: element, depth: depth)
+        }
+
+        var observed = before
+        var verdict = ActionAccessibilityValueVerdict.unchanged
+        for attempt in 0..<accessibilityValueReadBackAttempts {
+            if attempt > 0 {
+                usleep(accessibilityValueReadBackIntervalUs)
+            }
+            observed = readableAccessibilityValue(of: element)
+            verdict = actionAccessibilityValueVerdict(
+                requested: value,
+                before: before,
+                observed: observed
+            )
+            if verdict == .matched {
+                break
+            }
+        }
+
+        guard verdict == .matched else {
+            throw ActionNativeAutomationError.accessibilityValueNotApplied(
+                actionAccessibilityValueFailureDetail(
+                    verdict: verdict,
+                    requested: value,
+                    observed: observed,
+                    describing: target
+                )
+            )
+        }
+
+        return snapshot(of: element, depth: depth)
     }
 
-    public static func drag(from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
+    /// Press and release go through `ActionPointerChannel` so a drag is recorded — and optionally
+    /// shown — by exactly the same path as a click. The interpolated `leftMouseDragged` motion in
+    /// between stays here: it carries no button transition, so it is not a pointer event.
+    @discardableResult
+    public static func drag(
+        from start: CGPoint,
+        to end: CGPoint,
+        durationMs: Int = 300,
+        pointerEventLogPath: String? = nil
+    ) throws -> ActionPointerGesture {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create event source")
         }
@@ -424,15 +513,13 @@ public enum ActionNativeAutomation {
         let deltaX = end.x - start.x
         let deltaY = end.y - start.y
 
-        CGWarpMouseCursorPosition(start)
-        usleep(10000)
-
-        guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
-              let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left) else {
-            throw ActionNativeAutomationError.accessibilityActionFailed("Unable to create mouse drag events")
-        }
-
-        down.post(tap: .cghidEventTap)
+        let press = try ActionPointerChannel.beginPrimaryPress(
+            at: start,
+            gesture: .drag,
+            source: "drag",
+            eventSource: source,
+            log: ActionPointerEventLog.active(explicitPath: pointerEventLogPath)
+        )
         usleep(15000)
 
         for index in 1...steps {
@@ -449,7 +536,7 @@ public enum ActionNativeAutomation {
             usleep(stepDelayUs)
         }
 
-        up.post(tap: .cghidEventTap)
+        return try ActionPointerChannel.endPrimaryPress(press, at: end)
     }
 
     /// Scrolls at a screen point using pixel-unit scroll wheel events.
@@ -518,12 +605,24 @@ public enum ActionNativeAutomation {
         }
     }
 
-    public static func dragFile(path: String, from start: CGPoint, to end: CGPoint, durationMs: Int = 300) throws {
+    @discardableResult
+    public static func dragFile(
+        path: String,
+        from start: CGPoint,
+        to end: CGPoint,
+        durationMs: Int = 300,
+        pointerEventLogPath: String? = nil
+    ) throws -> ActionPointerGesture {
         guard FileManager.default.fileExists(atPath: path) else {
             throw ActionNativeAutomationError.dragPathNotFound(path)
         }
 
-        try drag(from: start, to: end, durationMs: durationMs)
+        return try drag(
+            from: start,
+            to: end,
+            durationMs: durationMs,
+            pointerEventLogPath: pointerEventLogPath
+        )
     }
 
     public static func calculatorDisplayValue() throws -> String {
@@ -619,6 +718,91 @@ private func axValue(_ element: AXUIElement, attribute: String) -> AnyObject? {
     }
 
     return value
+}
+
+private func collectWindows(of application: AXUIElement) -> [AXUIElement] {
+    var seen = Set<ObjectIdentifier>()
+    var windows: [AXUIElement] = []
+
+    func append(_ element: AXUIElement) {
+        let id = ObjectIdentifier(element)
+        guard !seen.contains(id) else { return }
+        seen.insert(id)
+        windows.append(element)
+    }
+
+    for element in axElementArray(application, attribute: kAXWindowsAttribute) {
+        append(element)
+    }
+    for child in axChildren(of: application) {
+        let role = axValue(child, attribute: kAXRoleAttribute) as? String
+        if role == (kAXWindowRole as String) {
+            append(child)
+        }
+    }
+    for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+        if let raw = axValue(application, attribute: attribute),
+           CFGetTypeID(raw) == AXUIElementGetTypeID() {
+            append(unsafeDowncast(raw, to: AXUIElement.self))
+        }
+    }
+    return windows
+}
+
+/// `AXWindows` arrives as a CFArray of AXUIElements. The Swift `as? [AXUIElement]`
+/// cast loses that array, which is why raise-window saw no windows while inspect
+/// still found the focused one.
+private func axElementArray(_ element: AXUIElement, attribute: String) -> [AXUIElement] {
+    var value: CFTypeRef?
+    let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+    guard error == .success, let value else {
+        return []
+    }
+    if let windows = value as? [AXUIElement] {
+        return windows
+    }
+    guard CFGetTypeID(value) == CFArrayGetTypeID() else {
+        return []
+    }
+    let array = value as! CFArray
+    var windows: [AXUIElement] = []
+    let count = CFArrayGetCount(array)
+    windows.reserveCapacity(count)
+    for index in 0..<count {
+        guard let pointer = CFArrayGetValueAtIndex(array, index) else { continue }
+        let element = unsafeBitCast(pointer, to: AXUIElement.self)
+        guard CFGetTypeID(element) == AXUIElementGetTypeID() else { continue }
+        windows.append(element)
+    }
+    return windows
+}
+
+/// Read-back budget for a value write: six reads spaced 40ms apart, so an app that applies the
+/// value on its next run loop turn still gets confirmed, and a write that is being ignored costs
+/// about 200ms before it is reported.
+private let accessibilityValueReadBackAttempts = 6
+private let accessibilityValueReadBackIntervalUs: UInt32 = 40_000
+
+/// Reads `kAXValue` as text. Numeric values (sliders, steppers) are compared by their string form
+/// rather than treated as unreadable, so setting one is still verifiable.
+private func readableAccessibilityValue(of element: AXUIElement) -> String? {
+    let raw = axValue(element, attribute: kAXValueAttribute)
+    if let text = raw as? String {
+        return text
+    }
+    if let number = raw as? NSNumber {
+        return number.stringValue
+    }
+    return nil
+}
+
+private func isSecureTextElement(_ element: AXUIElement) -> Bool {
+    let role = axValue(element, attribute: kAXRoleAttribute) as? String
+    let subrole = axValue(element, attribute: kAXSubroleAttribute) as? String
+    // AppKit exposes this as a subrole constant only; the same string is the role a plain
+    // secure field reports, so both are checked against the literal.
+    let secureRole = "AXSecureTextField"
+    return role == secureRole || subrole == secureRole
 }
 
 private func axChildren(of element: AXUIElement) -> [AXUIElement] {

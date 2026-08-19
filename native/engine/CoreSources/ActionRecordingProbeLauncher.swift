@@ -15,7 +15,8 @@ public enum ActionRecordingProbeLauncher {
         finishedSignalPath: String?,
         debugLogPath: String?,
         fps: Double,
-        scale: Double
+        scale: Double,
+        includeSupervisionOverlay: Bool
     ) async throws -> [String: String] {
         var arguments = [
             "recording-probe",
@@ -26,6 +27,7 @@ public enum ActionRecordingProbeLauncher {
             "--output", outputPath,
             "--fps", String(describing: fps),
             "--scale", String(describing: scale),
+            "--include-supervision-overlay", String(includeSupervisionOverlay),
         ]
 
         if let stopSignalPath, !stopSignalPath.isEmpty {

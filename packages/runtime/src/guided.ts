@@ -5,6 +5,7 @@ import type {
   BackdropPreset,
   CaptureEngine,
   CaptureProfile,
+  ClickFeedbackConfig,
   CompiledTimeline,
   EngineDiagnostics,
   GuidedSessionEvent,
@@ -98,6 +99,11 @@ export interface GuidedCaptureSessionOptions {
   stageHoldMsAfterComplete?: number;
   initialActionDelayMs?: number;
   actionCadenceMs?: number;
+  /**
+   * Visible feedback for Action-driven clicks during the run. Off unless set: the normal macOS
+   * cursor is what a guided capture shows by default.
+   */
+  clickFeedback?: ClickFeedbackConfig;
 }
 
 export type GuidedSessionListener = (event: GuidedSessionEvent) => void;
@@ -115,6 +121,7 @@ export class GuidedCaptureSession {
   private readonly stageHoldMsAfterComplete: number;
   private readonly initialActionDelayMs: number;
   private readonly actionCadenceMs: number;
+  private readonly clickFeedback?: ClickFeedbackConfig;
   private phase: GuidedSessionPhase = "created";
   private stage: StageScene = { backdrop: "neutral" };
   private targetApp?: TargetApp;
@@ -145,6 +152,7 @@ export class GuidedCaptureSession {
     this.stageHoldMsAfterComplete = options.stageHoldMsAfterComplete ?? 0;
     this.initialActionDelayMs = options.initialActionDelayMs ?? 650;
     this.actionCadenceMs = options.actionCadenceMs ?? 900;
+    this.clickFeedback = options.clickFeedback;
   }
 
   onEvent(listener: GuidedSessionListener): () => void {
@@ -285,6 +293,7 @@ export class GuidedCaptureSession {
       outputPath: capturePath,
       viewport: this.stage.viewport,
       profile: this.captureProfile,
+      clickFeedback: this.clickFeedback,
     });
 
     this.session.transition("running", { reason: "capture started" });
