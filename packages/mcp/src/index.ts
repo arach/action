@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { appendFile, access, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -48,6 +49,9 @@ import {
   searchOCRText,
   startAgentCursor,
   startPointerEventLog,
+  readAgentCursorState,
+  cursorTravelMs,
+  PlayLogger,
   stopAgentCursor,
   stopPointerEventLog,
   updateAgentCursor,
@@ -459,6 +463,110 @@ async function ensureDriveLeaseForAct(input: {
   return lease;
 }
 
+function actPoint(action: RuntimeAction, target: ResolvedTarget | undefined): { x: number; y: number } | undefined {
+  const bounds = target?.bounds;
+  const point = bounds
+    ? pointFromBounds(bounds)
+    : action.target?.point
+      ? {
+          x: Number((action.target.point as { x?: number }).x),
+          y: Number((action.target.point as { y?: number }).y),
+        }
+      : undefined;
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+    return undefined;
+  }
+  return point;
+}
+
+function actHighlight(target: ResolvedTarget | undefined): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} | undefined {
+  const bounds = target?.bounds;
+  if (!bounds) {
+    return undefined;
+  }
+  const x = Number(bounds.x);
+  const y = Number(bounds.y);
+  const width = Number(bounds.width);
+  const height = Number(bounds.height);
+  if (![x, y, width, height].every(Number.isFinite) || width < 4 || height < 4) {
+    return undefined;
+  }
+  return { x, y, width, height };
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function publishDriveNote(line: string, leaseId?: string): Promise<JsonObject> {
+  const note = {
+    at: now(),
+    leaseId,
+    line: line.slice(0, 120),
+  };
+  const supervisionDir = resolve(
+    homedir(),
+    "Library/Application Support/Action/runtime/supervision",
+  );
+  const notesPath = resolve(supervisionDir, "notes.jsonl");
+  await mkdir(supervisionDir, { recursive: true });
+  await appendFile(notesPath, `${JSON.stringify(note)}\n`);
+
+  const registrationsDir = resolve(supervisionDir, "registrations");
+  if (await pathExists(registrationsDir)) {
+    const files = await readdir(registrationsDir);
+    for (const file of files) {
+      if (!file.endsWith(".json")) {
+        continue;
+      }
+      const path = resolve(registrationsDir, file);
+      try {
+        const registration = JSON.parse(await readFile(path, "utf8")) as JsonObject;
+        registration.detail = note.line;
+        registration.updatedAt = note.at;
+        await writeFile(path, `${JSON.stringify(registration, null, 2)}\n`);
+      } catch {
+        // A torn registration is not worth failing the note.
+      }
+    }
+  }
+
+  return { note, notesPath };
+}
+
+async function stageCursor(input: {
+  lease: DriveLease;
+  point?: { x: number; y: number };
+  highlight?: { x: number; y: number; width: number; height: number } | null;
+  label?: string;
+  wait?: boolean;
+}): Promise<void> {
+  if (!cursorPresenter.isPresenting(input.lease.leaseId)) {
+    return;
+  }
+  const previous = await readAgentCursorState(input.lease.leaseId);
+  const from = previous && Number.isFinite(previous.x) && Number.isFinite(previous.y)
+    ? { x: previous.x as number, y: previous.y as number }
+    : undefined;
+  await cursorPresenter.update({
+    leaseId: input.lease.leaseId,
+    agent: input.lease.agent,
+    point: input.point,
+    label: input.label ?? "looking",
+    phase: "idle",
+    highlight: input.highlight,
+  });
+  if (input.wait === false || !input.point) {
+    return;
+  }
+  await sleep(cursorTravelMs(from, input.point));
+}
+
 async function presentActCue(input: {
   lease: DriveLease;
   action: RuntimeAction;
@@ -467,18 +575,8 @@ async function presentActCue(input: {
   try {
     const kind = input.action.kind;
     const cueId = `${input.action.id}_${Date.now()}`;
-    const bounds = input.target?.bounds;
-    const point = bounds
-      ? pointFromBounds(bounds)
-      : input.action.target?.point
-        ? {
-            x: Number((input.action.target.point as { x?: number }).x),
-            y: Number((input.action.target.point as { y?: number }).y),
-          }
-        : undefined;
-    const safePoint = point && Number.isFinite(point.x) && Number.isFinite(point.y)
-      ? point
-      : undefined;
+    const safePoint = actPoint(input.action, input.target);
+    const highlight = actHighlight(input.target);
     const description = (input.action.description || kind).slice(0, 40);
 
     if (kind === "type") {
@@ -491,6 +589,7 @@ async function presentActCue(input: {
         phase: "type",
         typingText: text.slice(0, 80),
         cueId,
+        highlight,
       });
       const holdMs = Math.min(3200, 420 + text.length * 55);
       setTimeout(() => {
@@ -499,6 +598,7 @@ async function presentActCue(input: {
           agent: input.lease.agent,
           phase: "idle",
           label: "driving",
+          highlight: null,
         });
       }, holdMs);
       return;
@@ -518,6 +618,7 @@ async function presentActCue(input: {
         phase: "key",
         keyLabel: chord,
         cueId,
+        highlight,
       });
       setTimeout(() => {
         void cursorPresenter.update({
@@ -525,6 +626,7 @@ async function presentActCue(input: {
           agent: input.lease.agent,
           phase: "idle",
           label: "driving",
+          highlight: null,
         });
       }, 700);
       return;
@@ -537,6 +639,7 @@ async function presentActCue(input: {
       label: description,
       phase: safePoint ? "click" : "idle",
       cueId,
+      highlight,
     });
     if (safePoint) {
       setTimeout(() => {
@@ -545,6 +648,7 @@ async function presentActCue(input: {
           agent: input.lease.agent,
           phase: "idle",
           label: "driving",
+          highlight: null,
         });
       }, 480);
     }
@@ -772,6 +876,42 @@ const tools: Tool[] = [
       leaseId: textProperty("Optional lease id to focus the response."),
     }),
     { readOnlyHint: true, idempotentHint: true },
+  ),
+  tool(
+    "action.drive.note",
+    "Drive Note",
+    "Write a short beat to the floating supervision HUD so the operator can see what this client is doing without watching the console.",
+    objectSchema({
+      line: textProperty("One short status line. Keep it under 80 characters."),
+      leaseId: textProperty("Optional drive lease id this note belongs to."),
+    }, ["line"]),
+    { readOnlyHint: false, idempotentHint: false },
+  ),
+  tool(
+    "action.drive.aim",
+    "Drive Aim",
+    "Move the synthetic cursor to a point and optionally highlight a region. Does not click, type, or paste. Use this to set up what the operator should look at, then act.",
+    objectSchema({
+      leaseId: textProperty("Drive lease id. Required when this client has more than one active lease."),
+      point: objectProperty("Screen point { x, y } for the cursor tip."),
+      highlight: objectProperty("Optional region { x, y, width, height } to frame."),
+      label: textProperty("Optional badge label while aiming."),
+    }),
+    { readOnlyHint: false, idempotentHint: true },
+  ),
+  tool(
+    "action.drive.play",
+    "Drive Play",
+    "Run a short named sequence of beats as one play. Each beat is note, aim, wait, or act. Use this to group steps instead of driving them one tool call at a time.",
+    objectSchema({
+      title: textProperty("Short name for the play, shown on the HUD."),
+      beats: {
+        type: "array",
+        description: "Ordered beats. Each is { do: note|aim|wait|act, ... }. note needs line; aim takes point/highlight/label; wait needs ms; act needs action (same shape as act.execute).",
+      },
+      leaseId: textProperty("Drive lease id. Required when this client has more than one active lease."),
+    }, ["beats"]),
+    { readOnlyHint: false, idempotentHint: false },
   ),
   tool(
     "action.observe.snapshot",
@@ -1136,6 +1276,140 @@ const handlers: Record<string, ToolHandler> = {
     };
   },
 
+  async "action.drive.note"(args) {
+    const line = optionalString(args.line)?.replaceAll("\n", " ").trim();
+    if (!line) {
+      throw new Error("line is required");
+    }
+    return { ok: true, ...(await publishDriveNote(line, optionalString(args.leaseId))) };
+  },
+
+  async "action.drive.aim"(args) {
+    const lease = await ensureDriveLeaseForAct({
+      leaseId: optionalString(args.leaseId),
+      axTier: "semantic",
+      actionKind: "drive.aim",
+      description: optionalString(args.label) ?? "aim",
+    });
+    await cursorPresenter.ensure(lease);
+    const point = args.point && typeof args.point === "object"
+      ? (() => {
+          const object = args.point as JsonObject;
+          const x = optionalNumber(object.x);
+          const y = optionalNumber(object.y);
+          return x !== undefined && y !== undefined ? { x, y } : undefined;
+        })()
+      : undefined;
+    const highlight = args.highlight === null
+      ? null
+      : args.highlight && typeof args.highlight === "object"
+        ? (() => {
+            try {
+              return parseBounds(args.highlight, "highlight");
+            } catch {
+              return undefined;
+            }
+          })()
+        : undefined;
+    await stageCursor({
+      lease,
+      point,
+      highlight,
+      label: optionalString(args.label) ?? "looking",
+      wait: true,
+    });
+    return {
+      ok: true,
+      leaseId: lease.leaseId,
+      point,
+      highlight: highlight ?? undefined,
+    };
+  },
+
+  async "action.drive.play"(args) {
+    const title = optionalString(args.title) ?? "play";
+    const beats = Array.isArray(args.beats) ? args.beats : [];
+    if (beats.length === 0) {
+      throw new Error("beats must be a non-empty array");
+    }
+    const lease = await ensureDriveLeaseForAct({
+      leaseId: optionalString(args.leaseId),
+      axTier: "semantic",
+      actionKind: "drive.play",
+      description: title,
+    });
+    await cursorPresenter.ensure(lease);
+    const log = new PlayLogger(title, lease.leaseId);
+    await log.playStart(beats.length);
+
+    const ran: JsonObject[] = [];
+    for (const [index, raw] of beats.entries()) {
+      const beat = asObject(raw, `beats[${index}]`);
+      const kind = optionalString(beat.do) ?? optionalString(beat.kind);
+      const label = optionalString(beat.label)
+        ?? optionalString(beat.line)
+        ?? kind
+        ?? `beat ${index + 1}`;
+      const started = Date.now();
+      await log.stepStart(index, beats.length, kind ?? "step", label);
+
+      try {
+        if (kind === "note") {
+          const line = optionalString(beat.line);
+          if (!line) {
+            throw new Error("note beat requires line");
+          }
+          ran.push({ index, do: "note", line });
+        } else if (kind === "wait") {
+          const ms = Math.min(8000, Math.max(0, optionalNumber(beat.ms) ?? 400));
+          await sleep(ms);
+          ran.push({ index, do: "wait", ms });
+        } else if (kind === "aim") {
+          await handlers["action.drive.aim"]({
+            leaseId: lease.leaseId,
+            point: beat.point,
+            highlight: beat.highlight,
+            label: optionalString(beat.label) ?? label,
+          });
+          ran.push({ index, do: "aim", label });
+        } else if (kind === "act") {
+          await handlers["action.act.execute"]({
+            leaseId: lease.leaseId,
+            action: beat.action,
+            target: beat.target,
+          });
+          ran.push({ index, do: "act", label });
+        } else {
+          throw new Error(`Unknown beat do="${kind ?? ""}". Use note, aim, wait, or act.`);
+        }
+        await log.stepOk(index, beats.length, kind ?? "step", Date.now() - started, label);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await log.stepFail(index, beats.length, kind ?? "step", message);
+        await log.playFail(message, index);
+        return {
+          ok: false,
+          title,
+          leaseId: lease.leaseId,
+          logDir: join(homedir(), "Library/Application Support/Action/runtime/plays"),
+          stoppedAt: index,
+          error: message,
+          ran,
+        };
+      }
+    }
+
+    await log.playOk();
+    return {
+      ok: true,
+      title,
+      leaseId: lease.leaseId,
+      logDir: join(homedir(), "Library/Application Support/Action/runtime/plays"),
+      beatCount: beats.length,
+      ran,
+    };
+  },
+
   async "action.observe.snapshot"(args) {
     const sessionId = optionalString(args.sessionId) ?? defaultSessionId("inspection");
     const outputDir = resolve(actionRoot, optionalString(args.outputDir) ?? sessionOutputDir(sessionId));
@@ -1349,6 +1623,16 @@ const handlers: Record<string, ToolHandler> = {
     // performAction throws for anything it could not carry out — including an action kind the
     // runtime has no handler for — and the tool dispatcher turns a throw into an isError reply.
     // Reaching this line is therefore the success signal; the literal below is not an assumption.
+    const stagedPoint = actPoint(action, target);
+    const stagedHighlight = actHighlight(target);
+    await stageCursor({
+      lease,
+      point: stagedPoint,
+      highlight: stagedHighlight,
+      label: (action.description || action.kind).slice(0, 40),
+      wait: true,
+    });
+
     try {
       await engine.performAction(action, target);
     } catch (error) {
@@ -1634,16 +1918,33 @@ const handlers: Record<string, ToolHandler> = {
   },
 };
 
-/** Grok (and the MCP 2025 name grammar) reject dots in tool names. Keep the
- *  action.* names for Hermes; also publish health / observe_snapshot / … */
+/** Grok (and the MCP 2025 name grammar) reject dots in tool names.
+ *  `action.health` stays the handler key for Hermes. Spec names
+ *  (`health`, `observe_snapshot`, …) are what tools/list advertises
+ *  unless ACTION_MCP_TOOL_NAMES=legacy|both. Grok drops the *entire*
+ *  list if any advertised name has a dot, so "both" is never for Grok. */
 const specToolAliases: Record<string, string> = {};
-for (const existing of [...tools]) {
+const legacyTools = [...tools];
+const specTools: Tool[] = [];
+for (const existing of legacyTools) {
   const alias = existing.name.replace(/^action\./, "").replaceAll(".", "_");
   if (alias === existing.name) {
+    specTools.push(existing);
     continue;
   }
   specToolAliases[alias] = existing.name;
-  tools.push({ ...existing, name: alias });
+  specTools.push({ ...existing, name: alias });
+}
+
+function advertisedTools(): Tool[] {
+  const mode = (process.env.ACTION_MCP_TOOL_NAMES ?? "spec").trim().toLowerCase();
+  if (mode === "legacy") {
+    return legacyTools;
+  }
+  if (mode === "both") {
+    return [...legacyTools, ...specTools];
+  }
+  return specTools;
 }
 
 function createServer(): Server {
@@ -1664,13 +1965,16 @@ function createServer(): Server {
         "Background is the supported drive mode; attention approval is not available yet.",
         "Treat action.record.start as asynchronous; completion is represented by action.record.status and the finished file.",
         "Prefer action.observe.snapshot and action.resolve.target before action.act.execute.",
+        "Use action.drive.note before each beat so the supervision HUD shows what you are doing.",
+        "Use action.drive.aim to move the synthetic cursor and highlight a region before acting. Move, then do the thing.",
+        "Use action.drive.play to run a named list of beats (note, aim, wait, act) as one sequence.",
         "Use action.stage.set to declare the world for a take: a color drape plus the windows that sit on it. Never write the desktop picture.",
       ].join("\n"),
     },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools,
+    tools: advertisedTools(),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
