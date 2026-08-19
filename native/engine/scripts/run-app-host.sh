@@ -29,10 +29,12 @@ run_via_open() {
   # The drape must not steal focus. open(1) without -g activates Action, and a
   # later raise-window instance exiting can hand activation back to the still-
   # running drape — burying the subject that was just put on the sheet.
+  # window-order must not steal focus either: it exists to read the scene
+  # after raise, so activating Action would rewrite the z-order it measures.
   # raise-window itself cannot use -g: a background Action process sees an
   # empty AX window list, so the raise would never land.
   local open_flags=(-n)
-  if [[ "$COMMAND" == "drape" ]]; then
+  if [[ "$COMMAND" == "drape" || "$COMMAND" == "window-order" ]]; then
     open_flags+=(-g)
   fi
   open "${open_flags[@]}" "$APP_DIR" --args "$@" --reply-file "$reply_file" >/dev/null

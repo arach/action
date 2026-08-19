@@ -462,6 +462,30 @@ export interface StageWorld {
  */
 export type StageOwner = "caller" | "detached";
 
+export interface StageWindowInfo {
+  bundleId?: string;
+  title: string;
+  owner: string;
+  pid: number;
+  layer: number;
+  bounds: Bounds;
+}
+
+export type StageSceneIntruderReason = "above-subject" | "in-rect" | "subject-buried";
+
+/**
+ * What is actually on top of the sheet after raise.
+ * `ok` is false when a non-subject occupies the scene or a listed subject is still buried.
+ */
+export interface StageSceneReport {
+  ok: boolean;
+  bounds?: Bounds;
+  tops: StageWindowInfo[];
+  subjects: StageWindowInfo[];
+  drapes: StageWindowInfo[];
+  intruders: Array<StageWindowInfo & { reason: StageSceneIntruderReason }>;
+}
+
 export interface StageWorldStatus extends StageWorld {
   active: boolean;
   pid?: number;
@@ -469,6 +493,7 @@ export interface StageWorldStatus extends StageWorld {
   ownerPid?: number;
   stopFile?: string;
   raised: Array<StageSubject & { title: string }>;
+  scene?: StageSceneReport;
 }
 
 export interface TargetApp {

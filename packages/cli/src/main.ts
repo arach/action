@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { compileScenario } from "@action/compiler";
-import { CompanionClient, inspectCurrentSurface, settleCurrentSurfaceViewport, StageDirector } from "@action/runtime";
+import { CompanionClient, inspectCurrentSurface, settleCurrentSurfaceViewport, StageDirector, StageSceneError } from "@action/runtime";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -166,27 +166,36 @@ async function main(argv: string[]): Promise<void> {
           const [bundleId, title] = token.split(":");
           return title ? { bundleId, title } : { bundleId };
         });
-      const status = await director.set({
-        mode: flags.mode,
-        color: flags.color,
-        level: flags.level,
-        subjects,
-        // This process exits as soon as the drape is up, so it cannot be what the drape
-        // watches — a caller-owned sheet would dismiss itself within one poll interval.
-        // The lifetime is the backstop instead: `stage clear` is the intended teardown,
-        // and a forgotten drape still expires on its own.
-        owner: "detached",
-        seconds: flags.seconds ?? String(DEFAULT_CLI_STAGE_SECONDS),
-        bounds: flags.x
-          ? {
-              x: requiredNumber(flags, "x"),
-              y: requiredNumber(flags, "y"),
-              width: requiredNumber(flags, "width"),
-              height: requiredNumber(flags, "height"),
-            }
-          : undefined,
-      });
-      printJson({ ok: true, stage: status });
+      try {
+        const status = await director.set({
+          mode: flags.mode,
+          color: flags.color,
+          level: flags.level,
+          subjects,
+          // This process exits as soon as the drape is up, so it cannot be what the drape
+          // watches — a caller-owned sheet would dismiss itself within one poll interval.
+          // The lifetime is the backstop instead: `stage clear` is the intended teardown,
+          // and a forgotten drape still expires on its own.
+          owner: "detached",
+          seconds: flags.seconds ?? String(DEFAULT_CLI_STAGE_SECONDS),
+          bounds: flags.x
+            ? {
+                x: requiredNumber(flags, "x"),
+                y: requiredNumber(flags, "y"),
+                width: requiredNumber(flags, "width"),
+                height: requiredNumber(flags, "height"),
+              }
+            : undefined,
+        });
+        printJson({ ok: true, stage: status });
+      } catch (error) {
+        if (error instanceof StageSceneError) {
+          printJson({ ok: false, error: error.message, stage: error.stage });
+          process.exitCode = 1;
+          return;
+        }
+        throw error;
+      }
       return;
     }
     if (arg === "clear") {

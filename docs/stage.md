@@ -19,6 +19,8 @@ Action owns the look of a take. The wallpaper is never written.
 
 - Puts up a flat color sheet at ordinary window level (`NSWindow.Level.normal`).
 - `AXRaise`s only the listed windows. Same level is what lets them sit on the sheet.
+- Reads on-screen window order in the staged bounds (or the sheet's frames). The scene is the listed subjects on the sheet. Anything else above the sheet — including the driver terminal — is an intruder unless it was listed.
+- Fails `stage.set` if a listed subject is still buried or a non-subject occupies the scene. It raises again a couple of times before refusing. The sheet stays up so `stage.status` can show who is actually on top.
 - Leaves every other app alone. No hiding. No desktop-picture writes.
 - Dies with the process that asked for it. `action.stage.clear` takes it down on purpose.
 
@@ -29,7 +31,7 @@ Action owns the look of a take. The wallpaper is never written.
 - **Owner.** A drape set through MCP watches the MCP server and dismisses itself if that server dies. A drape set through the CLI cannot do this — the CLI process exits the moment the sheet is up, so a drape watching it would take itself down immediately. CLI drapes are detached.
 - **`seconds`.** An optional lifetime after which the drape dismisses itself. The CLI defaults to 1800; pass `--seconds` to change it. MCP omits it by default because the owner check already covers a dead server.
 
-`stage status` reports `owner`, `pid`, and whether the drape is still up.
+`stage status` reports `owner`, `pid`, whether the drape is still up, and `scene`: the windows actually on top of the sheet.
 
 `mode: "space"` keeps the sheet on the current Space only. Instantiate subjects on that Space; windows on other Spaces will not compose into the frame.
 

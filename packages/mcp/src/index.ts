@@ -38,6 +38,7 @@ import {
   MacOSCommandEngine,
   ocrScreenshot,
   StageDirector,
+  StageSceneError,
   pointFromBounds,
   publishPointerEventLog,
   readPointerEventLog,
@@ -836,7 +837,7 @@ const tools: Tool[] = [
   tool(
     "action.stage.set",
     "Set Stage",
-    "Declare what the world should look like for a take. Puts up a flat color drape and raises only the listed windows above it. Does not write the wallpaper, hide apps, or change Spaces unless mode is space (sheet stays on the current Space).",
+    "Declare what the world should look like for a take. Puts up a flat color drape, raises only the listed windows, then reads on-screen z-order and fails if anything else still occupies the scene. Does not write the wallpaper, hide apps, or change Spaces unless mode is space (sheet stays on the current Space).",
     objectSchema({
       mode: enumProperty(["drape", "space"], "drape (default) buries other windows under a same-level sheet. space keeps the sheet on this Space only."),
       color: textProperty("Sheet color as RRGGBB. Defaults to 0e0d0a."),
@@ -868,7 +869,7 @@ const tools: Tool[] = [
   tool(
     "action.stage.status",
     "Stage Status",
-    "Read whether a drape is up, its pid, and which windows were last raised.",
+    "Read whether a drape is up, its pid, which windows were last raised, and which windows are actually on top of the sheet.",
     objectSchema(),
     { readOnlyHint: true, idempotentHint: true },
   ),
@@ -1670,6 +1671,12 @@ function createServer(): Server {
       const args = asObject(request.params.arguments ?? {}, "arguments");
       return mcpResult(await handler(args));
     } catch (error) {
+      if (error instanceof StageSceneError) {
+        return mcpError(error.message, {
+          tool: request.params.name,
+          stage: error.stage as unknown as JsonObject,
+        });
+      }
       return mcpError(error instanceof Error ? error.message : String(error), {
         tool: request.params.name,
       });

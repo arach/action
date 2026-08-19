@@ -43,6 +43,7 @@ enum ActionHostCommand: String {
     case stageOverlay = "stage-overlay"
     case drape
     case raiseWindow = "raise-window"
+    case windowOrder = "window-order"
     case demoCursorOverlay = "demo-cursor-overlay"
     case agentCursorOverlay = "agent-cursor-overlay"
     case clickFeedbackOverlay = "click-feedback-overlay"
@@ -733,6 +734,54 @@ struct CurrentSurfaceResponse: Encodable {
     let bundleId: String
     let appName: String
     let frame: OverlayBounds?
+}
+
+struct WindowOrderEntry: Encodable {
+    let pid: Int
+    let bundleId: String?
+    let owner: String
+    let title: String
+    let layer: Int
+    let bounds: OverlayBounds
+}
+
+struct WindowOrderResponse: Encodable {
+    let status: String
+    let windows: [WindowOrderEntry]
+}
+
+func windowOrder(bounds: CGRect?) -> WindowOrderResponse {
+    let windowList = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [[String: Any]] ?? []
+
+    var windows: [WindowOrderEntry] = []
+    windows.reserveCapacity(windowList.count)
+    for windowInfo in windowList {
+        guard let frame = rect(from: windowInfo), frame.width >= 32, frame.height >= 32 else {
+            continue
+        }
+        if let bounds, !frame.intersects(bounds) {
+            continue
+        }
+        let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? pid_t ?? 0
+        let app = ownerPID > 0 ? NSRunningApplication(processIdentifier: ownerPID) : nil
+        let owner = (windowInfo[kCGWindowOwnerName as String] as? String)
+            ?? app?.localizedName
+            ?? ""
+        windows.append(
+            WindowOrderEntry(
+                pid: Int(ownerPID),
+                bundleId: app?.bundleIdentifier,
+                owner: owner,
+                title: windowInfo[kCGWindowName as String] as? String ?? "",
+                layer: windowInfo[kCGWindowLayer as String] as? Int ?? 0,
+                bounds: overlayBounds(from: frame)
+            )
+        )
+    }
+    return WindowOrderResponse(status: "window-order", windows: windows)
 }
 
 func overlayBounds(from rect: CGRect) -> OverlayBounds {
@@ -3793,6 +3842,18 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
                 detail: "\(bundleId): \(raisedTitle)"
             )
         )
+    case .windowOrder:
+        let bounds: CGRect?
+        if let spec = options.options["bounds"] {
+            let numbers = spec.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard numbers.count == 4, numbers[2] > 0, numbers[3] > 0 else {
+                throw ActionHostError.missingOption("--bounds x,y,width,height")
+            }
+            bounds = CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
+        } else {
+            bounds = nil
+        }
+        try writer.write(windowOrder(bounds: bounds))
     case .requestApplicationActivation:
         let bundleId = try options.required("bundle-id")
         try ActionNativeAutomation.activateApplication(bundleId: bundleId)

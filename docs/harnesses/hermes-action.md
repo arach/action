@@ -38,7 +38,7 @@ ACTION_ROOT=/Users/art/dev/action
 - `action.observe.ax`
 - `action.resolve.target`
 - `action.act.execute`
-- `action.stage.set`
+- `action.stage.set` (fails if the listed windows are not actually on the sheet)
 - `action.stage.clear`
 - `action.stage.status`
 - `action.record.start`
