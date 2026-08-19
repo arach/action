@@ -699,7 +699,8 @@
         action<span>.app</span>
       </a>
       <ul class="nav-links">
-        <li><a href="#install">Install</a></li>
+        <li><a href="#download">Install</a></li>
+        <li><a href="#install">Plugin</a></li>
         <li><a href="#demo">Demo</a></li>
         <li><a class="nav-agents" href="agents/">For agents</a></li>
         <li><a href="https://github.com/arach/action">GitHub</a></li>
@@ -718,8 +719,8 @@
           <h1 id="hero-title">Action gives agents an API to record and share computer use.</h1>
           <p class="hero-lead">Each macOS run can include video, screenshots, accessibility context, and traces.</p>
           <div class="actions">
-            <a class="button" href="#install">Install for agents <span aria-hidden="true">→</span></a>
-            <a class="button secondary" href="#demo">Watch the capture</a>
+            <a class="button" href="#download">Download for macOS <span aria-hidden="true">↓</span></a>
+            <a class="button secondary" href="#install">Install for agents</a>
           </div>
           <p class="agent-entry">
             Reading this as an agent? <a href="agents/">Start here</a> — capabilities, connection, and which browser to drive.
@@ -741,6 +742,40 @@
         <span>CLI + MCP</span>
       </div>
     </div>
+
+    <section class="section" id="download" aria-labelledby="download-title">
+      <div class="shell">
+        <div class="section-heading">
+          <p class="section-label">Install</p>
+          <h2 id="download-title">Get Action on your Mac.</h2>
+          <p class="lead">A signed, notarized build. Download it, drag it to Applications, and grant the two permissions macOS asks for the first time you record.</p>
+        </div>
+
+        <div class="actions">
+          <a class="button" href="https://github.com/arach/action/releases/latest/download/Action.dmg">Download for macOS <span aria-hidden="true">↓</span></a>
+          <a class="button secondary" href="https://github.com/arach/action/releases/latest">All releases</a>
+        </div>
+
+        <ul class="install-facts">
+          <li><strong>Requires</strong><span>macOS 14 or newer, Apple silicon.</span></li>
+          <li><strong>Permissions</strong><span>Accessibility to read and drive controls, Screen Recording to capture. Both are asked for on first use and can be revoked in System Settings.</span></li>
+          <li><strong>Local</strong><span>Runs and recordings stay on your Mac. Nothing is uploaded.</span></li>
+        </ul>
+
+        <div class="section-heading" style="margin-top: 48px;">
+          <h3 id="download-agent-title">Then connect an agent</h3>
+          <p class="lead">Action speaks MCP over stdio. Hand this to the agent once and the tools appear on its next task.</p>
+        </div>
+
+        <div class="prompt-block">
+          <pre id="mcp-connect-command">claude mcp add action -s user -e ACTION_ROOT=~/dev/action \
+  -- bun --cwd ~/dev/action packages/mcp/src/index.ts</pre>
+          <button class="copy-button" type="button" data-copy-target="mcp-connect-command" aria-label="Copy the MCP setup command">Copy</button>
+        </div>
+
+        <p class="lead" style="margin-top: 16px;">The runtime server currently runs from a source checkout, so this line needs the repository and <a href="https://bun.sh">Bun</a>. A self-contained server that ships inside the app is the next step — until then, <a href="https://github.com/arach/action">clone the repo</a> alongside the app.</p>
+      </div>
+    </section>
 
     <section class="install-section" id="install" aria-labelledby="install-title">
       <div class="shell install-grid">
