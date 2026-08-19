@@ -45,7 +45,6 @@
     "mira:hide": "bun scripts/mira-overlay.mjs hide",
     "scenario:calculator": "bun packages/cli/src/main.ts scenario calculator-demo",
     "scenario:notes": "bun packages/cli/src/main.ts scenario notes-demo",
-    "hud": "bun packages/hud/src/server.ts",
     "native:dev": "bun packages/cli/src/action-dev.ts",
     "native:app:build": "native/engine/scripts/build-app.sh",
     "native:dmg:build": "Installer/build.sh",

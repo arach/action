@@ -4451,7 +4451,7 @@ struct ActionHostMain {
             }
             return true
         case .webkitSmoke:
-            let urlString = options.options["url"] ?? "http://127.0.0.1:4318/"
+            let urlString = options.options["url"] ?? "https://example.com"
             guard let url = URL(string: urlString) else {
                 FileHandle.standardError.write(Data("ActionHost failed: missing or invalid --url\n".utf8))
                 Darwin.exit(1)

@@ -269,7 +269,6 @@ The release workflow builds, signs, notarizes, verifies, and uploads generic and
 - `packages/compiler` — scenario intent to executable timeline
 - `packages/composer-core` — render-manifest contract
 - `packages/composer-remotion` — early Remotion backend boundary
-- `packages/hud` — local web console / HUD
 - `docs` — architecture, decisions, milestones, and runtime notes
 
 ## Important Runtime Notes

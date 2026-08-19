@@ -239,25 +239,13 @@ private struct GuidedCaptureLauncherResult: Decodable {
 @MainActor
 final class ActionLauncherViewModel: ObservableObject {
     private let logger = Logger(subsystem: "dev.action.Action", category: "Launcher")
-    private let demoSiteURL = URL(string: "https://example.com")!
-    private let localConsoleURL = URL(string: "http://127.0.0.1:4318/")!
     private let agentProcess = ActionAgentProcessController()
     private let agentClient = ActionAgentClient()
-    private var browserWindowController: ActionBrowserWindowController?
-    private var localConsoleProcess: Process?
-    private var consoleReachabilityTask: Task<Void, Never>?
-    private var consoleWatchdogTask: Task<Void, Never>?
 
     @Published var agentStatus: String = "Offline"
     @Published var accessibilityStatus: String = "Unknown"
     @Published var screenRecordingStatus: String = "Unknown"
     @Published var notes: [String] = []
-    @Published var consoleURL: URL
-    @Published var consoleStatus: String = "Ready"
-    @Published var consoleDetail: String = "Optional local HUD for diagnostics."
-    @Published var consoleIsReachable: Bool = false
-    @Published var consoleIsManagedByAction: Bool = false
-    @Published var consoleAutoEnsureEnabled: Bool = true
     @Published var guidedDemoStatus: String = "Ready"
     @Published var recentSessions: [ActionSessionSummary] = []
     @Published var isRunningGuidedDemo: Bool = false
@@ -294,12 +282,9 @@ final class ActionLauncherViewModel: ObservableObject {
     }
 
     init() {
-        self.consoleURL = localConsoleURL
         self.appearanceMode = ActionAppearanceStore.shared.mode
         refreshSessions()
         refreshScenarios()
-        refreshConsoleState()
-        startConsoleWatchdog()
     }
 
     func refreshPermissions() {
@@ -326,106 +311,6 @@ final class ActionLauncherViewModel: ObservableObject {
         }
     }
 
-    func openWebConsoleInBrowser() {
-        NSWorkspace.shared.open(consoleURL)
-    }
-
-    func openEmbeddedConsole() {
-        consoleURL = localConsoleURL
-        openBrowserWindow()
-    }
-
-    func startLocalConsole() {
-        consoleAutoEnsureEnabled = true
-
-        if consoleIsReachable && localConsoleProcess == nil {
-            consoleStatus = "Ready"
-            consoleDetail = localConsoleURL.absoluteString
-            return
-        }
-
-        if let localConsoleProcess, localConsoleProcess.isRunning {
-            consoleStatus = "Ready"
-            consoleDetail = localConsoleURL.absoluteString
-            return
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["bun", "run", "hud"]
-        process.currentDirectoryURL = repositoryRootURL()
-        let logURL = consoleLogURL()
-        FileManager.default.createFile(atPath: logURL.path, contents: Data())
-        let logHandle = try? FileHandle(forWritingTo: logURL)
-        process.standardOutput = logHandle
-        process.standardError = logHandle
-        process.terminationHandler = { [weak self] proc in
-            Task { @MainActor in
-                guard let self else { return }
-                self.localConsoleProcess = nil
-                self.consoleIsManagedByAction = false
-                self.consoleStatus = "Off"
-                self.consoleDetail = "HUD stopped."
-                self.refreshConsoleState()
-            }
-        }
-
-        do {
-            try process.run()
-            localConsoleProcess = process
-            consoleIsManagedByAction = true
-            consoleStatus = "Starting…"
-            consoleDetail = "Opening the local HUD."
-            logger.notice("Started local console process (pid=\(process.processIdentifier, privacy: .public))")
-            scheduleConsoleProbeBurst()
-        } catch {
-            consoleStatus = "Failed"
-            consoleDetail = error.localizedDescription
-            logger.error("Failed to start local console: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
-    func stopLocalConsole() {
-        consoleAutoEnsureEnabled = false
-
-        guard let localConsoleProcess, localConsoleProcess.isRunning else {
-            if consoleIsReachable {
-                consoleStatus = "Ready"
-                consoleDetail = "HUD is running outside Action. Auto-start is off."
-            } else {
-                consoleStatus = "Off"
-                consoleDetail = "HUD is stopped."
-            }
-            return
-        }
-
-        localConsoleProcess.terminate()
-        self.localConsoleProcess = nil
-        consoleIsManagedByAction = false
-        consoleStatus = "Stopping…"
-        consoleDetail = "HUD is shutting down."
-        scheduleConsoleProbeBurst()
-    }
-
-    func restartLocalConsole() {
-        consoleAutoEnsureEnabled = true
-        if let localConsoleProcess, localConsoleProcess.isRunning {
-            localConsoleProcess.terminate()
-            self.localConsoleProcess = nil
-        }
-        consoleIsManagedByAction = false
-        consoleStatus = "Restarting…"
-        consoleDetail = "Restarting the local HUD."
-        startLocalConsole()
-    }
-
-    func refreshConsoleState() {
-        consoleReachabilityTask?.cancel()
-        consoleReachabilityTask = Task { @MainActor in
-            await self.updateConsoleReachability()
-        }
-    }
-
     /// Where this checkout lives. Home builds the MCP setup snippet against it
     /// so the line an operator copies is correct for their machine rather than
     /// for the path the docs happen to use.
@@ -448,67 +333,6 @@ final class ActionLauncherViewModel: ObservableObject {
     func stopAllDrives() {
         let stopped = ActionSupervisionRegistry.triggerStopAll()
         logger.log("home: requested stop for \(stopped) supervised drive(s)")
-    }
-
-    func copyLocalConsoleCommand() {
-        let command = "cd \(repositoryRootURL().path.quotedForShell()) && bun run hud"
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(command, forType: .string)
-        consoleStatus = "Ready"
-        consoleDetail = "Copied launch command."
-    }
-
-    func openConsoleLog() {
-        let logURL = consoleLogURL()
-        guard FileManager.default.fileExists(atPath: logURL.path) else {
-            consoleStatus = "Off"
-            consoleDetail = "No HUD log yet."
-            return
-        }
-        NSWorkspace.shared.open(logURL)
-    }
-
-    func showDemoSite() {
-        consoleURL = demoSiteURL
-        openBrowserWindow()
-    }
-
-    func showLocalConsole() {
-        consoleURL = localConsoleURL
-        openBrowserWindow()
-    }
-
-    func reloadConsole() {
-        browserController().reload()
-        refreshConsoleState()
-    }
-
-    func setConsoleStatus(_ status: String) {
-        consoleStatus = status
-    }
-
-    func handleWebViewCommand(_ command: ActionWebViewCommand) {
-        switch command {
-        case .startLocalConsole:
-            startLocalConsole()
-        case .copyText(let value):
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(value, forType: .string)
-            consoleStatus = "Copied to clipboard"
-            consoleDetail = value
-        }
-    }
-
-    func openBrowserWindow() {
-        logger.notice("openBrowserWindow called with URL: \(self.consoleURL.absoluteString, privacy: .public)")
-        browserController().show(url: self.consoleURL)
-        refreshConsoleState()
-    }
-
-    func showWebInspector() {
-        browserController().showInspector()
     }
 
     func openScenariosFolder() {
@@ -885,33 +709,11 @@ final class ActionLauncherViewModel: ObservableObject {
 
     func stopAgent() {
         agentProcess.stopIfNeeded()
-        consoleReachabilityTask?.cancel()
-        consoleWatchdogTask?.cancel()
-        if let localConsoleProcess, localConsoleProcess.isRunning {
-            localConsoleProcess.terminate()
-            self.localConsoleProcess = nil
-            consoleIsManagedByAction = false
-        }
     }
 
     func setAppearanceMode(_ mode: ActionAppearanceMode) {
         appearanceMode = mode
         ActionAppearanceStore.shared.mode = mode
-    }
-
-    private func browserController() -> ActionBrowserWindowController {
-        if let browserWindowController {
-            return browserWindowController
-        }
-        let controller = ActionBrowserWindowController()
-        controller.onStatusChange = { [weak self] text in
-            self?.consoleStatus = text
-        }
-        controller.onCommand = { [weak self] command in
-            self?.handleWebViewCommand(command)
-        }
-        browserWindowController = controller
-        return controller
     }
 
     private func repositoryRootURL() -> URL {
@@ -929,94 +731,6 @@ final class ActionLauncherViewModel: ObservableObject {
         }
 
         return FileManager.default.homeDirectoryForCurrentUser
-    }
-
-    private func consoleLogURL() -> URL {
-        let directory = sessionsDirectoryURL().deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.appendingPathComponent("console.log")
-    }
-
-    private func scheduleConsoleProbeBurst() {
-        consoleReachabilityTask?.cancel()
-        consoleReachabilityTask = Task { @MainActor in
-            for index in 0..<8 {
-                await updateConsoleReachability()
-                if Task.isCancelled {
-                    return
-                }
-                if consoleIsReachable && index >= 1 {
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(400))
-            }
-        }
-    }
-
-    private func updateConsoleReachability() async {
-        let reachable = await probeConsoleReachability()
-        consoleIsReachable = reachable
-
-        if reachable {
-            if let localConsoleProcess, localConsoleProcess.isRunning {
-                consoleStatus = "Ready"
-                consoleDetail = localConsoleURL.absoluteString
-                consoleIsManagedByAction = true
-            } else {
-                consoleStatus = "Ready"
-                consoleDetail = localConsoleURL.absoluteString
-            }
-        } else if let localConsoleProcess, localConsoleProcess.isRunning {
-            consoleStatus = "Starting…"
-            consoleDetail = "Waiting for the HUD to answer."
-            consoleIsManagedByAction = true
-        } else if !consoleAutoEnsureEnabled {
-            consoleStatus = "Off"
-            consoleDetail = "HUD is stopped."
-            consoleIsManagedByAction = false
-        } else {
-            consoleStatus = "Off"
-            consoleDetail = "Start the HUD when you need diagnostics."
-            consoleIsManagedByAction = false
-        }
-    }
-
-    private func startConsoleWatchdog() {
-        consoleWatchdogTask?.cancel()
-        consoleWatchdogTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(250))
-
-            while !Task.isCancelled {
-                let reachable = await probeConsoleReachability()
-                self.consoleIsReachable = reachable
-
-                if !reachable, self.consoleAutoEnsureEnabled, (self.localConsoleProcess?.isRunning != true) {
-                    self.consoleStatus = "Starting…"
-                    self.consoleDetail = "Opening the local HUD."
-                    self.startLocalConsole()
-                } else {
-                    await self.updateConsoleReachability()
-                }
-
-                try? await Task.sleep(for: .seconds(5))
-            }
-        }
-    }
-
-    private func probeConsoleReachability() async -> Bool {
-        var request = URLRequest(url: localConsoleURL)
-        request.timeoutInterval = 1.0
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse {
-                return (200..<500).contains(httpResponse.statusCode)
-            }
-            return true
-        } catch {
-            return false
-        }
     }
 
     private func refreshAgentStatus() async {

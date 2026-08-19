@@ -116,11 +116,6 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
             action: #selector(showSettings),
             keyEquivalent: ","
         )
-        appMenu.addItem(
-            withTitle: "Open Embedded Console",
-            action: #selector(openBrowserWindow),
-            keyEquivalent: ""
-        )
         appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: "Hide \(appName)",
@@ -154,16 +149,6 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
             withTitle: "New Window",
             action: #selector(openNewWindow),
             keyEquivalent: "n"
-        )
-        fileMenu.addItem(
-            withTitle: "Open Embedded Console",
-            action: #selector(openBrowserWindow),
-            keyEquivalent: "b"
-        )
-        fileMenu.addItem(
-            withTitle: "Open Console in Browser",
-            action: #selector(openConsoleInBrowser),
-            keyEquivalent: ""
         )
         fileItem.submenu = fileMenu
         mainMenu.addItem(fileItem)
@@ -229,16 +214,6 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
     private func openNewWindow() {
         showWindow()
         NSApplication.shared.activate(ignoringOtherApps: true)
-    }
-
-    @objc
-    private func openBrowserWindow() {
-        viewModel.openEmbeddedConsole()
-    }
-
-    @objc
-    private func openConsoleInBrowser() {
-        viewModel.openWebConsoleInBrowser()
     }
 
     @objc

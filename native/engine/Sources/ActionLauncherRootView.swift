@@ -181,7 +181,6 @@ struct ActionLauncherRootView: View {
     @State private var sidebarPreviewWidth: CGFloat?
     @AppStorage("Action.LibraryLayout") private var libraryLayoutRaw = LibraryLayout.gallery.rawValue
     @AppStorage("Action.SettingsPane") private var settingsPaneRaw = SettingsPane.permissions.rawValue
-    @StateObject private var consoleBridge = ActionEmbeddedWebConsoleBridge()
     private let sessionDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
@@ -2301,78 +2300,6 @@ struct ActionLauncherRootView: View {
 
     private var settingsAdvancedPage: some View {
         VStack(alignment: .leading, spacing: 18) {
-            ActionSettingsSection(title: "Local HUD") {
-                ActionSettingsRow(
-                    icon: "safari",
-                    title: "Web diagnostics",
-                    subtitle: "Optional local page for deeper operator tools. Day-to-day work stays in Takes."
-                ) {
-                    ActionSettingsStatusBadge(
-                        text: humanConsoleStatus,
-                        kind: model.consoleIsReachable ? .ok : .neutral
-                    )
-                }
-
-                ActionSettingsDivider()
-
-                ActionSettingsControlRow(
-                    title: "Controls",
-                    subtitle: model.consoleURL.absoluteString,
-                    icon: "slider.horizontal.3"
-                ) {
-                    HStack(spacing: 8) {
-                        Button(model.consoleIsReachable ? "Open" : "Start") {
-                            if model.consoleIsReachable {
-                                model.openWebConsoleInBrowser()
-                            } else {
-                                model.startLocalConsole()
-                            }
-                        }
-                        .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
-
-                        if model.consoleIsReachable {
-                            Button("Restart", action: model.restartLocalConsole)
-                                .buttonStyle(ActionSettingsPillButtonStyle())
-                            Button("Stop", action: model.stopLocalConsole)
-                                .buttonStyle(ActionSettingsPillButtonStyle())
-                        }
-
-                        Button("Pop out", action: model.openEmbeddedConsole)
-                            .buttonStyle(ActionSettingsPillButtonStyle())
-                    }
-                }
-
-                if model.consoleIsReachable {
-                    ActionSettingsDivider()
-
-                    DisclosureGroup("Embedded preview") {
-                        ActionEmbeddedWebConsoleView(
-                            url: model.consoleURL,
-                            bridge: consoleBridge,
-                            onStatusChange: { status in
-                                model.setConsoleStatus(status)
-                            },
-                            onCommand: { command in
-                                model.handleWebViewCommand(command)
-                            }
-                        )
-                        .frame(minHeight: 360)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-                        )
-                        .padding(.top, 10)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 14)
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                }
-            }
-
             ActionSettingsSection(title: "Files") {
                 ActionSettingsRow(
                     icon: "folder",
@@ -2440,16 +2367,6 @@ struct ActionLauncherRootView: View {
                 )
             }
         }
-    }
-
-    private var humanConsoleStatus: String {
-        if model.consoleIsReachable {
-            return "Ready"
-        }
-        if model.consoleAutoEnsureEnabled {
-            return "Starting…"
-        }
-        return "Off"
     }
 
     private func permissionStatusLabel(_ status: String) -> String {
