@@ -21,9 +21,18 @@ struct AgentCursorState: Codable, Equatable {
     var countdown: Int?
     /// Unique per act so repeated clicks/types re-trigger sound + visuals.
     var cueId: String?
+    /// Optional region the cursor is presenting — same coordinate space as `x`/`y`.
+    var highlight: AgentCursorHighlight?
     /// Renewable deadline after which this detached overlay releases itself.
     var expiresAt: String?
     var updatedAt: String?
+}
+
+struct AgentCursorHighlight: Codable, Equatable {
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
 }
 
 private struct TrailSample {
@@ -67,11 +76,14 @@ final class AgentCursorOverlayController: NSObject {
     private static let iso8601Format = Date.ISO8601FormatStyle()
     private static let fractionalISO8601Format = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
-    /// Familiar macOS pointer angle: the arrow points counter-clockwise toward the upper-left.
-    private let brandLean: CGFloat = -22.0 * .pi / 180.0
-    /// Restrained operator-only motion, layered on top of the pointer angle.
+    /// Rest pose of a real pointer: from the lower-right, tip toward upper-left.
+    /// Steeper than vertical so it never reads as a rocket.
+    private let brandLean: CGFloat = -38.0 * .pi / 180.0
+    /// Extra motion on top of the rest pose — idle breath, arrival settle, click strike.
     private var leanAngle: CGFloat = 0
     private var leanVelocity: CGFloat = 0
+    private var pendingClick = false
+    private var settleUntil: TimeInterval = 0
 
     init(
         stateFile: String,
@@ -219,12 +231,15 @@ final class AgentCursorOverlayController: NSObject {
             clickStartedAt = nil
             typingStartedAt = nil
         case "click":
-            clickStartedAt = Date()
             typingStartedAt = nil
             typingFullText = ""
             typingRevealCount = 0
             lastCountdownValue = nil
-            soundPlayer.playClick()
+            if isTraveling {
+                pendingClick = true
+            } else {
+                fireClickCue()
+            }
         case "type":
             let text = decoded.typingText ?? decoded.label ?? ""
             typingFullText = text
@@ -250,6 +265,12 @@ final class AgentCursorOverlayController: NSObject {
             lastCountdownValue = nil
             break
         }
+    }
+
+    private func fireClickCue() {
+        clickStartedAt = Date()
+        settleUntil = Date().timeIntervalSince(startedAt) + 0.28
+        soundPlayer.playClick()
     }
 
     private func beginMove(to target: CGPoint) {
@@ -355,6 +376,11 @@ final class AgentCursorOverlayController: NSObject {
                 travelPoint = target
                 isTraveling = false
                 speed = 0
+                settleUntil = now + 0.32
+                if pendingClick {
+                    pendingClick = false
+                    fireClickCue()
+                }
             } else {
                 let eased = Self.trekEase(u)
                 let prevU = max(0, (now - dt - t0) / max(0.001, moveDuration))
@@ -458,6 +484,16 @@ final class AgentCursorOverlayController: NSObject {
             return state.label
         }()
 
+        var localHighlight: CGRect?
+        if let box = state.highlight, box.width > 4, box.height > 4 {
+            localHighlight = CGRect(
+                x: box.x - screen.frame.origin.x,
+                y: box.y - screen.frame.origin.y,
+                width: box.width,
+                height: box.height
+            )
+        }
+
         overlayView?.model = AgentCursorRenderModel(
             point: local,
             trail: localTrail,
@@ -470,22 +506,28 @@ final class AgentCursorOverlayController: NSObject {
             typingVisible: typingVisible,
             showCaret: showCaret,
             isKeyCue: phase == "key",
-            countdown: phase == "countdown" ? state.countdown : nil
+            countdown: phase == "countdown" ? state.countdown : nil,
+            highlight: localHighlight
         )
         overlayView?.needsDisplay = true
     }
 
     private func stepBalance(dt: TimeInterval, amplitude: CGFloat) {
-        let t = Date().timeIntervalSince(startedAt)
-        let noise = sin(t * 1.35) * 0.55 + sin(t * 2.9 + 0.7) * 0.28 + sin(t * 4.6 + 1.4) * 0.12
-        let spring: CGFloat = 18.0
-        let damping: CGFloat = 5.5
-        let drive = CGFloat(noise) * 0.85 * amplitude
+        let now = Date().timeIntervalSince(startedAt)
+        let t = now
+        // Idle breath plus a quicker fidget — reads as attention, not a screensaver.
+        let noise = sin(t * 1.15) * 0.72 + sin(t * 2.4 + 0.6) * 0.38 + sin(t * 4.1 + 1.1) * 0.16
+        var drive = CGFloat(noise) * 1.25 * amplitude
+        if now < settleUntil {
+            let remaining = settleUntil - now
+            drive += sin((0.32 - remaining) * 18) * 0.22 * CGFloat(remaining / 0.32)
+        }
+        let spring: CGFloat = 16.0
+        let damping: CGFloat = 4.8
         let accel = -spring * leanAngle - damping * leanVelocity + drive
         leanVelocity += accel * CGFloat(dt)
         leanAngle += leanVelocity * CGFloat(dt)
-        // Micro-sway only — brand lean is applied separately.
-        leanAngle = min(0.06, max(-0.06, leanAngle))
+        leanAngle = min(0.14, max(-0.14, leanAngle))
     }
 
     private func stateIsExpired(at now: Date) -> Bool {
@@ -529,6 +571,7 @@ struct AgentCursorRenderModel {
     var showCaret: Bool
     var isKeyCue: Bool
     var countdown: Int?
+    var highlight: CGRect?
 }
 
 final class AgentCursorOverlayView: NSView {
@@ -550,6 +593,9 @@ final class AgentCursorOverlayView: NSView {
         }
 
         drawTrail(model.trail, head: model.point, speed: model.speed)
+        if let highlight = model.highlight {
+            drawHighlight(highlight)
+        }
         if let countdown = model.countdown, countdown > 0 {
             drawCountdown(at: model.point, value: countdown, lean: model.leanAngle)
         }
@@ -698,6 +744,21 @@ final class AgentCursorOverlayView: NSView {
             at: CGPoint(x: textX, y: rect.minY + padY - 1),
             withAttributes: attrs
         )
+    }
+
+    private func drawHighlight(_ rect: CGRect) {
+        let inset = rect.insetBy(dx: -3, dy: -3)
+        let frame = NSBezierPath(roundedRect: inset, xRadius: 10, yRadius: 10)
+        NSColor(calibratedRed: 0.953, green: 0.922, blue: 0.867, alpha: 0.07).setFill()
+        frame.fill()
+        NSColor(calibratedRed: 0.953, green: 0.922, blue: 0.867, alpha: 0.42).setStroke()
+        frame.lineWidth = 1.4
+        frame.stroke()
+
+        let inner = NSBezierPath(roundedRect: inset.insetBy(dx: 1.2, dy: 1.2), xRadius: 9, yRadius: 9)
+        NSColor(calibratedRed: 0.937, green: 0.416, blue: 0.278, alpha: 0.28).setStroke()
+        inner.lineWidth = 1.0
+        inner.stroke()
     }
 
     private func drawTrail(_ points: [CGPoint], head: CGPoint, speed: CGFloat) {

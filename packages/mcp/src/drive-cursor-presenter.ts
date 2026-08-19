@@ -20,6 +20,12 @@ export interface AgentCursorCue {
   keyLabel?: string;
   countdown?: number;
   cueId?: string;
+  highlight?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
 }
 
 /** Side-effecting cursor overlay calls, injected so the policy stays testable. */

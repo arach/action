@@ -13,6 +13,13 @@ import type {
 
 export const AGENT_CURSOR_IDLE_EXPIRY_MS = 90_000;
 
+export interface AgentCursorHighlight {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface AgentCursorState {
   x?: number;
   y?: number;
@@ -23,6 +30,7 @@ export interface AgentCursorState {
   keyLabel?: string;
   countdown?: number;
   cueId?: string;
+  highlight?: AgentCursorHighlight;
   expiresAt?: string;
   updatedAt?: string;
 }
@@ -97,6 +105,27 @@ export async function startAgentCursor(input: {
   ]);
 }
 
+export async function readAgentCursorState(leaseId: string): Promise<AgentCursorState | undefined> {
+  try {
+    return JSON.parse(await readFile(agentCursorStatePath(leaseId), "utf8")) as AgentCursorState;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Milliseconds to wait after aiming so the overlay warp finishes before the act. */
+export function cursorTravelMs(from: Point | undefined, to: Point): number {
+  if (!from || !Number.isFinite(from.x) || !Number.isFinite(from.y)) {
+    return 220;
+  }
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  if (distance < 2) {
+    return 80;
+  }
+  // Match the native overlay warp, then a short settle so the strike reads after arrival.
+  return Math.min(380, Math.max(110, distance / 2.4)) + 90;
+}
+
 export async function updateAgentCursor(input: {
   leaseId: string;
   agent?: string;
@@ -107,6 +136,7 @@ export async function updateAgentCursor(input: {
   keyLabel?: string;
   countdown?: number;
   cueId?: string;
+  highlight?: AgentCursorHighlight | null;
 }): Promise<void> {
   const statePath = agentCursorStatePath(input.leaseId);
   let previous: AgentCursorState = {};
@@ -131,6 +161,11 @@ export async function updateAgentCursor(input: {
     expiresAt: agentCursorExpiration(updatedAt),
     updatedAt,
   };
+  if (input.highlight === null) {
+    delete next.highlight;
+  } else if (input.highlight) {
+    next.highlight = input.highlight;
+  }
   if (next.phase === "idle") {
     next.typingText = undefined;
     next.keyLabel = undefined;
