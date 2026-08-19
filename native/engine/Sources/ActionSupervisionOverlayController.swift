@@ -10,8 +10,11 @@ private let actionSupervisionShadowMargin: CGFloat = 20
 // The card sizes live here rather than at each use site because the SwiftUI frame and the
 // panel window have to agree exactly: a window smaller than its card clips the card, and a
 // larger one leaves dead transparent space that still swallows clicks.
-private let actionSupervisionExpandedCard = CGSize(width: 360, height: 78)
+// The expanded card is a fixed console: header chrome, a taller log well, and a
+// footer of session actions. Growing with each note made the window jump.
+private let actionSupervisionExpandedCard = CGSize(width: 340, height: 276)
 private let actionSupervisionMinimizedCard = CGSize(width: 278, height: 50)
+private let actionSupervisionNoteLimit = 6
 
 @MainActor
 final class ActionSupervisionViewModel: ObservableObject {
@@ -21,6 +24,7 @@ final class ActionSupervisionViewModel: ObservableObject {
     @Published var stopButtonTitle: String = "Stop"
     @Published var isStopPending: Bool = false
     @Published var isMinimized: Bool = false
+    @Published var lines: [String] = []
 
     var onStop: (() -> Void)?
     var onToggleMinimized: (() -> Void)?
@@ -58,73 +62,132 @@ struct ActionSupervisionView: View {
     }
 
     private var expandedBody: some View {
-        HStack(spacing: 10) {
-            ActionSupervisionBrandMark(size: 28)
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 7) {
-                    Text("Action")
-                        .font(.system(size: 11, weight: .semibold, design: .default))
-                        .foregroundStyle(StageHUDTheme.hudPaper)
-
-                    Text(model.countLabel)
-                        .font(.system(size: 9, weight: .medium, design: .default))
-                        .foregroundStyle(StageHUDTheme.hudMuted)
-                        .lineLimit(1)
-                }
-
-                Text(model.title)
-                    .font(.system(size: 10, weight: .semibold, design: .default))
-                    .foregroundStyle(StageHUDTheme.hudPaper.opacity(0.92))
-                    .lineLimit(1)
-
-                Text(model.detail)
-                    .font(.system(size: 9, weight: .regular, design: .default))
-                    .foregroundStyle(StageHUDTheme.hudMuted)
-                    .lineLimit(1)
-            }
-            .layoutPriority(1)
-
-            Spacer(minLength: 6)
-
-            HStack(spacing: 7) {
-                Button {
-                    model.onToggleMinimized?()
-                } label: {
-                    Image(systemName: "chevron.up")
-                }
-                .buttonStyle(ActionSupervisionIconButtonStyle())
-                .help("Show less")
-                .accessibilityLabel("Show less supervision detail")
-
-                Button {
-                    model.onStop?()
-                } label: {
-                    ActionSupervisionStopLabel(title: model.stopButtonTitle)
-                }
-                .buttonStyle(ActionSupervisionButtonStyle())
-                .disabled(model.isStopPending)
-                .help(stopButtonHelp)
-                .accessibilityLabel(stopButtonHelp)
-            }
+        VStack(spacing: 0) {
+            expandedHeader
+            expandedLog
+            expandedFooter
         }
-        .padding(.leading, 13)
-        .padding(.trailing, 10)
         .frame(
             width: actionSupervisionExpandedCard.width,
             height: actionSupervisionExpandedCard.height,
-            alignment: .leading
+            alignment: .top
         )
-        .background(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(StageHUDTheme.hudCanvas.opacity(0.97))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .stroke(StageHUDTheme.hudStrokeStrong, lineWidth: 1)
-                )
-                .shadow(color: StageHUDTheme.hudShadow.opacity(0.72), radius: 12, x: 0, y: 7)
-        )
+        .background(ActionSupervisionGlass(cornerRadius: 14))
         .padding(actionSupervisionShadowMargin)
+        .preferredColorScheme(.dark)
+    }
+
+    private var expandedHeader: some View {
+        HStack(spacing: 9) {
+            ActionSupervisionBrandMark(size: 26)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Action")
+                    .font(.system(size: 11, weight: .semibold, design: .default))
+                    .foregroundStyle(StageHUDTheme.hudPaper)
+
+                Text(model.countLabel)
+                    .font(.system(size: 9, weight: .medium, design: .default))
+                    .foregroundStyle(StageHUDTheme.hudMuted)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                model.onToggleMinimized?()
+            } label: {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(ActionSupervisionIconButtonStyle())
+            .help("Show less")
+            .accessibilityLabel("Show less supervision detail")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 10)
+        .frame(height: 42)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(StageHUDTheme.hudPaper.opacity(0.10))
+                .frame(height: 1)
+        }
+    }
+
+    private var expandedLog: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.title)
+                    .font(.system(size: 12, weight: .semibold, design: .default))
+                    .foregroundStyle(StageHUDTheme.hudPaper.opacity(0.94))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(model.detail)
+                    .font(.system(size: 10, weight: .regular, design: .default))
+                    .foregroundStyle(StageHUDTheme.hudMuted)
+                    .lineLimit(2)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                if model.lines.isEmpty {
+                    Text("Waiting for the next beat.")
+                        .font(.system(size: 11, weight: .regular, design: .default))
+                        .foregroundStyle(StageHUDTheme.hudPaper.opacity(0.38))
+                } else {
+                    ForEach(Array(model.lines.enumerated()), id: \.offset) { index, line in
+                        let isLatest = index == model.lines.count - 1
+                        Text(line)
+                            .font(.system(
+                                size: 11,
+                                weight: isLatest ? .medium : .regular,
+                                design: .default
+                            ))
+                            .foregroundStyle(
+                                StageHUDTheme.hudPaper.opacity(isLatest ? 0.92 : 0.46)
+                            )
+                            .lineLimit(isLatest ? 2 : 1)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .padding(.horizontal, 13)
+        .padding(.top, 10)
+        .padding(.bottom, 11)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(StageHUDTheme.hudRecess.opacity(0.48))
+    }
+
+    private var expandedFooter: some View {
+        HStack(spacing: 8) {
+            Button {
+                model.onClose?()
+            } label: {
+                Text("Quit")
+            }
+            .buttonStyle(ActionSupervisionSecondaryButtonStyle())
+            .help("Hide the supervision HUD. Active sessions keep running.")
+            .accessibilityLabel("Hide the supervision HUD")
+
+            Spacer(minLength: 8)
+
+            Button {
+                model.onStop?()
+            } label: {
+                ActionSupervisionStopLabel(title: model.stopButtonTitle)
+            }
+            .buttonStyle(ActionSupervisionButtonStyle())
+            .disabled(model.isStopPending)
+            .help(stopButtonHelp)
+            .accessibilityLabel(stopButtonHelp)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 46)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(StageHUDTheme.hudPaper.opacity(0.10))
+                .frame(height: 1)
+        }
     }
 
     private var minimizedBody: some View {
@@ -169,16 +232,9 @@ struct ActionSupervisionView: View {
             height: actionSupervisionMinimizedCard.height,
             alignment: .leading
         )
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(StageHUDTheme.hudCanvas.opacity(0.97))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(StageHUDTheme.hudStrokeStrong, lineWidth: 1)
-                )
-                .shadow(color: StageHUDTheme.hudShadow.opacity(0.72), radius: 11, x: 0, y: 6)
-        )
+        .background(ActionSupervisionGlass(cornerRadius: 12))
         .padding(actionSupervisionShadowMargin)
+        .preferredColorScheme(.dark)
     }
 
     private var stopButtonHelp: String {
@@ -193,7 +249,25 @@ struct ActionSupervisionView: View {
     }
 }
 
-private struct ActionSupervisionBrandMark: View {
+private struct ActionSupervisionGlass: View {
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(StageHUDTheme.hudCanvas.opacity(0.38))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(StageHUDTheme.hudPaper.opacity(0.16), lineWidth: 1)
+            )
+            .shadow(color: StageHUDTheme.hudShadow.opacity(0.34), radius: 16, x: 0, y: 8)
+    }
+}
+
+struct ActionSupervisionBrandMark: View {
     let size: CGFloat
 
     var body: some View {
@@ -227,6 +301,26 @@ private struct ActionSupervisionStopLabel: View {
     }
 }
 
+struct ActionSupervisionSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 10, weight: .semibold, design: .default))
+            .foregroundStyle(StageHUDTheme.hudPaper.opacity(configuration.isPressed ? 0.62 : 0.86))
+            .padding(.horizontal, 11)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(configuration.isPressed ? StageHUDTheme.hudPanel : StageHUDTheme.hudPanelRaised)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(StageHUDTheme.hudStrokeStrong, lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 struct ActionSupervisionButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
@@ -252,7 +346,7 @@ struct ActionSupervisionButtonStyle: ButtonStyle {
     }
 }
 
-private struct ActionSupervisionIconButtonStyle: ButtonStyle {
+struct ActionSupervisionIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 9, weight: .semibold))
@@ -328,7 +422,7 @@ final class ActionSupervisionOverlayController: NSObject {
             self?.toggleMinimized()
         }
         model.onClose = { [weak self] in
-            self?.dismissOverlay(reason: "context-menu")
+            self?.dismissOverlay(reason: "quit")
         }
         createWindow()
         startPolling()
@@ -464,6 +558,10 @@ final class ActionSupervisionOverlayController: NSObject {
         }
         if model.isStopPending != stopPresentation.isPending {
             model.isStopPending = stopPresentation.isPending
+        }
+        let notes = ActionSupervisionRegistry.recentHudLines(limit: actionSupervisionNoteLimit)
+        if model.lines != notes {
+            model.lines = notes
         }
         let nextPositioningFingerprint = registrations
             .compactMap(\.avoidedDisplayID)
