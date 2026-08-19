@@ -4,6 +4,16 @@ import Foundation
 // The cycle is inherent to the product — not a named "loop" object.
 // Users work with a scenario (plan) and takes (runs).
 
+enum ActionLauncherDestination: String, CaseIterable, Identifiable {
+    case home
+    case scenarios
+    case runs
+    case library
+    case settings
+
+    var id: String { rawValue }
+}
+
 /// What you're looking at for a scenario — plan vs last take.
 /// Start is not a mode; it's creating a scenario.
 enum ActionFlowPhase: String, CaseIterable, Identifiable {

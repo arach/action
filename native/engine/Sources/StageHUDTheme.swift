@@ -13,24 +13,24 @@ enum StageHUDTheme {
     }
 
     static let appBackground = dynamic(
-        light: NSColor(calibratedWhite: 0.965, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.09, alpha: 1)
+        light: NSColor(calibratedRed: 0.953, green: 0.922, blue: 0.867, alpha: 1),
+        dark: NSColor(calibratedRed: 0.078, green: 0.098, blue: 0.102, alpha: 1)
     )
     static let railBackground = dynamic(
-        light: NSColor(calibratedWhite: 0.94, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.075, alpha: 1)
+        light: NSColor(calibratedRed: 0.925, green: 0.886, blue: 0.812, alpha: 1),
+        dark: NSColor(calibratedRed: 0.055, green: 0.071, blue: 0.074, alpha: 1)
     )
     static let footerBackground = dynamic(
-        light: NSColor(calibratedWhite: 0.955, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.07, alpha: 1)
+        light: NSColor(calibratedRed: 0.929, green: 0.894, blue: 0.827, alpha: 1),
+        dark: NSColor(calibratedRed: 0.055, green: 0.071, blue: 0.074, alpha: 1)
     )
     static let panelBackgroundTop = dynamic(
-        light: NSColor.white,
-        dark: NSColor(calibratedWhite: 0.07, alpha: 1)
+        light: NSColor(calibratedRed: 0.980, green: 0.961, blue: 0.922, alpha: 1),
+        dark: NSColor(calibratedRed: 0.110, green: 0.133, blue: 0.137, alpha: 1)
     )
     static let panelBackgroundBottom = dynamic(
-        light: NSColor.white,
-        dark: NSColor(calibratedWhite: 0.07, alpha: 1)
+        light: NSColor(calibratedRed: 0.980, green: 0.961, blue: 0.922, alpha: 1),
+        dark: NSColor(calibratedRed: 0.110, green: 0.133, blue: 0.137, alpha: 1)
     )
     static let panelBorder = dynamic(
         light: NSColor(calibratedWhite: 0.05, alpha: 0.12),
@@ -41,24 +41,24 @@ enum StageHUDTheme {
         dark: NSColor(calibratedWhite: 0.0, alpha: 0.22)
     )
     static let textPrimary = dynamic(
-        light: NSColor(calibratedWhite: 0.08, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.95, alpha: 1)
+        light: NSColor(calibratedRed: 0.125, green: 0.157, blue: 0.169, alpha: 1),
+        dark: NSColor(calibratedRed: 0.953, green: 0.922, blue: 0.867, alpha: 1)
     )
     static let textSecondary = dynamic(
-        light: NSColor(calibratedWhite: 0.26, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.74, alpha: 1)
+        light: NSColor(calibratedRed: 0.349, green: 0.384, blue: 0.380, alpha: 1),
+        dark: NSColor(calibratedRed: 0.659, green: 0.702, blue: 0.694, alpha: 1)
     )
     static let textMuted = dynamic(
-        light: NSColor(calibratedWhite: 0.46, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.52, alpha: 1)
+        light: NSColor(calibratedRed: 0.529, green: 0.502, blue: 0.463, alpha: 1),
+        dark: NSColor(calibratedRed: 0.482, green: 0.529, blue: 0.522, alpha: 1)
     )
     static let cardFill = dynamic(
-        light: NSColor.white,
-        dark: NSColor(calibratedWhite: 0.12, alpha: 1)
+        light: NSColor(calibratedRed: 0.980, green: 0.961, blue: 0.922, alpha: 1),
+        dark: NSColor(calibratedRed: 0.110, green: 0.133, blue: 0.137, alpha: 1)
     )
     static let cardBorder = dynamic(
-        light: NSColor(calibratedWhite: 0.0, alpha: 0.08),
-        dark: NSColor(calibratedWhite: 1.0, alpha: 0.08)
+        light: NSColor(calibratedRed: 0.125, green: 0.157, blue: 0.169, alpha: 0.12),
+        dark: NSColor(calibratedWhite: 1.0, alpha: 0.10)
     )
     static let accentIdle = dynamic(
         light: NSColor(calibratedWhite: 0.14, alpha: 1),
@@ -75,16 +75,58 @@ enum StageHUDTheme {
         dark: NSColor(calibratedWhite: 0.82, alpha: 1)
     )
     static let buttonSecondary = dynamic(
-        light: NSColor.white,
-        dark: NSColor(calibratedWhite: 0.10, alpha: 1)
+        light: NSColor(calibratedRed: 0.980, green: 0.961, blue: 0.922, alpha: 1),
+        dark: NSColor(calibratedRed: 0.110, green: 0.133, blue: 0.137, alpha: 1)
     )
     static let buttonSecondaryHover = dynamic(
-        light: NSColor(calibratedWhite: 0.97, alpha: 1),
-        dark: NSColor(calibratedWhite: 0.14, alpha: 1)
+        light: NSColor(calibratedRed: 0.996, green: 0.984, blue: 0.957, alpha: 1),
+        dark: NSColor(calibratedRed: 0.137, green: 0.165, blue: 0.169, alpha: 1)
     )
     static let buttonPrimaryText = dynamic(
         light: NSColor.white,
         dark: NSColor(calibratedWhite: 0.08, alpha: 1)
+    )
+
+    // Run outcome tokens. The Runs ledger needs one glanceable status colour per
+    // row, legible at 6pt dot size against cardFill in both appearances.
+    static let runOk = dynamic(
+        light: NSColor(calibratedRed: 0.13, green: 0.55, blue: 0.33, alpha: 1),
+        dark: NSColor(calibratedRed: 0.38, green: 0.80, blue: 0.55, alpha: 1)
+    )
+    static let runRunning = dynamic(
+        light: NSColor(calibratedRed: 0.72, green: 0.50, blue: 0.06, alpha: 1),
+        dark: NSColor(calibratedRed: 0.95, green: 0.76, blue: 0.34, alpha: 1)
+    )
+    static let runFailed = dynamic(
+        light: NSColor(calibratedRed: 0.78, green: 0.21, blue: 0.19, alpha: 1),
+        dark: NSColor(calibratedRed: 0.98, green: 0.45, blue: 0.42, alpha: 1)
+    )
+    static let runStopped = dynamic(
+        light: NSColor(calibratedWhite: 0.52, alpha: 1),
+        dark: NSColor(calibratedWhite: 0.55, alpha: 1)
+    )
+    /// Zebra wash for dense ledger rows. Deliberately near-invisible: it should
+    /// steady the eye across a 260-row scan without reading as a stripe.
+    static let rowAlternate = dynamic(
+        light: NSColor(calibratedWhite: 0.0, alpha: 0.018),
+        dark: NSColor(calibratedWhite: 1.0, alpha: 0.022)
+    )
+    /// Selection wash for the run the operator last opened. It has to survive the
+    /// zebra underneath it and still leave room for a hovered variant on top, so
+    /// the pair is tuned together rather than reusing `reviewAccentMuted`.
+    static let runSelection = dynamic(
+        light: NSColor(calibratedRed: 0.19, green: 0.47, blue: 0.90, alpha: 0.13),
+        dark: NSColor(calibratedRed: 0.47, green: 0.71, blue: 1.00, alpha: 0.17)
+    )
+    static let runSelectionHover = dynamic(
+        light: NSColor(calibratedRed: 0.19, green: 0.47, blue: 0.90, alpha: 0.22),
+        dark: NSColor(calibratedRed: 0.47, green: 0.71, blue: 1.00, alpha: 0.27)
+    )
+    /// Backing for the hovered row's destination chip. Sits on top of the hover
+    /// fill, so it needs its own weight rather than borrowing the selection wash.
+    static let runActionChip = dynamic(
+        light: NSColor(calibratedRed: 0.19, green: 0.47, blue: 0.90, alpha: 0.11),
+        dark: NSColor(calibratedRed: 0.47, green: 0.71, blue: 1.00, alpha: 0.15)
     )
 
     // Capture HUD tokens. The recorder is deliberately dark in both system
@@ -119,6 +161,94 @@ enum StageHUDTheme {
     static let hudMetalSheen = Color(red: 0.30, green: 0.31, blue: 0.29)
     static let hudMetalCore = Color(red: 0.165, green: 0.170, blue: 0.160)
     static let hudMetalTrough = Color(red: 0.045, green: 0.048, blue: 0.046)
+
+    // MARK: - Field tokens (Home)
+    //
+    // Home is the one surface that speaks in the brand's own voice rather than
+    // the neutral operator chrome the ledgers use. The pair below is the brand
+    // paper/graphite set from `assets/brand`, split across the two system
+    // appearances: paper in light, graphite in dark. Both keep the same coral
+    // and the same cyan, so a live drive reads identically either way — the
+    // colour that means "running" must not depend on the operator's theme.
+    //
+    // Coral is the runtime-truth colour: something is happening to this Mac
+    // right now. Cyan is the secondary signal and never competes with it.
+
+    private static func hex(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
+        NSColor(
+            calibratedRed: CGFloat((value >> 16) & 0xFF) / 255.0,
+            green: CGFloat((value >> 8) & 0xFF) / 255.0,
+            blue: CGFloat(value & 0xFF) / 255.0,
+            alpha: alpha
+        )
+    }
+
+    /// Page ground.
+    static let fieldCanvas = dynamic(light: hex(0xF3EBDD), dark: hex(0x14191A))
+    /// Raised card over the canvas.
+    static let fieldPanel = dynamic(light: hex(0xFAF5EB), dark: hex(0x1C2223))
+    /// The status console at the top of Home.
+    ///
+    /// A shade *below* the canvas where the other panels sit a shade above it,
+    /// so the console reads as recessed into the page rather than as one more
+    /// card on it. That is the whole hierarchy: everything else is content laid
+    /// on the surface, this is a window cut into it showing the machine's state.
+    static let fieldConsole = dynamic(light: hex(0xEDE4D3), dark: hex(0x111617))
+    static let fieldPanelEdge = dynamic(
+        light: hex(0x20282B, alpha: 0.12),
+        dark: NSColor(calibratedWhite: 1.0, alpha: 0.10)
+    )
+    /// Hairline under the page header.
+    static let fieldRule = dynamic(
+        light: hex(0x20282B, alpha: 0.22),
+        dark: hex(0xF3EBDD, alpha: 0.18)
+    )
+    /// The vertical field grid. Near-invisible on purpose: it should register as
+    /// paper texture, not as a ruled sheet.
+    static let fieldGrid = dynamic(
+        light: hex(0x20282B, alpha: 0.025),
+        dark: NSColor(calibratedWhite: 1.0, alpha: 0.028)
+    )
+
+    static let fieldInk = dynamic(light: hex(0x20282B), dark: hex(0xF3EBDD))
+    static let fieldInkSecondary = dynamic(light: hex(0x596261), dark: hex(0xA8B3B1))
+    /// Ledger row titles. Between `fieldInk` and `fieldInkSecondary`: still the
+    /// most prominent thing in its row, without printing as black.
+    static let fieldInkRow = dynamic(light: hex(0x3D4241), dark: hex(0xD5D0C4))
+    /// Field tan. An accent voice, not a demotion — it carries the editorial
+    /// subtitle beside a panel label, where a warm aside is the intent.
+    ///
+    /// It is deliberately *not* used for numbers. Tan is saturated enough that
+    /// applying it to every duration and timestamp made the metadata louder than
+    /// the row titles it describes, which is exactly backwards.
+    static let fieldInkMuted = dynamic(light: hex(0xA77850), dark: hex(0x7B8785))
+    /// Numeric metadata: durations, timestamps, counts. A genuinely quiet warm
+    /// grey, so a row reads title-first.
+    static let fieldInkMeta = dynamic(light: hex(0x8A8175), dark: hex(0x6F7A78))
+
+    /// The recessed dark block: the live lease panel and the command well. It
+    /// stays dark in both appearances for the same reason the capture HUD does —
+    /// what it reports is operational state, not decoration.
+    ///
+    /// Warmed in light mode. The brand graphite (`#20282b`) is a cool blue-green,
+    /// and against warm paper it reads as a foreign object dropped on the page
+    /// rather than as part of it. This keeps the same darkness and drops the blue,
+    /// so the block belongs to the palette it sits in. Dark mode keeps the cool
+    /// graphite, because there it sits on a cool ground and already agrees with it.
+    static let fieldDeep = dynamic(light: hex(0x25231F), dark: hex(0x0A0E0F))
+    static let fieldDeepText = hex_(0xF3EBDD)
+    static let fieldDeepMeta = hex_(0x8D9997)
+    static let fieldDeepEdge = Color(nsColor: hex(0xF3EBDD, alpha: 0.12))
+    static let fieldDeepChip = Color(nsColor: hex(0xF3EBDD, alpha: 0.10))
+
+    /// Runtime truth. Same value as `hudCoral`, named for where it is used.
+    static let fieldAccent = hudCoral
+    static let fieldAccentText = dynamic(light: hex(0xFAF5EB), dark: hex(0x0E1213))
+    static let fieldSignal = hudCyan
+
+    private static func hex_(_ value: UInt32) -> Color {
+        Color(nsColor: hex(value))
+    }
 
     // Review surface tokens (premium pass V1)
     static let reviewCanvas = dynamic(

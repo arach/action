@@ -13,6 +13,12 @@ Installer/*-temp.dmg
 # OpenScout local state
 .openscout/project.json
 
+# Local pane layout
+.lattices.json
+
+# Capture and inspection output written outside artifacts/
+take-2-preflight/
+
 # Rust supervisor build output
 target
 crates/*/target

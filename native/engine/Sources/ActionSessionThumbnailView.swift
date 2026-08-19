@@ -90,17 +90,26 @@ struct ActionSessionThumbnailView: View {
             .background(Color.black.opacity(0.55), in: Capsule(style: .continuous))
     }
 
+    /// Below this the centred label and the bottom-left duration badge occupy
+    /// the same pixels and print over each other. The icon alone still says
+    /// which kind of run it was, so the label is what gives way.
+    private var placeholderFitsLabel: Bool {
+        height >= 64
+    }
+
     private var thumbnailPlaceholder: some View {
         ZStack {
             StageHUDTheme.appBackground
 
-            VStack(spacing: 8) {
-                Image(systemName: "film")
-                    .font(.system(size: 16, weight: .medium))
+            VStack(spacing: placeholderFitsLabel ? 8 : 0) {
+                Image(systemName: session.kind == .inspection ? "eye" : (session.kind == .drive ? "cursorarrow.click" : "film"))
+                    .font(.system(size: placeholderFitsLabel ? 16 : 13, weight: .medium))
                     .foregroundStyle(StageHUDTheme.textMuted)
-                Text(session.actualResult)
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
+                if placeholderFitsLabel {
+                    Text(session.isCalculatorTake ? session.actualResult : session.kind.rawValue)
+                        .font(.system(size: 14, weight: .semibold, design: session.isCalculatorTake ? .monospaced : .default))
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                }
             }
         }
     }

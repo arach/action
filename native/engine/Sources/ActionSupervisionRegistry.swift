@@ -16,6 +16,8 @@ struct ActionSupervisionRegistration: Codable {
 private struct ActionSupervisionNote: Codable {
     let at: String
     let line: String
+    /// Which drive wrote it. Absent on notes from before leases were tagged.
+    let leaseId: String?
 }
 
 enum ActionSupervisionRegistry {
@@ -164,6 +166,35 @@ enum ActionSupervisionRegistry {
             return "?"
         }
         return "\(index + 1)/\(of)"
+    }
+
+    /// The newest beat a specific drive wrote, if it is recent enough to still
+    /// describe what that drive is doing.
+    ///
+    /// The unfiltered `recentHudLines` is wrong for a live panel: it returns the
+    /// last line anyone wrote, so a finished play from hours ago gets printed
+    /// under a running drive as if it were its current step. A beat has to be
+    /// attributable to *this* lease and still warm, or it is not shown at all.
+    static func latestNote(forLease leaseID: String, maxAge: TimeInterval = 90, now: Date = Date()) -> String? {
+        guard let raw = try? String(contentsOf: notesURL, encoding: .utf8), !raw.isEmpty else {
+            return nil
+        }
+
+        let decoder = JSONDecoder()
+        for row in raw.split(whereSeparator: \.isNewline).reversed() {
+            guard let data = String(row).data(using: .utf8),
+                  let note = try? decoder.decode(ActionSupervisionNote.self, from: data) else {
+                continue
+            }
+            guard note.leaseId == leaseID else { continue }
+            guard let at = parseISO8601Date(note.at), now.timeIntervalSince(at) < maxAge else {
+                // Older entries only get older; nothing further back can qualify.
+                return nil
+            }
+            let line = note.line.trimmingCharacters(in: .whitespacesAndNewlines)
+            return line.isEmpty ? nil : line
+        }
+        return nil
     }
 
     static func recentNotes(limit: Int = 4) -> [String] {

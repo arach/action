@@ -3,6 +3,7 @@ import ActionCore
 import AVFoundation
 import Foundation
 import OSLog
+import SwiftUI
 
 @MainActor
 final class ActionAppearanceStore: ObservableObject {
@@ -23,9 +24,105 @@ final class ActionAppearanceStore: ObservableObject {
     }
 }
 
+enum ActionRunKind: String, Codable, CaseIterable, Identifiable {
+    case capture
+    case drive
+    case inspection
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .capture: return "Capture"
+        case .drive: return "Drive"
+        case .inspection: return "Inspect"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .capture: return "record.circle"
+        case .drive: return "cursorarrow.motionlines"
+        case .inspection: return "viewfinder"
+        }
+    }
+}
+
+/// Terminal disposition of a run, collapsed from the many raw state strings the
+/// runtime writes (`driving`, `done`, `completed`, `failed`, `cancelled`,
+/// `expired`). Runs is an operator ledger, so the row needs one glanceable
+/// signal rather than the raw vocabulary.
+enum ActionRunOutcome: String, CaseIterable, Identifiable {
+    case running
+    case unfinished
+    case ok
+    case failed
+    case stopped
+
+    var id: String { rawValue }
+
+    /// A drive that has not been heard from for this long is gone, not working.
+    /// The number is not a guess: it matches
+    /// `ActionSupervisionRegistry.driveIdleExpirySeconds` and the runtime's
+    /// `AGENT_CURSOR_IDLE_EXPIRY_MS`, so the ledger agrees with the supervisor
+    /// that already dropped the lease rather than inventing its own opinion.
+    static let idleExpirySeconds: TimeInterval = 90
+
+    /// - Parameter lastActivity: the newest timestamp the run wrote — a release,
+    ///   or failing that its last heartbeat. `nil` means the run never reported.
+    init(state: String, lastActivity: Date?, now: Date = Date()) {
+        switch state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "failed", "error":
+            self = .failed
+        case "cancelled", "canceled", "expired", "released":
+            self = .stopped
+        case "done", "completed", "succeeded", "ok":
+            self = .ok
+        default:
+            // Mid-flight with no terminal record. Live only while the run is
+            // still checking in; otherwise it was abandoned mid-drive and
+            // saying "Running" about it is a lie the whole ledger pays for.
+            guard let lastActivity,
+                  now.timeIntervalSince(lastActivity) < Self.idleExpirySeconds else {
+                self = .unfinished
+                return
+            }
+            self = .running
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .running: return "Running"
+        case .unfinished: return "Unfinished"
+        case .ok: return "Done"
+        case .failed: return "Failed"
+        case .stopped: return "Stopped"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .running: return StageHUDTheme.runRunning
+        case .unfinished: return StageHUDTheme.runStopped
+        case .ok: return StageHUDTheme.runOk
+        case .failed: return StageHUDTheme.runFailed
+        case .stopped: return StageHUDTheme.runStopped
+        }
+    }
+
+    /// A filled dot means the run reached a state someone recorded. `unfinished`
+    /// is the one outcome nobody ever wrote down, so it reads as an open ring —
+    /// the difference is carried by form, not by spending another colour.
+    var isSettled: Bool {
+        self != .unfinished
+    }
+}
+
 struct ActionSessionSummary: Identifiable {
     let id: String
     let sessionId: String
+    let kind: ActionRunKind
     let artifactDirectoryURL: URL
     let videoURL: URL
     let traceURL: URL
@@ -40,6 +137,13 @@ struct ActionSessionSummary: Identifiable {
     let feedbackCount: Int
     /// Best-effort media duration in seconds (video first, wall-clock fallback).
     let durationSeconds: Double?
+    let label: String
+    let subtitle: String
+    let state: String
+    /// Driving agent identity, kept separate from `subtitle` so the Runs row can
+    /// rank it below the task instead of inheriting a pre-joined string.
+    let agent: String
+    let outcome: ActionRunOutcome
 
     var agentFeedbackMarkdownURL: URL {
         artifactDirectoryURL.appendingPathComponent("agent-feedback.md")
@@ -50,8 +154,22 @@ struct ActionSessionSummary: Identifiable {
     }
 
     var displayTitle: String {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return trimmed
+        }
         let compact = expression.replacingOccurrences(of: " ", with: "")
         return compact.isEmpty ? sessionId : compact
+    }
+
+    var isCalculatorTake: Bool {
+        kind == .capture && !actualResult.isEmpty
+    }
+
+    /// The single date the Runs ledger sorts, groups, and prints. When a run
+    /// began is what an operator scans for; anything else has to agree with it.
+    var ledgerDate: Date? {
+        startedAt ?? finishedAt
     }
 
     var formattedDuration: String? {
@@ -77,6 +195,35 @@ private struct ActionSessionTrace: Decodable {
     let actualResult: String
     let videoPath: String
     let screenshots: [String]
+}
+
+private struct PersistedSessionRecord: Decodable {
+    let id: String
+    let mode: String?
+    let state: String?
+    let phase: String?
+    let createdAt: String?
+    let updatedAt: String?
+    let targetApp: String?
+    let driveLeaseId: String?
+    let drive: PersistedDriveRecord?
+}
+
+private struct PersistedDriveRecord: Decodable {
+    let agent: String?
+    let task: String?
+    let summary: String?
+    let outcome: String?
+    let status: String?
+    let startedAt: String?
+    let releasedAt: String?
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }
 
 private struct GuidedCaptureLauncherResult: Decodable {
@@ -126,6 +273,8 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var scenarioDraftGoal: String = "Show a short Calculator demo with keyboard and click input"
     @Published var scenarioStepFeedbackDraft: String = ""
     @Published private(set) var workspaceNavigationRequestID = UUID()
+    @Published private(set) var launcherDestination: ActionLauncherDestination = .home
+    @Published private(set) var launcherDestinationRequestID = UUID()
 
     var selectedScenario: ActionScenarioDocument? {
         if let selectedScenarioID,
@@ -275,6 +424,30 @@ final class ActionLauncherViewModel: ObservableObject {
         consoleReachabilityTask = Task { @MainActor in
             await self.updateConsoleReachability()
         }
+    }
+
+    /// Where this checkout lives. Home builds the MCP setup snippet against it
+    /// so the line an operator copies is correct for their machine rather than
+    /// for the path the docs happen to use.
+    var repositoryRoot: URL {
+        repositoryRootURL()
+    }
+
+    /// Copies the line that registers Action's native runtime MCP with an agent.
+    func copyMCPSetupCommand() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(ActionMCPSetup.command(root: repositoryRoot), forType: .string)
+    }
+
+    /// Signals every live drive to stop and hand the Mac back.
+    ///
+    /// This is the same path the supervision overlay's stop control takes: it
+    /// writes the stop markers the drivers poll. It asks rather than kills, so a
+    /// driver mid-act finishes that act and then releases.
+    func stopAllDrives() {
+        let stopped = ActionSupervisionRegistry.triggerStopAll()
+        logger.log("home: requested stop for \(stopped) supervised drive(s)")
     }
 
     func copyLocalConsoleCommand() {
@@ -552,8 +725,46 @@ final class ActionLauncherViewModel: ObservableObject {
         focusedFeedbackItemID = nil
     }
 
+    func revealLauncher(to destination: ActionLauncherDestination) {
+        launcherDestination = destination
+        launcherDestinationRequestID = UUID()
+    }
+
+    func revealScenarioInLauncher(_ scenario: ActionScenarioDocument) {
+        selectScenario(scenario)
+        revealLauncher(to: .scenarios)
+    }
+
+    func runScenarioFromLauncher(_ scenario: ActionScenarioDocument) {
+        selectScenario(scenario)
+        revealLauncher(to: .scenarios)
+        approveAndRunSelectedScenario()
+    }
+
+    func revealSessionInLauncher(_ session: ActionSessionSummary) {
+        selectSession(session)
+        if let scenario = scenarios.first(where: {
+            $0.latestSessionId == session.sessionId
+                || $0.sessionIds.contains(session.sessionId)
+                || $0.latestSessionId == session.id
+                || $0.sessionIds.contains(session.id)
+        }) {
+            selectScenario(scenario)
+            setFlowPhase(.review)
+            revealLauncher(to: .scenarios)
+        } else if session.kind == .capture {
+            revealLauncher(to: .library)
+        } else {
+            revealLauncher(to: .runs)
+        }
+    }
+
     func replaySession(_ session: ActionSessionSummary) {
-        NSWorkspace.shared.open(session.videoURL)
+        if FileManager.default.fileExists(atPath: session.videoURL.path) {
+            NSWorkspace.shared.open(session.videoURL)
+            return
+        }
+        revealSession(session)
     }
 
     func revealSession(_ session: ActionSessionSummary) {
@@ -907,27 +1118,101 @@ final class ActionLauncherViewModel: ObservableObject {
         pasteboard.setString(value, forType: .string)
     }
 
-    private func loadRecentSessions(limit: Int = 48) -> [ActionSessionSummary] {
-        let sessionsURL = sessionsDirectoryURL()
+    private func artifactsSessionsDirectoryURL() -> URL {
+        repositoryRootURL().appendingPathComponent("artifacts/sessions", isDirectory: true)
+    }
 
-        guard let urls = try? FileManager.default.contentsOfDirectory(
-            at: sessionsURL,
-            includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
+    private func runInventoryURL() -> URL {
+        let directory = sessionsDirectoryURL().deletingLastPathComponent().appendingPathComponent("logs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("runs.json")
+    }
+
+    private func loadRecentSessions(limit: Int = 400) -> [ActionSessionSummary] {
+        let roots = [sessionsDirectoryURL(), artifactsSessionsDirectoryURL()]
+        var seen = Set<String>()
+        var loaded: [ActionSessionSummary] = []
+
+        for root in roots {
+            guard let urls = try? FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            for url in urls {
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                guard isDirectory, let session = try? loadSession(at: url) else {
+                    continue
+                }
+                if seen.insert(session.id).inserted {
+                    loaded.append(session)
+                }
+            }
         }
 
-        let sortedURLs = urls.sorted { lhs, rhs in
-            let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-            let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-            return lhsDate > rhsDate
+        // Sort on the same date the Runs ledger groups and prints. Sorting by
+        // finish while displaying start left the time column non-monotonic
+        // (12:36, 12:31, 12:34), which reads as a broken list.
+        loaded.sort { lhs, rhs in
+            let left = lhs.ledgerDate ?? .distantPast
+            let right = rhs.ledgerDate ?? .distantPast
+            return left > right
         }
 
-        return sortedURLs.prefix(limit).compactMap { try? loadSession(at: $0) }
+        let sessions = Array(loaded.prefix(limit))
+        persistRunInventory(sessions)
+        return sessions
+    }
+
+    private func persistRunInventory(_ sessions: [ActionSessionSummary]) {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let entries: [[String: String]] = sessions.map { session in
+            var row: [String: String] = [
+                "id": session.id,
+                "kind": session.kind.rawValue,
+                "title": session.displayTitle,
+                "state": session.state,
+                "outcome": session.outcome.rawValue,
+                "path": session.artifactDirectoryURL.path,
+            ]
+            if !session.agent.isEmpty {
+                row["agent"] = session.agent
+            }
+            if !session.subtitle.isEmpty {
+                row["subtitle"] = session.subtitle
+            }
+            if let startedAt = session.startedAt {
+                row["startedAt"] = formatter.string(from: startedAt)
+            }
+            if let finishedAt = session.finishedAt {
+                row["updatedAt"] = formatter.string(from: finishedAt)
+            }
+            return row
+        }
+        let payload: [String: Any] = [
+            "generatedAt": formatter.string(from: Date()),
+            "count": sessions.count,
+            "runs": entries,
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) else {
+            return
+        }
+        try? data.write(to: runInventoryURL(), options: .atomic)
     }
 
     private func loadSession(at sessionURL: URL) throws -> ActionSessionSummary? {
+        if let capture = try loadCaptureSession(at: sessionURL) {
+            return capture
+        }
+        return try loadPersistedRuntimeSession(at: sessionURL)
+    }
+
+    private func loadCaptureSession(at sessionURL: URL) throws -> ActionSessionSummary? {
         let isoFormatter = ISO8601DateFormatter()
         let traceURL = sessionURL.appendingPathComponent("trace.json")
         let feedbackURL = sessionURL.appendingPathComponent("feedback.json")
@@ -953,6 +1238,7 @@ final class ActionLauncherViewModel: ObservableObject {
         return ActionSessionSummary(
             id: trace.sessionId,
             sessionId: trace.sessionId,
+            kind: .capture,
             artifactDirectoryURL: sessionURL,
             videoURL: videoURL,
             traceURL: traceURL,
@@ -965,7 +1251,106 @@ final class ActionLauncherViewModel: ObservableObject {
             startedAt: startedAt,
             finishedAt: finishedAt,
             feedbackCount: feedbackCount,
-            durationSeconds: durationSeconds
+            durationSeconds: durationSeconds,
+            label: trace.expression,
+            subtitle: trace.actualResult.isEmpty ? "Capture" : "= \(trace.actualResult)",
+            state: "completed",
+            agent: "",
+            outcome: .ok
+        )
+    }
+
+    private func loadPersistedRuntimeSession(at sessionURL: URL) throws -> ActionSessionSummary? {
+        let recordURL = sessionURL.appendingPathComponent("session.json")
+        guard let data = try? Data(contentsOf: recordURL),
+              let record = try? JSONDecoder().decode(PersistedSessionRecord.self, from: data) else {
+            return nil
+        }
+
+        let isoFormatter = ISO8601DateFormatter()
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        func parseDate(_ raw: String?) -> Date? {
+            guard let raw, !raw.isEmpty else { return nil }
+            return fractional.date(from: raw) ?? isoFormatter.date(from: raw)
+        }
+
+        let kind: ActionRunKind
+        if record.mode == "inspection" || sessionURL.lastPathComponent.hasPrefix("inspection") {
+            kind = .inspection
+        } else if record.drive != nil || record.driveLeaseId != nil || sessionURL.lastPathComponent.hasPrefix("drive_") {
+            kind = .drive
+        } else {
+            kind = .capture
+        }
+
+        let agentName = record.drive?.agent?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? ""
+        let label: String
+        let subtitle: String
+        switch kind {
+        case .drive:
+            label = record.drive?.task?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? record.drive?.summary?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? "Drive"
+            let outcome = (record.drive?.outcome ?? record.drive?.status ?? record.state ?? "completed")
+            subtitle = [agentName.nilIfEmpty, outcome].compactMap { $0 }.joined(separator: " · ")
+        case .inspection:
+            label = record.targetApp.map { "Inspect \($0)" } ?? "Inspection"
+            subtitle = record.state ?? record.phase ?? "inspection"
+        case .capture:
+            label = record.id
+            subtitle = record.state ?? "capture"
+        }
+
+        let resolvedState = record.drive?.outcome ?? record.drive?.status ?? record.state ?? ""
+        let snapshot = sessionURL.appendingPathComponent("snapshot.png")
+        let stage = sessionURL.appendingPathComponent("stage.png")
+        let result = sessionURL.appendingPathComponent("result.png")
+        let startedAt = parseDate(record.drive?.startedAt) ?? parseDate(record.createdAt)
+        let finishedAt = parseDate(record.drive?.releasedAt) ?? parseDate(record.updatedAt)
+        let videoCandidates = ["capture.mov", "session.mov", "recording.mov"]
+            .map { sessionURL.appendingPathComponent($0) }
+        let videoURL = videoCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) })
+            ?? sessionURL.appendingPathComponent("capture.mov")
+        let traceURL = sessionURL.appendingPathComponent(
+            FileManager.default.fileExists(atPath: sessionURL.appendingPathComponent("drive-trace.json").path)
+                ? "drive-trace.json"
+                : "trace.json"
+        )
+        let durationSeconds = Self.resolveDurationSeconds(
+            videoURL: videoURL,
+            startedAt: startedAt,
+            finishedAt: finishedAt
+        )
+
+        return ActionSessionSummary(
+            id: record.id,
+            sessionId: record.id,
+            kind: kind,
+            artifactDirectoryURL: sessionURL,
+            videoURL: videoURL,
+            traceURL: traceURL,
+            feedbackURL: sessionURL.appendingPathComponent("feedback.json"),
+            stageScreenshotURL: FileManager.default.fileExists(atPath: stage.path) ? stage : (
+                FileManager.default.fileExists(atPath: snapshot.path) ? snapshot : nil
+            ),
+            resultScreenshotURL: FileManager.default.fileExists(atPath: result.path) ? result : (
+                FileManager.default.fileExists(atPath: snapshot.path) ? snapshot : nil
+            ),
+            expression: label,
+            expectedResult: "",
+            actualResult: record.drive?.summary ?? "",
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            feedbackCount: 0,
+            durationSeconds: durationSeconds,
+            label: label,
+            subtitle: subtitle,
+            state: resolvedState,
+            agent: agentName,
+            // `finishedAt` is a release for a closed run and the last heartbeat
+            // for an open one — either way it is the freshest thing the run said.
+            outcome: ActionRunOutcome(state: resolvedState, lastActivity: finishedAt ?? startedAt)
         )
     }
 

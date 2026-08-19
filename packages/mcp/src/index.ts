@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 
 import { DriverIdentityContext } from "./driver-identity.js";
 import { DriveCursorPresenter, parseDriveCursorStyle } from "./drive-cursor-presenter.js";
+import { recordToolCall, verbForTool } from "./tool-ledger.js";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -1986,10 +1987,28 @@ function createServer(): Server {
       return mcpError(`Unknown tool: ${requested}`);
     }
 
+    // Every tool call settles here, so this is the one place that can count them
+    // without each handler remembering to. The ledger write is fire-and-forget:
+    // Home's Actions panel is worth a count, never a failed tool call.
+    const startedAt = Date.now();
+    let args: JsonObject = {};
+    const settle = (ok: boolean) => {
+      void recordToolCall({
+        at: new Date(startedAt).toISOString(),
+        tool: canonical,
+        verb: verbForTool(canonical, args),
+        ok,
+        ms: Date.now() - startedAt,
+      });
+    };
+
     try {
-      const args = asObject(request.params.arguments ?? {}, "arguments");
-      return mcpResult(await handler(args));
+      args = asObject(request.params.arguments ?? {}, "arguments");
+      const result = mcpResult(await handler(args));
+      settle(true);
+      return result;
     } catch (error) {
+      settle(false);
       if (error instanceof StageSceneError) {
         return mcpError(error.message, {
           tool: request.params.name,

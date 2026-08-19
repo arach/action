@@ -19,7 +19,9 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         app.delegate = self
         applyAppearanceMode()
         configureMenu()
+        ActionMenuBarController.shared.start(model: viewModel)
         showWindow()
+        ActionMenuBarController.shared.warmUpPopover()
         app.activate(ignoringOtherApps: true)
         app.run()
     }
@@ -34,7 +36,7 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -56,7 +58,19 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
     }
 
     func windowWillClose(_ notification: Notification) {
-        NSApplication.shared.terminate(nil)
+        if notification.object as? NSWindow === window {
+            self.window = nil
+        }
+    }
+
+    func showMainWindow() {
+        showWindow()
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func reveal(_ destination: ActionLauncherDestination) {
+        viewModel.revealLauncher(to: destination)
+        showMainWindow()
     }
 
     private func showWindow() {
@@ -74,11 +88,7 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
             defer: false
         )
         window.title = "Action"
-        window.titlebarAppearsTransparent = false
-        window.titleVisibility = .hidden
-        window.isMovableByWindowBackground = false
-        window.toolbarStyle = .unifiedCompact
-        window.backgroundColor = NSColor.windowBackgroundColor
+        ActionWindowChrome.apply(to: window)
         window.tabbingMode = .disallowed
         window.center()
         window.setFrameAutosaveName("ActionLauncherWindow")
