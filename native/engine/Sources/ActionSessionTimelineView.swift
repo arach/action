@@ -90,7 +90,7 @@ struct ActionSessionTimelineView: View {
                     .offset(x: laneLabelWidth + 6, y: top + laneGroupHeight - 2)
 
                 Text(kind.label.uppercased())
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textMuted)
                     .frame(width: laneLabelWidth - 8, alignment: .leading)
                     .offset(x: 8, y: top + 3)
@@ -104,9 +104,9 @@ struct ActionSessionTimelineView: View {
         case .point:
             HStack(spacing: 4) {
                 Image(systemName: "mappin.circle.fill")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(ActionIcon.micro)
                 Text("\(marker.index + 1)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .bold))
             }
             .foregroundStyle(marker.tint)
             .padding(.horizontal, 6)
@@ -120,9 +120,9 @@ struct ActionSessionTimelineView: View {
         case .range:
             HStack(spacing: 4) {
                 Image(systemName: "rectangle.inset.filled")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(ActionIcon.micro)
                 Text("\(marker.index + 1)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .bold))
             }
             .foregroundStyle(marker.tint)
             .frame(width: marker.width, height: 16)
@@ -135,9 +135,9 @@ struct ActionSessionTimelineView: View {
         case .region:
             HStack(spacing: 4) {
                 Image(systemName: "scope")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(ActionIcon.micro)
                 Text("\(marker.index + 1)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .bold))
             }
             .foregroundStyle(marker.tint)
             .padding(.horizontal, 6)
@@ -155,16 +155,16 @@ struct ActionSessionTimelineView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text("Timeline")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textMuted)
                 Spacer()
                 if durationSeconds > 0 {
                     Text(formattedTimeForRail(currentTimeSeconds))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(ActionType.mono(11, weight: .semibold))
                         .foregroundStyle(StageHUDTheme.textPrimary)
                 } else {
                     Text("Duration pending")
-                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .font(ActionType.mono(10, weight: .regular))
                         .foregroundStyle(StageHUDTheme.textMuted)
                 }
             }
@@ -235,7 +235,7 @@ struct ActionSessionTimelineView: View {
             Spacer()
             Text(formattedTimeForRail(max(end, 0)))
         }
-        .font(.system(size: 10, weight: .medium, design: .monospaced))
+        .font(ActionType.mono(10, weight: .medium))
         .foregroundStyle(StageHUDTheme.textMuted)
         .frame(width: width)
     }
@@ -253,11 +253,11 @@ struct ActionSessionTimelineView: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Window Navigator")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textMuted)
                 Spacer()
                 Text("\(formattedTime(clampedWindowStartSeconds)) → \(formattedTime(min(clampedWindowStartSeconds + visibleDurationSeconds, durationSeconds)))")
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .regular))
                     .foregroundStyle(StageHUDTheme.textMuted)
             }
 
@@ -569,9 +569,9 @@ struct ActionSessionTimelineView: View {
         case .point:
             return StageHUDTheme.reviewAccent
         case .range:
-            return Color(red: 0.25, green: 0.69, blue: 0.48)
+            return StageHUDTheme.runOk
         case .region:
-            return Color(red: 0.95, green: 0.49, blue: 0.28)
+            return StageHUDTheme.accentPaused
         }
     }
 

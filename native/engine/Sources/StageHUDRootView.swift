@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StageHUDRootView: View {
     @ObservedObject var model: StageHUDViewModel
+    @ObservedObject private var themeStore = ActionThemeStore.shared
 
     var body: some View {
         VStack(spacing: 7) {
@@ -14,6 +15,7 @@ struct StageHUDRootView: View {
         .frame(width: 336, height: 456, alignment: .top)
         .background(monolithShell)
         .preferredColorScheme(.dark)
+        .id(themeStore.revision)
     }
 
     private var header: some View {
@@ -659,7 +661,7 @@ private struct StageHUDMonolithButton: View {
         Button(action: action) {
             HStack(spacing: 9) {
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .black))
+                    .font(ActionIcon.small)
                 Text(title)
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .tracking(0.3)
@@ -786,7 +788,7 @@ private struct StageHUDHardwareButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
+                .font(ActionIcon.small)
                 .foregroundStyle(isHovered ? StageHUDTheme.hudPaper : StageHUDTheme.hudMuted)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())

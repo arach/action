@@ -210,7 +210,7 @@ struct ActionSessionPreviewView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text(inspectorTab.rawValue)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(ActionType.uiBodyStrong)
                             .foregroundStyle(StageHUDTheme.textMuted)
                         Spacer()
                         feedbackButton("Close", systemImage: "xmark", tone: .secondary) {
@@ -244,19 +244,19 @@ struct ActionSessionPreviewView: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(session.displayTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(ActionType.uiBodyStrong)
                     .foregroundStyle(StageHUDTheme.textPrimary)
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     if isComposingFeedback {
                         statusPill(anchorMode.rawValue, accent: true)
                         Text(draftAnchorSummary)
-                            .font(.system(size: 11))
+                            .font(ActionType.uiCaption)
                             .foregroundStyle(StageHUDTheme.textSecondary)
                             .lineLimit(1)
                     } else {
                         Text("Space play  ·  N note  ·  1–4 anchors")
-                            .font(.system(size: 11))
+                            .font(ActionType.uiCaption)
                             .foregroundStyle(StageHUDTheme.textMuted)
                     }
                 }
@@ -306,7 +306,7 @@ struct ActionSessionPreviewView: View {
     private var playbackControlBar: some View {
         HStack(spacing: 18) {
             Text(playbackTimeSummary)
-                .font(.system(size: 11, weight: .semibold))
+                .font(ActionType.uiCaptionStrong)
                 .foregroundStyle(StageHUDTheme.textPrimary)
 
             Spacer()
@@ -350,18 +350,18 @@ struct ActionSessionPreviewView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Text("TIMELINE")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(ActionType.mono(11, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textMuted)
                 Text(modeStatusText)
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .font(ActionType.monoCaption)
                     .foregroundStyle(StageHUDTheme.textSecondary)
                 Spacer()
                 Text(seekingHint)
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .regular))
                     .foregroundStyle(StageHUDTheme.textMuted)
                 if playback.durationSeconds > 0 {
                     Text("\(timelineDisplayTime(playback.currentTimeSeconds)) / \(timelineDisplayTime(playback.durationSeconds))")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(ActionType.mono(11, weight: .semibold))
                         .foregroundStyle(StageHUDTheme.textPrimary)
                 }
                 if isComposingFeedback {
@@ -414,7 +414,7 @@ struct ActionSessionPreviewView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if isComposingFeedback {
                         Text("Anchor: \(anchorMode.rawValue) • \(draftAnchorSummary)")
-                            .font(.system(size: 11, weight: .regular, design: .default))
+                            .font(ActionType.uiCaption)
                             .foregroundStyle(Color.white)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
@@ -422,8 +422,8 @@ struct ActionSessionPreviewView: View {
                     }
 
                     if isSelectingRegion {
-                        Text("Region mode active: drag directly on the frame.")
-                            .font(.system(size: 11, weight: .regular, design: .default))
+                        Text("Drag on the frame.")
+                            .font(ActionType.uiCaption)
                             .foregroundStyle(StageHUDTheme.textPrimary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
@@ -552,7 +552,7 @@ struct ActionSessionPreviewView: View {
                         drawingOverlay(
                             drawing,
                             in: geometry.size,
-                            tint: item.id == model.focusedFeedbackItemID ? StageHUDTheme.reviewAccent : Color(red: 0.94, green: 0.61, blue: 0.24)
+                            tint: item.id == model.focusedFeedbackItemID ? StageHUDTheme.reviewAccent : StageHUDTheme.accentPaused
                         )
                     }
                 }
@@ -645,7 +645,7 @@ struct ActionSessionPreviewView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
                 Text("Compose")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(ActionType.uiBodyStrong)
                     .foregroundStyle(StageHUDTheme.textMuted)
                 Spacer()
                 statusPill(isComposingFeedback ? "Open" : "Closed", accent: isComposingFeedback)
@@ -660,8 +660,8 @@ struct ActionSessionPreviewView: View {
             if isComposingFeedback {
                 feedbackComposerBar
             } else {
-                Text("Open feedback mode to place anchors on timeline or frame.")
-                    .font(.system(size: 11, weight: .regular, design: .default))
+                Text("Open Feedback to place anchors.")
+                    .font(ActionType.uiCaption)
                     .foregroundStyle(StageHUDTheme.textSecondary)
                     .padding(.bottom, 2)
             }
@@ -669,10 +669,10 @@ struct ActionSessionPreviewView: View {
             if isComposingFeedback {
                 HStack(spacing: 8) {
                     Image(systemName: "mappin.and.ellipse")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(ActionIcon.small)
                         .foregroundStyle(StageHUDTheme.reviewAccent)
                     Text(draftAnchorSummary)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(ActionType.mono(11, weight: .medium))
                         .foregroundStyle(StageHUDTheme.textSecondary)
                         .lineLimit(1)
                 }
@@ -684,7 +684,7 @@ struct ActionSessionPreviewView: View {
                 )
             }
 
-            TextField("Tell the agent what should change at this anchor.", text: $draftInstruction, axis: .vertical)
+            TextField("What should change here", text: $draftInstruction, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(4...7)
                 .focused($noteEditorFocused)
@@ -718,14 +718,14 @@ struct ActionSessionPreviewView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Agent Exports")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(ActionType.mono(12, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textMuted)
                 Spacer()
                 statusPill(feedbackDocument.items.isEmpty ? "No Notes" : "Ready", accent: feedbackDocument.items.isEmpty == false)
             }
 
-            Text("Export notes for agent consumption or open source files directly.")
-                .font(.system(size: 12, weight: .regular, design: .default))
+            Text("Export notes, or open the files.")
+                .font(ActionType.uiBody)
                 .foregroundStyle(StageHUDTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -750,7 +750,7 @@ struct ActionSessionPreviewView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Saved Notes")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(ActionType.mono(12, weight: .semibold))
                     .foregroundStyle(StageHUDTheme.textMuted)
                 Spacer()
                 feedbackButton("Prev", systemImage: "chevron.up", tone: .secondary, action: focusPreviousFeedback)
@@ -774,7 +774,7 @@ struct ActionSessionPreviewView: View {
 
             TextField("Search notes…", text: $feedbackSearch)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12, weight: .regular, design: .default))
+                .font(ActionType.uiBody)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .background(
@@ -787,8 +787,8 @@ struct ActionSessionPreviewView: View {
                 )
 
             if filteredFeedbackItems.isEmpty {
-                Text("Open + Feedback, set a point/range/region, then save a note for the agent.")
-                    .font(.system(size: 12, weight: .regular, design: .default))
+                Text("Set an anchor, then save a note.")
+                    .font(ActionType.uiBody)
                     .foregroundStyle(StageHUDTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
@@ -796,10 +796,10 @@ struct ActionSessionPreviewView: View {
                    let focusedItem = filteredFeedbackItems.first(where: { $0.id == focusedFeedbackItemID }) {
                     HStack(spacing: 8) {
                         Image(systemName: "scope")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(ActionIcon.small)
                             .foregroundStyle(StageHUDTheme.reviewAccent)
                         Text("Focused: \(feedbackItemSummary(focusedItem))")
-                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .font(ActionType.monoCaption)
                             .foregroundStyle(StageHUDTheme.textMuted)
                             .lineLimit(1)
                         Spacer()
@@ -853,7 +853,7 @@ struct ActionSessionPreviewView: View {
             }
 
             Text(composerHint)
-                .font(.system(size: 11, weight: .regular, design: .default))
+                .font(ActionType.uiCaption)
                 .foregroundStyle(StageHUDTheme.textSecondary)
         }
         .padding(12)
@@ -870,13 +870,13 @@ struct ActionSessionPreviewView: View {
     private var composerHint: String {
         switch anchorMode {
         case .point:
-            return "Click anywhere on the timeline to stamp a time anchor."
+            return "Stamp a time"
         case .range:
-            return "Drag across the timeline to define an in/out range."
+            return "Set an in/out range"
         case .region:
-            return "Drag on the video frame to highlight the exact screen area."
+            return "Highlight a screen area"
         case .draw:
-            return "Draw directly on the frame to call attention to a shape or flow."
+            return "Draw on the frame"
         }
     }
 
@@ -931,7 +931,7 @@ struct ActionSessionPreviewView: View {
             HStack(spacing: 6) {
                 if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(ActionIcon.small)
                 }
                 Text(title)
             }
@@ -957,7 +957,7 @@ struct ActionSessionPreviewView: View {
 
     private func statusPill(_ text: String, accent: Bool) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .font(ActionType.mono(10, weight: .semibold))
             .foregroundStyle(accent ? Color.white : StageHUDTheme.textSecondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -977,7 +977,7 @@ struct ActionSessionPreviewView: View {
                 .fill(StageHUDTheme.reviewAccent.opacity(0.8))
                 .frame(width: 6, height: 6)
             Text(text)
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                .font(ActionType.monoCaption)
                 .foregroundStyle(StageHUDTheme.textMuted)
                 .lineLimit(1)
         }
@@ -985,7 +985,7 @@ struct ActionSessionPreviewView: View {
 
     private func metadataChip(_ text: String, emphasized: Bool = false) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .font(ActionType.mono(10, weight: .semibold))
             .foregroundStyle(emphasized ? StageHUDTheme.reviewAccent : StageHUDTheme.textMuted)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
@@ -1020,7 +1020,7 @@ struct ActionSessionPreviewView: View {
                         }
                     }
                     Text(item.instruction)
-                        .font(.system(size: 13, weight: .medium, design: .default))
+                        .font(ActionType.uiBodyStrong)
                         .foregroundStyle(StageHUDTheme.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1039,11 +1039,11 @@ struct ActionSessionPreviewView: View {
 
             if let region = item.region {
                 Text("Region \(Int(region.x * 100))%, \(Int(region.y * 100))% • \(Int(region.width * 100)) x \(Int(region.height * 100))")
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .regular))
                     .foregroundStyle(StageHUDTheme.textMuted)
             } else if let drawing = item.drawing {
                 Text("Drawing • \(drawing.points.count) points")
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .font(ActionType.mono(10, weight: .regular))
                     .foregroundStyle(StageHUDTheme.textMuted)
             }
         }
@@ -1567,7 +1567,7 @@ struct ActionSessionPreviewView: View {
                 .position(x: frame.midX, y: frame.midY)
 
             Text(label)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(ActionType.mono(10, weight: .semibold))
                 .foregroundStyle(Color.white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
@@ -1597,7 +1597,7 @@ struct ActionSessionPreviewView: View {
 
     private func annotationPin(text: String) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .font(ActionType.mono(10, weight: .bold))
             .foregroundStyle(Color.white)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
@@ -1660,7 +1660,7 @@ private struct ReviewSurfaceButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(ActionType.mono(11, weight: .semibold))
             .foregroundStyle(foregroundColor(configuration: configuration))
             .padding(.horizontal, 10)
             .frame(minHeight: 32)

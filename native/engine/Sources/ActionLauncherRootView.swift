@@ -11,18 +11,26 @@ struct ActionLauncherRootView: View {
 
         var id: String { rawValue }
 
-        var subtitle: String {
+        /// The line above the title. Fixed per page — it says what the page is
+        /// for, which the page's own one-word name cannot. The subtitle
+        /// underneath carries the part that changes.
+        /// One word above the title, and a noun rather than a phrase: it names
+        /// the category the page's own name belongs to. A scenario is a plan, a
+        /// run is history, a take is what got captured — the eyebrow is where
+        /// the app says so, instead of a sentence under the title saying it at
+        /// length.
+        var eyebrow: String {
             switch self {
             case .home:
-                return "Overview and shortcuts"
+                return "COMPUTER USE"
             case .scenarios:
-                return "Plans you can run"
+                return "PLANS"
             case .runs:
-                return "Everything that has run"
+                return "HISTORY"
             case .library:
-                return "Captured takes"
+                return "TAKES"
             case .settings:
-                return "Permissions and preferences"
+                return "PREFERENCES"
             }
         }
     }
@@ -144,11 +152,11 @@ struct ActionLauncherRootView: View {
         var subtitle: String {
             switch self {
             case .permissions:
-                return "macOS access Action needs for capture and automation."
+                return "Accessibility and Screen Recording"
             case .appearance:
-                return "Theme and how the app looks on this Mac."
+                return "Theme, light and dark"
             case .agent:
-                return "Local automation runtime that drives capture."
+                return "The local runtime"
             case .advanced:
                 return "Optional diagnostics and developer tools."
             case .about:
@@ -159,7 +167,17 @@ struct ActionLauncherRootView: View {
 
     @ObservedObject var model: ActionLauncherViewModel
     @State private var selectedSection: LauncherSection? = .home
+    @State private var hoveredSidebarSection: LauncherSection?
+    @Namespace private var sidebarSelection
     @State private var librarySearch = ""
+    /// How many runs the ledger draws before it asks. The list is lazy, so the
+    /// rows themselves were never the cost — grouping, day-bucketing and the
+    /// per-row date formatting all run over the whole array on every keystroke
+    /// in the search field, and that is linear in "every run you have ever
+    /// made". A window keeps the work proportional to what is on screen.
+    private static let runsPageSize = 80
+
+    @State private var runsVisibleCount = ActionLauncherRootView.runsPageSize
     @State private var runsSearch = ""
     @State private var runKindFilter: RunKindFilter = .all
     @State private var runOutcomeFilter: RunOutcomeFilter = .any
@@ -172,13 +190,17 @@ struct ActionLauncherRootView: View {
     @State private var hoveredLibrarySessionID: String?
     @State private var sessionPendingDelete: ActionSessionSummary?
     @State private var showKeyboardCheatSheet = false
+    @ObservedObject private var themeStore = ActionThemeStore.shared
+    @State private var showThemeNotes = false
     @AppStorage("Action.LauncherSidebarIconsOnly") private var sidebarIconsOnly = false
     /// The rail's expanded width, remembered across launches and across a
     /// collapse, so re-expanding returns to the width the operator chose.
     @AppStorage("Action.LauncherSidebarLabelWidth") private var sidebarLabelWidth = 200.0
-    /// Width to render mid-drag. Kept out of storage so an abandoned drag leaves
-    /// nothing behind.
-    @State private var sidebarPreviewWidth: CGFloat?
+    /// Live width while a drag is in flight. Kept out of storage so an
+    /// abandoned drag leaves nothing behind, and kept in a reference type that
+    /// this view does *not* observe so a drag repaints the rail rather than the
+    /// window. `ActionSidebarColumn` is the subscriber.
+    @State private var resizeState = ActionSidebarResizeState()
     @AppStorage("Action.LibraryLayout") private var libraryLayoutRaw = LibraryLayout.gallery.rawValue
     @AppStorage("Action.SettingsPane") private var settingsPaneRaw = SettingsPane.permissions.rawValue
     private let sessionDateFormatter: RelativeDateTimeFormatter = {
@@ -189,28 +211,6 @@ struct ActionLauncherRootView: View {
 
     /// Collapsed rail width. Wide enough for a 34pt tap target plus its inset.
     private static let sidebarCompactWidth: CGFloat = 56
-
-    private var sidebarWidth: CGFloat {
-        // Mid-drag the preview wins outright: dragging left from an expanded
-        // rail has to be able to travel below the minimum toward the collapse
-        // threshold, which is the whole feel of the gesture.
-        if let sidebarPreviewWidth {
-            return max(Self.sidebarCompactWidth, sidebarPreviewWidth)
-        }
-        return sidebarIconsOnly
-            ? Self.sidebarCompactWidth
-            : ActionSidebarResizeGeometry.default.committedWidth(CGFloat(sidebarLabelWidth))
-    }
-
-    /// True while the rail is narrow enough that labels no longer fit — during a
-    /// drag this follows the preview, so labels drop out as the edge crosses the
-    /// threshold rather than snapping at the end.
-    private var sidebarShowsIconsOnly: Bool {
-        if let sidebarPreviewWidth {
-            return sidebarPreviewWidth <= ActionSidebarResizeGeometry.default.collapseLabelWidth
-        }
-        return sidebarIconsOnly
-    }
 
     private var activeSection: LauncherSection {
         selectedSection ?? .home
@@ -357,11 +357,20 @@ struct ActionLauncherRootView: View {
     /// Runs are already sorted newest-first, so day buckets fall out in order.
     /// Grouping is what keeps 260 rows from reading as one undifferentiated
     /// column of "10 hrs ago".
+    /// The window the ledger actually draws.
+    private var windowedRuns: [ActionSessionSummary] {
+        Array(filteredRuns.prefix(runsVisibleCount))
+    }
+
+    private var runsRemainingCount: Int {
+        max(0, filteredRuns.count - runsVisibleCount)
+    }
+
     private var runDayGroups: [(key: Date, runs: [ActionSessionSummary])] {
         let calendar = Calendar.current
         var order: [Date] = []
         var buckets: [Date: [ActionSessionSummary]] = [:]
-        for session in filteredRuns {
+        for session in windowedRuns {
             let day = session.ledgerDate.map { calendar.startOfDay(for: $0) } ?? Date.distantPast
             if buckets[day] == nil {
                 order.append(day)
@@ -420,8 +429,18 @@ struct ActionLauncherRootView: View {
             titleBar
 
             HStack(spacing: 0) {
-                sidebar
+                ActionSidebarColumn(
+                    resizeState: resizeState,
+                    isCompact: sidebarIconsOnly,
+                    committedLabelWidth: CGFloat(sidebarLabelWidth),
+                    compactWidth: Self.sidebarCompactWidth
+                ) { showsIconsOnly in
+                    sidebar(showsIconsOnly: showsIconsOnly)
+                }
 
+                // The rule stays a hairline; the grab strip straddles it and
+                // overhangs both neighbours, which is where the pointer
+                // actually aims.
                 Rectangle()
                     .fill(StageHUDTheme.cardBorder)
                     .frame(width: 1)
@@ -429,9 +448,14 @@ struct ActionLauncherRootView: View {
                         ActionSidebarEdgeHandle(
                             isCompact: $sidebarIconsOnly,
                             labelWidth: $sidebarLabelWidth,
-                            previewWidth: $sidebarPreviewWidth
+                            resizeState: resizeState
                         )
                     )
+                    // The strip overhangs both neighbours by about five points.
+                    // Without this the main pane, a later sibling, sits on top
+                    // of the half that reaches into it and the grab area is
+                    // quietly halved.
+                    .zIndex(1)
 
                 mainPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -441,6 +465,11 @@ struct ActionLauncherRootView: View {
         }
         .frame(minWidth: 1100, minHeight: 720)
         .background(StageHUDTheme.appBackground)
+        // Colours are read through static tokens, which nothing can observe, so
+        // a theme swap is expressed as a new identity for the tree. Heavy —
+        // it resets view state — and correct for something the operator does
+        // deliberately and rarely.
+        .id(themeStore.revision)
         // The title bar band already provides traffic-light clearance. Without
         // this the hidden title bar's safe area reserves a second empty strip of
         // the same height underneath it.
@@ -543,7 +572,11 @@ struct ActionLauncherRootView: View {
     /// put. Borrowed from Linea's top bar.
     private var titleBar: some View {
         HStack(spacing: 10) {
+            // The wordmark is not interactive, so it can be part of the drag
+            // region rather than a hole in it.
             ActionBrandLockup()
+                .frame(maxHeight: .infinity)
+                .overlay(ActionWindowDragHandle())
 
             Button {
                 withAnimation(.easeInOut(duration: 0.16)) {
@@ -551,7 +584,7 @@ struct ActionLauncherRootView: View {
                 }
             } label: {
                 Image(systemName: "sidebar.left")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(ActionIcon.medium)
                     .foregroundStyle(StageHUDTheme.textMuted)
                     .frame(width: 26, height: 26)
                     .contentShape(Rectangle())
@@ -559,7 +592,14 @@ struct ActionLauncherRootView: View {
             .buttonStyle(.plain)
             .help(sidebarIconsOnly ? "Expand sidebar" : "Collapse sidebar")
 
-            Spacer(minLength: 0)
+            // The drag region is a sibling of the controls, not a sheet laid
+            // over them. As an overlay across the whole band it hit-tested
+            // first and ate every click meant for the collapse button beneath
+            // it — a view with `mouseDownCanMoveWindow` is still opaque to hit
+            // testing, so AppKit started a window drag instead of pressing the
+            // button.
+            ActionWindowDragHandle()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.leading, ActionWindowChrome.trafficLightInset)
         .padding(.trailing, 16)
@@ -571,66 +611,153 @@ struct ActionLauncherRootView: View {
                 .fill(StageHUDTheme.cardBorder)
                 .frame(height: 1)
         }
-        // The band is the window's drag handle now that the system title bar is
-        // transparent and the rest of the surface is dense and clickable.
-        .overlay(ActionWindowDragHandle())
     }
 
     // MARK: - Sidebar
 
-    private var sidebar: some View {
+    /// The navigation rail.
+    ///
+    /// Four ideas borrowed from the sidebars in Talkie and HudsonKit, which had
+    /// all of this and Action had none of it:
+    ///
+    /// 1. **The icon sits in a fixed column.** Every glyph is centred in the
+    ///    same 22pt rail, so the labels start on one hard vertical and the
+    ///    glyph does not move when the rail collapses.
+    /// 2. **Selection is one underlay that slides.** A `matchedGeometryEffect`
+    ///    pill travels between rows on a spring instead of one rectangle
+    ///    switching off while another switches on. It is the difference between
+    ///    a navigation that moves and one that blinks.
+    /// 3. **Selected icons fill.** `house` becomes `house.fill`. It costs
+    ///    nothing and it is the signal macOS users already read.
+    /// 4. **Hover is its own state.** There was none at all before, so half the
+    ///    rail read as decoration until you clicked it.
+    ///
+    /// The surface gets a barely-there vertical gradient — Hudson's `.base`
+    /// treatment — so the rail reads as a panel with a light on it rather than
+    /// as a flat swatch of a different colour.
+    private func sidebar(showsIconsOnly: Bool) -> some View {
         VStack(spacing: 0) {
-            VStack(spacing: 2) {
-                ForEach([LauncherSection.home, .scenarios, .runs, .library], id: \.self) { section in
-                    sidebarItem(section)
+            VStack(spacing: 1) {
+                sidebarItem(.home, showsIconsOnly: showsIconsOnly)
+
+                // Home is the overview; the three below it are the surfaces you
+                // work in. One hairline says that much without spending a
+                // section header on four items.
+                Rectangle()
+                    .fill(StageHUDTheme.cardBorder.opacity(0.7))
+                    .frame(height: 1)
+                    .padding(.horizontal, showsIconsOnly ? 6 : 10)
+                    .padding(.vertical, 7)
+
+                ForEach([LauncherSection.scenarios, .runs, .library], id: \.self) { section in
+                    sidebarItem(section, showsIconsOnly: showsIconsOnly)
                 }
             }
-            .padding(.horizontal, sidebarShowsIconsOnly ? 8 : 10)
+            .padding(.horizontal, 8)
             .padding(.top, 12)
 
             Spacer(minLength: 0)
 
-            if !sidebarShowsIconsOnly {
+            if !showsIconsOnly {
                 MiraCompanionBadge()
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 14)
             }
 
-            sidebarItem(.settings)
-                .padding(.horizontal, sidebarShowsIconsOnly ? 8 : 10)
+            sidebarItem(.settings, showsIconsOnly: showsIconsOnly)
+                .padding(.horizontal, 8)
                 .padding(.bottom, 12)
         }
-        .frame(width: sidebarWidth)
-        .background(StageHUDTheme.railBackground)
-    }
-
-    private func sidebarItem(_ section: LauncherSection) -> some View {
-        let selected = activeSection == section
-        return Button {
-            selectedSection = section
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: iconName(for: section))
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: 18)
-
-                if !sidebarShowsIconsOnly {
-                    Text(section.rawValue)
-                        .font(.system(size: 13, weight: selected ? .semibold : .medium))
-                    Spacer(minLength: 0)
-                }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Drives the matched-geometry pill between rows. Talkie's value, which
+        // it arrived at after finding 0.32s read as sluggish next to an
+        // instant hover.
+        .animation(.spring(response: 0.20, dampingFraction: 0.85), value: activeSection)
+        .background {
+            ZStack {
+                StageHUDTheme.railBackground
+                LinearGradient(
+                    colors: [
+                        StageHUDTheme.textPrimary.opacity(0.035),
+                        StageHUDTheme.textPrimary.opacity(0.0),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
-            .foregroundStyle(selected ? StageHUDTheme.textPrimary : StageHUDTheme.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: 34, alignment: sidebarShowsIconsOnly ? .center : .leading)
-            .padding(.horizontal, sidebarShowsIconsOnly ? 0 : 10)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? StageHUDTheme.buttonSecondaryHover : Color.clear)
-            )
         }
-        .buttonStyle(.plain)
-        .help(sidebarShowsIconsOnly ? section.rawValue : "")
     }
+
+    private func sidebarItem(_ section: LauncherSection, showsIconsOnly: Bool) -> some View {
+        let selected = activeSection == section
+        let hovered = hoveredSidebarSection == section
+
+        return HStack(spacing: 0) {
+            Image(systemName: selected ? filledIconName(for: section) : iconName(for: section))
+                .font(ActionIcon.medium)
+                // Ink when selected, and filled — the outline/fill pair is the
+                // state cue, so the glyph does not also need to change colour.
+                // The 2pt rail is the only accent in the rail.
+                .foregroundStyle(
+                    selected ? StageHUDTheme.textPrimary : StageHUDTheme.textMuted
+                )
+                .frame(width: Self.sidebarRailWidth)
+
+            if !showsIconsOnly {
+                Text(section.rawValue)
+                    .font(ActionType.uiNav)
+                    .foregroundStyle(
+                        selected
+                            ? StageHUDTheme.textPrimary
+                            : (hovered ? StageHUDTheme.textPrimary : StageHUDTheme.textSecondary)
+                    )
+                    .padding(.leading, 8)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: showsIconsOnly ? .center : .leading)
+        .background {
+            // The travelling pill. Only the selected row draws it, so SwiftUI
+            // animates the single view from its old frame to its new one.
+            if selected {
+                // Ink, not accent, for the ground. A tinted pill behind the
+                // selected row made the accent the loudest colour in the
+                // chrome, on every screen, permanently. The 2pt rail is the
+                // only coloured mark left, and being the only one it does not
+                // need to be wide or to sit on a tinted field to be found.
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(StageHUDTheme.textPrimary.opacity(0.055))
+                    .overlay(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 1, style: .continuous)
+                            .fill(StageHUDTheme.reviewAccent)
+                            .frame(width: 2)
+                            .padding(.vertical, 8)
+                    }
+                    .matchedGeometryEffect(id: "sidebarSelection", in: sidebarSelection)
+            } else if hovered {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(StageHUDTheme.textPrimary.opacity(0.03))
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { selectedSection = section }
+        .onHover { inside in
+            if inside {
+                hoveredSidebarSection = section
+            } else if hoveredSidebarSection == section {
+                hoveredSidebarSection = nil
+            }
+        }
+        .help(showsIconsOnly ? section.rawValue : "")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(section.rawValue)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// Icons are centred in this column so labels share one left edge and the
+    /// glyph does not shift when the rail collapses to icons only.
+    private static let sidebarRailWidth: CGFloat = 22
 
     // MARK: - Main
 
@@ -696,27 +823,21 @@ struct ActionLauncherRootView: View {
 
     private var pageHeader: some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: activeSection == .home ? 5 : 3) {
-                if activeSection == .home {
-                    // Home says what Action is before it says where you are: a
-                    // computer-use surface for the Mac, of which recording is
-                    // one capability rather than the premise.
-                    Text("MACOS COMPUTER USE")
-                        .font(ActionType.label)
-                        .tracking(ActionType.eyebrowTracking)
-                        .foregroundStyle(StageHUDTheme.fieldAccent)
-                    Text(activeSection.rawValue)
-                        .font(ActionType.pageTitle)
-                        .foregroundStyle(StageHUDTheme.fieldInk)
-                } else {
-                    Text(activeSection.rawValue)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(StageHUDTheme.textPrimary)
-                    Text(headerSubtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                }
-            }
+            // One shape for every page: eyebrow, title, subtitle. The eyebrow is
+            // what makes a page identifiable at a glance — it is the only line
+            // that differs in colour — and the title and subtitle then sit at
+            // the same size and the same baselines everywhere, so moving
+            // between pages does not re-flow the top of the window.
+            ActionPageHeading(
+                eyebrow: activeSection.eyebrow,
+                title: activeSection.rawValue,
+                subtitle: headerSubtitle,
+                ink: onFieldCanvas ? StageHUDTheme.fieldInk : StageHUDTheme.textPrimary,
+                inkSecondary: onFieldCanvas
+                    ? StageHUDTheme.fieldInkSecondary
+                    : StageHUDTheme.textSecondary,
+                inkMuted: onFieldCanvas ? StageHUDTheme.fieldInkMeta : StageHUDTheme.textMuted
+            )
 
             Spacer(minLength: 0)
 
@@ -727,7 +848,7 @@ struct ActionLauncherRootView: View {
                 libraryLayoutPicker
             }
 
-            if activeSection == .home || activeSection == .scenarios || activeSection == .library {
+            if showsHeaderNewScenario {
                 launcherButton(
                     "New scenario",
                     tone: .primary,
@@ -744,17 +865,17 @@ struct ActionLauncherRootView: View {
     private var librarySearchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
+                .font(ActionIcon.small)
                 .foregroundStyle(StageHUDTheme.textMuted)
             TextField("Search takes", text: $librarySearch)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(ActionType.uiBody)
             if !librarySearch.isEmpty {
                 Button {
                     librarySearch = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
+                        .font(ActionIcon.small)
                         .foregroundStyle(StageHUDTheme.textMuted)
                 }
                 .buttonStyle(.plain)
@@ -794,7 +915,7 @@ struct ActionLauncherRootView: View {
             libraryLayout = layout
         } label: {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .medium))
+                .font(ActionIcon.medium)
                 .foregroundStyle(selected ? StageHUDTheme.textPrimary : StageHUDTheme.textMuted)
                 .frame(width: 30, height: 24)
                 .background(
@@ -806,22 +927,65 @@ struct ActionLauncherRootView: View {
         .help(help)
     }
 
-    private var headerSubtitle: String {
+    /// Home is the one page painted on the field canvas rather than on chrome.
+    private var onFieldCanvas: Bool { activeSection == .home }
+
+    /// The header's primary button, except where the page below it is already
+    /// asking for the same thing.
+    ///
+    /// An empty Scenarios page put "New scenario" in the header and "New
+    /// Calculator scenario" in the middle of the page — two filled primary
+    /// buttons, on one screen, calling the same method. The empty state is the
+    /// better of the two: it is where the eye lands, and it carries the goal
+    /// field the header button silently uses.
+    private var showsHeaderNewScenario: Bool {
+        switch activeSection {
+        case .home, .library:
+            return true
+        case .scenarios:
+            // The scenario switcher on the page owns New, Delete and picking
+            // between scenarios. A second New in the launcher header put two
+            // ways to make the same thing four inches apart.
+            return false
+        case .runs, .settings:
+            return false
+        }
+    }
+
+    /// The line under the title, and the only line in the header that changes.
+    ///
+    /// It carries a count or a state — never a description. A page that says
+    /// "Plans you can run" under a title that already says "Scenarios" has
+    /// spent a line telling the operator something they knew before they
+    /// clicked; a page that says "3 scenarios" has told them something new.
+    private var headerSubtitle: String? {
         switch activeSection {
         case .home:
-            return activeSection.subtitle
+            // Home's whole page is the state. A count here would only repeat
+            // the ledger heading forty points below it.
+            return nil
         case .scenarios:
-            if let scenario = model.selectedScenario {
-                return scenario.title
+            // Nothing when a scenario is open: the page states its name at 34pt
+            // two lines below, and that name is also the switcher. Three
+            // printings of one title inside one header.
+            if model.selectedScenario != nil || !model.scenarios.isEmpty {
+                return nil
             }
             let n = model.scenarios.count
-            return n == 0 ? "No scenarios yet" : "\(n) scenario\(n == 1 ? "" : "s")"
+            // No "None" at zero: the page below is entirely about the fact that
+            // there are none yet, and a count of nothing under the title is the
+            // header describing the page instead of locating you in it.
+            return n == 0 ? nil : "\(n) scenario\(n == 1 ? "" : "s")"
         case .runs:
-            return runsHeaderSubtitle
+            // Nothing. The filter strip an inch below reads "All 293 · Drive 187
+            // · Inspect 105 · Capture 1", so a count in the header was the same
+            // number twice, and the header's copy went stale the moment a
+            // filter narrowed the list.
+            return nil
         case .library:
             let total = librarySessions.count
             if total == 0 {
-                return "No captured takes yet"
+                return "None"
             }
             let shown = filteredLibrarySessions.count
             if !librarySearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -829,7 +993,7 @@ struct ActionLauncherRootView: View {
             }
             return "\(total) take\(total == 1 ? "" : "s")"
         case .settings:
-            return activeSection.subtitle
+            return settingsPane.title
         }
     }
 
@@ -873,7 +1037,7 @@ struct ActionLauncherRootView: View {
                 showKeyboardCheatSheet = true
             } label: {
                 Label("Keyboard", systemImage: "keyboard")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(ActionType.uiCaptionStrong)
                     .foregroundStyle(StageHUDTheme.textSecondary)
             }
             .buttonStyle(.plain)
@@ -883,7 +1047,7 @@ struct ActionLauncherRootView: View {
                 openDocumentation()
             } label: {
                 Label("Docs", systemImage: "book")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(ActionType.uiCaptionStrong)
                     .foregroundStyle(StageHUDTheme.textSecondary)
             }
             .buttonStyle(.plain)
@@ -909,10 +1073,10 @@ struct ActionLauncherRootView: View {
                 .fill(ok ? Color(nsColor: NSColor.systemGreen) : StageHUDTheme.textMuted.opacity(0.5))
                 .frame(width: 6, height: 6)
             Text(label)
-                .font(.system(size: 11))
+                .font(ActionType.uiCaption)
                 .foregroundStyle(StageHUDTheme.textMuted)
             Text(value)
-                .font(.system(size: 11, weight: .medium))
+                .font(ActionType.uiCaptionStrong)
                 .foregroundStyle(StageHUDTheme.textPrimary)
         }
     }
@@ -962,11 +1126,11 @@ struct ActionLauncherRootView: View {
     private var takesEmptyState: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("No takes yet")
-                .font(.system(size: 17, weight: .semibold))
+                .font(ActionType.uiSubhead)
                 .foregroundStyle(StageHUDTheme.textPrimary)
 
-            Text("Run a short Calculator capture. When it finishes, the take opens here for playback and notes.")
-                .font(.system(size: 13))
+            Text("A short Calculator capture")
+                .font(ActionType.uiBody)
                 .foregroundStyle(StageHUDTheme.textSecondary)
                 .frame(maxWidth: 420, alignment: .leading)
 
@@ -987,35 +1151,35 @@ struct ActionLauncherRootView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(sessionTimestamp(session))
-                        .font(.system(size: 12))
+                        .font(ActionType.uiBody)
                         .foregroundStyle(StageHUDTheme.textMuted)
                     if let duration = session.formattedDuration {
                         Text("·")
                             .foregroundStyle(StageHUDTheme.textMuted)
                         Text(duration)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(ActionType.monoBody)
                             .foregroundStyle(StageHUDTheme.textMuted)
                     }
                 }
 
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(session.displayTitle)
-                        .font(.system(size: 22, weight: .semibold, design: session.isCalculatorTake ? .monospaced : .default))
+                        .font(session.isCalculatorTake ? ActionType.mono(22, weight: .semibold) : ActionType.uiTitle)
                         .foregroundStyle(StageHUDTheme.textPrimary)
                     if session.isCalculatorTake {
                         Text("= \(session.actualResult)")
-                            .font(.system(size: 18, weight: .medium, design: .monospaced))
+                            .font(ActionType.mono(18, weight: .medium))
                             .foregroundStyle(StageHUDTheme.textSecondary)
                     } else if !session.subtitle.isEmpty {
                         Text(session.subtitle)
-                            .font(.system(size: 15, weight: .medium))
+                            .font(ActionType.uiSubhead)
                             .foregroundStyle(StageHUDTheme.textSecondary)
                             .lineLimit(1)
                     }
                 }
 
                 Text("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")  ·  N note · 1/2/3 anchors · ⌘↩ save")
-                    .font(.system(size: 11))
+                    .font(ActionType.uiCaption)
                     .foregroundStyle(StageHUDTheme.textMuted)
             }
 
@@ -1043,33 +1207,21 @@ struct ActionLauncherRootView: View {
 
     /// The chips carry the per-kind counts, so the header answers a different
     /// question: what is this list, and how much of it am I looking at.
-    private var runsHeaderSubtitle: String {
-        let total = model.recentSessions.count
-        if total == 0 {
-            return "Nothing has run yet"
-        }
-        if runsFiltersActive {
-            let shown = filteredRuns.count
-            return "\(shown) of \(total) run\(total == 1 ? "" : "s")"
-        }
-        return "Every drive, inspection, and capture on this Mac"
-    }
-
     private var runsSearchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
+                .font(ActionIcon.small)
                 .foregroundStyle(runsSearchFocused ? StageHUDTheme.reviewAccent : StageHUDTheme.textMuted)
             TextField(runsSearchFieldPlaceholder, text: $runsSearch)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(ActionType.uiBody)
                 .focused($runsSearchFocused)
             if !runsSearch.isEmpty {
                 Button {
                     runsSearch = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
+                        .font(ActionIcon.small)
                         .foregroundStyle(StageHUDTheme.textMuted)
                 }
                 .buttonStyle(.plain)
@@ -1186,7 +1338,7 @@ struct ActionLauncherRootView: View {
     private var runsClearButton: some View {
         Button(action: clearRunsFilters) {
             Text("Clear")
-                .font(.system(size: 11, weight: .medium))
+                .font(ActionType.uiCaptionStrong)
                 .foregroundStyle(hoveredRunsClear ? StageHUDTheme.textPrimary : StageHUDTheme.textSecondary)
                 .padding(.horizontal, 9)
                 .frame(height: Self.runStripControlHeight)
@@ -1274,18 +1426,19 @@ struct ActionLauncherRootView: View {
         return HStack(spacing: 5) {
             if let icon = filter.icon {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(ActionIcon.small)
                     .foregroundStyle(selected ? StageHUDTheme.textPrimary : StageHUDTheme.textMuted)
                     .frame(width: 13)
             }
             Text(filter.rawValue)
-                .font(.system(size: 11, weight: selected ? .semibold : .medium))
+                .font(ActionType.uiCaption)
+                .fontWeight(selected ? .semibold : .medium)
                 .foregroundStyle(labelColor)
             // Always present, even at 0, and given a two-digit slot: the count
             // is the chip's live reading, and a reading that disappears or
             // reflows while you type is worse than one that holds still.
             Text("\(count)")
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .font(ActionType.uiMicro.monospacedDigit())
                 .foregroundStyle(StageHUDTheme.textMuted)
                 // `minWidth` reserves the two-digit slot but is also a floor the
                 // layout will happily compress down to, which truncated the
@@ -1323,12 +1476,13 @@ struct ActionLauncherRootView: View {
                     runOutcomeDot(outcome)
                 }
                 Text(runOutcomeFilter.rawValue)
-                    .font(.system(size: 11, weight: runOutcomeFilter == .any ? .medium : .semibold))
+                    .font(ActionType.uiCaption)
+                    .fontWeight(runOutcomeFilter == .any ? .medium : .semibold)
                     .foregroundStyle(
                         runOutcomeFilter == .any ? StageHUDTheme.textSecondary : StageHUDTheme.textPrimary
                     )
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(ActionIcon.micro)
                     .foregroundStyle(StageHUDTheme.textMuted)
             }
             .padding(.horizontal, 9)
@@ -1362,36 +1516,53 @@ struct ActionLauncherRootView: View {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 ForEach(runDayGroups, id: \.key) { group in
                     Section {
+                        // A ledger, not a card of stripes. Zebra banding inside
+                        // a bordered box paints two tones of furniture behind
+                        // every row and still needs the box to say where the
+                        // day ends. Hairlines between the rows do the same work
+                        // with one mark, and match the way a plan is set on the
+                        // Scenarios page — the same table language for the
+                        // steps you are about to run and the runs you already
+                        // made.
                         VStack(spacing: 0) {
                             ForEach(Array(group.runs.enumerated()), id: \.element.id) { index, session in
-                                runRow(session, alternate: !index.isMultiple(of: 2))
+                                if index > 0 {
+                                    ActionRule(opacity: 0.55)
+                                }
+                                runRow(session)
                             }
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-                        )
-                        .padding(.bottom, 14)
+                        .padding(.bottom, 20)
                     } header: {
                         runDayHeader(day: group.key, count: group.runs.count)
                     }
+                }
+
+
+                if runsRemainingCount > 0 {
+                    runsMoreFooter
                 }
             }
             .padding(.horizontal, 28)
             .padding(.bottom, 24)
         }
+        // A narrowed list starts from the top again: keeping a 400-row window
+        // open after a search that matches three rows means the button below
+        // offers to load runs that are no longer in the list.
+        .onChange(of: runsSearch) { _, _ in runsVisibleCount = Self.runsPageSize }
+        .onChange(of: runKindFilter) { _, _ in runsVisibleCount = Self.runsPageSize }
+        .onChange(of: runOutcomeFilter) { _, _ in runsVisibleCount = Self.runsPageSize }
         .scrollIndicators(.automatic)
     }
 
     private func runDayHeader(day: Date, count: Int) -> some View {
         HStack(spacing: 8) {
             Text(runDayLabel(day).uppercased())
-                .font(.system(size: 10, weight: .semibold))
+                .font(ActionType.uiMicro)
                 .tracking(0.7)
                 .foregroundStyle(StageHUDTheme.textSecondary)
             Text("\(count)")
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .font(ActionType.uiMicro.monospacedDigit())
                 .foregroundStyle(StageHUDTheme.textMuted)
             Rectangle()
                 .fill(StageHUDTheme.cardBorder)
@@ -1402,7 +1573,27 @@ struct ActionLauncherRootView: View {
         .background(StageHUDTheme.appBackground)
     }
 
-    private func runRow(_ session: ActionSessionSummary, alternate: Bool) -> some View {
+    /// Says what is still off-screen rather than just "more". A ledger that
+    /// stops without saying how much it is holding back reads as the end of the
+    /// list.
+    private var runsMoreFooter: some View {
+        HStack(spacing: 10) {
+            Button("Show \(min(runsRemainingCount, Self.runsPageSize)) more") {
+                runsVisibleCount += Self.runsPageSize
+            }
+            .buttonStyle(ActionQuietButtonStyle())
+
+            Text("\(runsRemainingCount) older")
+                .font(ActionType.monoCaption)
+                .foregroundStyle(StageHUDTheme.textMuted)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+    }
+
+    private func runRow(_ session: ActionSessionSummary) -> some View {
         let selected = model.selectedSession?.id == session.id
         let hovered = hoveredRunID == session.id
         let action = runPrimaryAction(session)
@@ -1423,7 +1614,7 @@ struct ActionLauncherRootView: View {
                 HStack(spacing: 20) {
                     HStack(spacing: 8) {
                         Image(systemName: session.kind.icon)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(ActionIcon.small)
                             .foregroundStyle(
                                 selected ? StageHUDTheme.reviewAccent : StageHUDTheme.textMuted
                             )
@@ -1431,7 +1622,8 @@ struct ActionLauncherRootView: View {
                             .help(session.kind.title)
 
                         Text(session.displayTitle)
-                            .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
+                            .font(ActionType.uiBody)
+                            .fontWeight(selected ? .semibold : .medium)
                             .foregroundStyle(StageHUDTheme.textPrimary)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -1442,7 +1634,7 @@ struct ActionLauncherRootView: View {
                         // has real provenance or is an unidentified stray.
                         if !session.agent.isEmpty {
                             Text(session.agent)
-                                .font(.system(size: 10.5))
+                                .font(ActionType.uiCaption)
                                 .foregroundStyle(StageHUDTheme.textMuted)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
@@ -1458,7 +1650,7 @@ struct ActionLauncherRootView: View {
 
                     HStack(spacing: 10) {
                         Text(runClockTime(session))
-                            .font(.system(size: 11).monospacedDigit())
+                            .font(ActionType.uiCaption.monospacedDigit())
                             .foregroundStyle(StageHUDTheme.textMuted)
                             .frame(width: 56, alignment: .trailing)
 
@@ -1490,7 +1682,7 @@ struct ActionLauncherRootView: View {
                 .padding(.trailing, 10)
             }
             .frame(height: 30)
-            .background(runRowFill(selected: selected, hovered: hovered, alternate: alternate))
+            .background(runRowFill(selected: selected, hovered: hovered))
             .contentShape(Rectangle())
         }
         .onHover { inside in
@@ -1538,12 +1730,22 @@ struct ActionLauncherRootView: View {
         let tint: Color = armed
             ? StageHUDTheme.reviewAccent
             : (rowHovered ? StageHUDTheme.textSecondary : StageHUDTheme.textMuted)
+        // At rest the word is dropped and only the glyph stays. Down a page of
+        // two hundred rows the label was the loudest thing on the screen —
+        // "Finder" printed twenty times over, in a column whose value the icon
+        // already carries (a folder is not a snapshot). The word comes back the
+        // moment the pointer is on the row, which is the only moment it is
+        // about to be clicked.
         return HStack(spacing: 5) {
             Image(systemName: action.icon)
-                .font(.system(size: 10, weight: .medium))
-            Text(action.shortLabel)
-                .font(.system(size: 10, weight: armed ? .semibold : .regular))
-                .lineLimit(1)
+                .font(ActionIcon.small)
+            if rowHovered || selected {
+                Text(action.shortLabel)
+                    .font(ActionType.uiCaption)
+                    .fontWeight(armed ? .semibold : .regular)
+                    .lineLimit(1)
+                    .transition(.opacity)
+            }
         }
         .foregroundStyle(tint)
         // Padding is unconditional so the chip appearing on hover cannot shift
@@ -1558,18 +1760,19 @@ struct ActionLauncherRootView: View {
         // to live never clips "Snapshot" and never re-flows the column.
         .frame(width: 90, alignment: .trailing)
         .animation(.easeOut(duration: 0.1), value: armed)
+        .animation(.easeOut(duration: 0.1), value: rowHovered)
     }
 
-    private func runRowFill(selected: Bool, hovered: Bool, alternate: Bool) -> Color {
+    private func runRowFill(selected: Bool, hovered: Bool) -> Color {
         if selected {
             // Selected still has to answer the pointer, or hovering the row you
             // last opened reads as a dead cell.
             return hovered ? StageHUDTheme.runSelectionHover : StageHUDTheme.runSelection
         }
-        if hovered {
-            return StageHUDTheme.buttonSecondaryHover
-        }
-        return alternate ? StageHUDTheme.rowAlternate : StageHUDTheme.cardFill
+        // Paper at rest. A row is a line of text on the page, and only the two
+        // states an operator creates — pointing at it, having opened it — put
+        // anything behind it.
+        return hovered ? StageHUDTheme.textPrimary.opacity(0.035) : .clear
     }
 
     /// The dot carries the colour on every row; only a failure earns tinted,
@@ -1579,7 +1782,8 @@ struct ActionLauncherRootView: View {
         HStack(spacing: 5) {
             runOutcomeDot(outcome)
             Text(outcome.title)
-                .font(.system(size: 10.5, weight: outcome == .failed ? .semibold : .regular))
+                .font(ActionType.uiCaption)
+                .fontWeight(outcome == .failed ? .semibold : .regular)
                 .foregroundStyle(outcome == .failed ? outcome.tint : StageHUDTheme.textMuted)
                 .lineLimit(1)
         }
@@ -1607,17 +1811,17 @@ struct ActionLauncherRootView: View {
     private static let runsLegend: [(kind: ActionRunKind, blurb: String, destination: RunPrimaryAction)] = [
         (
             .drive,
-            "An agent took the pointer and acted on a real window.",
+            "Pointer and keys on a real window",
             .reveal
         ),
         (
             .inspection,
-            "A surface was read: screenshot, accessibility tree, on-screen text.",
+            "Screenshot, AX tree, on-screen text",
             .snapshot
         ),
         (
             .capture,
-            "A recorded take, ready to play back and annotate.",
+            "A recorded take",
             .review
         )
     ]
@@ -1626,14 +1830,14 @@ struct ActionLauncherRootView: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 22, weight: .light))
+                    .font(ActionIcon.display)
                     .foregroundStyle(StageHUDTheme.textMuted)
                     .padding(.bottom, 2)
                 Text("No runs yet")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(ActionType.uiSubhead)
                     .foregroundStyle(StageHUDTheme.textPrimary)
-                Text("Every drive, inspection, and capture lands here the moment it starts — including the ones an agent kicks off while you are elsewhere. A row opens whatever that run left behind.")
-                    .font(.system(size: 13))
+                Text("Drives, inspections and captures, live.")
+                    .font(ActionType.uiBody)
                     .foregroundStyle(StageHUDTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 460, alignment: .leading)
@@ -1669,17 +1873,17 @@ struct ActionLauncherRootView: View {
     ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: entry.kind.icon)
-                .font(.system(size: 11, weight: .medium))
+                .font(ActionIcon.small)
                 .foregroundStyle(StageHUDTheme.textMuted)
                 .frame(width: 15)
 
             Text(entry.kind.title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(ActionType.uiCaptionStrong)
                 .foregroundStyle(StageHUDTheme.textPrimary)
                 .frame(width: 58, alignment: .leading)
 
             Text(entry.blurb)
-                .font(.system(size: 12))
+                .font(ActionType.uiBody)
                 .foregroundStyle(StageHUDTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -1699,14 +1903,14 @@ struct ActionLauncherRootView: View {
         return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 22, weight: .light))
+                    .font(ActionIcon.display)
                     .foregroundStyle(StageHUDTheme.textMuted)
                     .padding(.bottom, 2)
                 Text("No runs match")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(ActionType.uiSubhead)
                     .foregroundStyle(StageHUDTheme.textPrimary)
                 Text(runsNoMatchDetail)
-                    .font(.system(size: 13))
+                    .font(ActionType.uiBody)
                     .foregroundStyle(StageHUDTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 480, alignment: .leading)
@@ -1723,11 +1927,11 @@ struct ActionLauncherRootView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .bold))
+                                    .font(ActionIcon.micro)
                                     .foregroundStyle(StageHUDTheme.textMuted)
                                 Text(release.name)
                                 Text("\(release.restores)")
-                                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                                    .font(ActionType.uiCaptionStrong.monospacedDigit())
                                     .foregroundStyle(StageHUDTheme.reviewAccent)
                             }
                         }
@@ -1748,7 +1952,7 @@ struct ActionLauncherRootView: View {
                     clearRunsFilters()
                 } label: {
                     Text("Clear all filters")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(ActionType.uiCaptionStrong)
                         .foregroundStyle(
                             hoveredRunsReset ? StageHUDTheme.textPrimary : StageHUDTheme.textMuted
                         )
@@ -1833,39 +2037,34 @@ struct ActionLauncherRootView: View {
     }
 
     private var libraryEmptyState: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("No sessions yet")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(StageHUDTheme.textPrimary)
-            Text("New takes appear here after you record them.")
-                .font(.system(size: 13))
-                .foregroundStyle(StageHUDTheme.textSecondary)
+        // "Takes", not "sessions". Everything else on this page — the subtitle,
+        // the search field, the button — calls them takes; "session" is the
+        // name the model uses for them internally and it should not surface.
+        ActionEmptyState(
+            icon: "film.stack",
+            title: "No takes yet",
+            message: "Record one to start."
+        ) {
             launcherButton(
                 model.isRunningGuidedDemo ? "Recording…" : "New take",
                 tone: .primary,
                 action: model.runGuidedCalculatorDemo
             )
             .disabled(model.isRunningGuidedDemo)
+            .padding(.top, 2)
         }
-        .padding(28)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardBackground)
     }
 
     private var libraryNoResultsState: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("No matches")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(StageHUDTheme.textPrimary)
-            Text("Nothing matched “\(librarySearch)”.")
-                .font(.system(size: 13))
-                .foregroundStyle(StageHUDTheme.textSecondary)
+        ActionEmptyState(
+            icon: "magnifyingglass",
+            title: "No matches",
+            message: "Nothing matched “\(librarySearch)”."
+        ) {
             Button("Clear search") { librarySearch = "" }
                 .buttonStyle(ActionSettingsPillButtonStyle())
+                .padding(.top, 2)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardBackground)
     }
 
     private var libraryGallery: some View {
@@ -1916,19 +2115,19 @@ struct ActionLauncherRootView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(session.displayTitle)
-                        .font(.system(size: 13, weight: .semibold, design: session.isCalculatorTake ? .monospaced : .default))
+                        .font(session.isCalculatorTake ? ActionType.monoBodyStrong : ActionType.uiBodyStrong)
                         .foregroundStyle(StageHUDTheme.textPrimary)
                         .lineLimit(1)
 
                     HStack(spacing: 6) {
                         Text(session.isCalculatorTake ? "= \(session.actualResult)" : session.subtitle)
-                            .font(.system(size: 12, design: session.isCalculatorTake ? .monospaced : .default))
+                            .font(session.isCalculatorTake ? ActionType.monoBody : ActionType.uiBody)
                             .foregroundStyle(StageHUDTheme.textSecondary)
                             .lineLimit(1)
                         Text("·")
                             .foregroundStyle(StageHUDTheme.textMuted)
                         Text(sessionTimestamp(session))
-                            .font(.system(size: 12))
+                            .font(ActionType.uiBody)
                             .foregroundStyle(StageHUDTheme.textMuted)
                     }
                 }
@@ -1959,7 +2158,7 @@ struct ActionLauncherRootView: View {
     private func libraryHoverChip(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(ActionType.uiMicro)
                 .foregroundStyle(Color.white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
@@ -1996,27 +2195,27 @@ struct ActionLauncherRootView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(session.displayTitle)
-                        .font(.system(size: 14, weight: .semibold, design: session.isCalculatorTake ? .monospaced : .default))
+                        .font(session.isCalculatorTake ? ActionType.bodyMono : ActionType.uiBodyStrong)
                         .foregroundStyle(StageHUDTheme.textPrimary)
                         .lineLimit(1)
 
                     Text(session.isCalculatorTake ? "Result \(session.actualResult)" : session.subtitle)
-                        .font(.system(size: 12))
+                        .font(ActionType.uiBody)
                         .foregroundStyle(StageHUDTheme.textSecondary)
                         .lineLimit(1)
 
                     HStack(spacing: 8) {
                         Text(sessionTimestamp(session))
-                            .font(.system(size: 11))
+                            .font(ActionType.uiCaption)
                             .foregroundStyle(StageHUDTheme.textMuted)
                         if let duration = session.formattedDuration {
                             Text(duration)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(ActionType.monoCaption)
                                 .foregroundStyle(StageHUDTheme.textMuted)
                         }
                         if session.feedbackCount > 0 {
                             Text("\(session.feedbackCount) note\(session.feedbackCount == 1 ? "" : "s")")
-                                .font(.system(size: 11))
+                                .font(ActionType.uiCaption)
                                 .foregroundStyle(StageHUDTheme.textMuted)
                         }
                     }
@@ -2031,7 +2230,7 @@ struct ActionLauncherRootView: View {
                     }
                 } else {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(ActionIcon.small)
                         .foregroundStyle(StageHUDTheme.textMuted)
                 }
             }
@@ -2072,18 +2271,30 @@ struct ActionLauncherRootView: View {
         }
     }
 
+    /// Open a take in the workspace, but only if the workspace can show it.
+    ///
+    /// The jump to Scenarios used to be unconditional. A take whose scenario
+    /// has since been deleted — or that was captured without one — put you on
+    /// an empty Scenarios page reading "No scenarios yet", with the thing you
+    /// had just clicked nowhere on screen. Navigating away is only right when
+    /// there is something there to navigate to.
     private func openSession(_ session: ActionSessionSummary) {
         model.selectSession(session)
-        selectedSection = .scenarios
-        if let scenario = model.scenarios.first(where: {
+        guard let scenario = model.scenarios.first(where: {
             $0.latestSessionId == session.sessionId
                 || $0.sessionIds.contains(session.sessionId)
                 || $0.latestSessionId == session.id
                 || $0.sessionIds.contains(session.id)
-        }) {
-            model.selectScenario(scenario)
-            model.setFlowPhase(.review)
+        }) else {
+            // Nothing to review it in, so play the take itself rather than
+            // leaving the click with no outcome at all. `replaySession` falls
+            // back to revealing the folder when there is no video to play.
+            model.replaySession(session)
+            return
         }
+        selectedSection = .scenarios
+        model.selectScenario(scenario)
+        model.setFlowPhase(.review)
     }
 
     // MARK: - Settings
@@ -2100,7 +2311,6 @@ struct ActionLauncherRootView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     ActionSettingsPageHeader(
-                        icon: settingsPane.icon,
                         title: settingsPane.title,
                         subtitle: settingsPane.subtitle
                     )
@@ -2118,18 +2328,16 @@ struct ActionLauncherRootView: View {
 
     private var settingsSubnav: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Settings")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(StageHUDTheme.textPrimary)
-                .padding(.horizontal, 16)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
-
+            // No "Settings" heading here. The rail on the left already has
+            // Settings selected and the pane on the right now opens with a
+            // SETTINGS eyebrow, so a third one in between was the same word
+            // three times across one window.
             VStack(spacing: 2) {
                 ForEach(SettingsPane.allCases) { pane in
                     settingsSubnavItem(pane)
                 }
             }
+            .padding(.top, 20)
             .padding(.horizontal, 10)
 
             Spacer(minLength: 0)
@@ -2144,26 +2352,30 @@ struct ActionLauncherRootView: View {
             settingsPane = pane
         } label: {
             HStack(spacing: 10) {
+                // The same selection as the rail two inches to the left: ink
+                // ground, one 2pt accent rail, ink glyph. It was a raised white
+                // card with a 3pt bar, so the window drew two different answers
+                // to "which one is selected" side by side.
                 Image(systemName: pane.icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(selected ? StageHUDTheme.reviewAccent : StageHUDTheme.textMuted)
+                    .font(ActionIcon.medium)
+                    .foregroundStyle(selected ? StageHUDTheme.textPrimary : StageHUDTheme.textMuted)
                     .frame(width: 18)
                 Text(pane.title)
-                    .font(.system(size: 13, weight: selected ? .semibold : .medium))
+                    .font(ActionType.uiNav)
                     .foregroundStyle(selected ? StageHUDTheme.textPrimary : StageHUDTheme.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
-            .frame(height: 34)
+            .frame(height: 32)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? StageHUDTheme.buttonSecondaryHover : Color.clear)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? StageHUDTheme.textPrimary.opacity(0.055) : Color.clear)
             )
             .overlay(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
                     .fill(selected ? StageHUDTheme.reviewAccent : Color.clear)
-                    .frame(width: 3)
+                    .frame(width: 2)
                     .padding(.vertical, 8)
             }
             .contentShape(Rectangle())
@@ -2199,7 +2411,7 @@ struct ActionLauncherRootView: View {
                         icon: "exclamationmark.triangle.fill",
                         iconColor: Color(nsColor: .systemOrange),
                         title: "Some permissions are missing",
-                        subtitle: "Capture and automation will be limited until both Accessibility and Screen Recording are granted."
+                        subtitle: "Accessibility and Screen Recording"
                     ) {
                         Button("Request access") {
                             model.requestPermissions()
@@ -2212,7 +2424,7 @@ struct ActionLauncherRootView: View {
             ActionSettingsSection(title: "macOS privacy") {
                 ActionSettingsPermissionRow(
                     title: "Accessibility",
-                    detail: "Required to focus apps, click, type, and read UI structure.",
+                    detail: "Focus, click, type, read UI",
                     granted: axGranted,
                     statusLabel: permissionStatusLabel(model.accessibilityStatus),
                     primaryActionTitle: "Grant",
@@ -2224,7 +2436,7 @@ struct ActionLauncherRootView: View {
 
                 ActionSettingsPermissionRow(
                     title: "Screen Recording",
-                    detail: "Required for screenshots and ScreenCaptureKit recording.",
+                    detail: "Screenshots and recording",
                     granted: screenGranted,
                     statusLabel: permissionStatusLabel(model.screenRecordingStatus),
                     primaryActionTitle: "Grant",
@@ -2245,25 +2457,145 @@ struct ActionLauncherRootView: View {
     }
 
     private var settingsAppearancePage: some View {
-        ActionSettingsSection(title: "Theme") {
-            ActionSettingsControlRow(
-                title: "Appearance",
-                subtitle: "System follows macOS. Light and Dark force the theme.",
-                icon: "circle.lefthalf.filled"
-            ) {
-                Picker("Appearance", selection: Binding(
-                    get: { model.appearanceMode },
-                    set: { model.setAppearanceMode($0) }
-                )) {
-                    ForEach(ActionAppearanceMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
+        VStack(alignment: .leading, spacing: 18) {
+            // "Mode", not "Appearance": the pane is already called Appearance,
+            // and a section label that repeats its own page reads as filler.
+            ActionSettingsSection(title: "Mode") {
+                ActionSettingsControlRow(
+                    title: "Light and dark",
+                    subtitle: nil,
+                    icon: "circle.lefthalf.filled"
+                ) {
+                    ActionSegmentedControl(
+                        options: ActionAppearanceMode.allCases.map { ($0, $0.title) },
+                        selection: Binding(
+                            get: { model.appearanceMode },
+                            set: { model.setAppearanceMode($0) }
+                        )
+                    )
+                    .frame(width: 220)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 220)
+            }
+
+            ActionSettingsSection(title: "Theme") {
+                // A grid of specimens rather than a menu of names. A theme is a
+                // look; asking someone to pick one from a dropdown is asking
+                // them to remember what each name looked like last time.
+                VStack(alignment: .leading, spacing: 12) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 132, maximum: 190), spacing: 10)],
+                        alignment: .leading,
+                        spacing: 12
+                    ) {
+                        ForEach(themeStore.catalog) { entry in
+                            ActionThemeSwatch(
+                                entry: entry,
+                                isSelected: entry.id == themeStore.selectedID
+                            ) {
+                                themeStore.select(entry.id)
+                            }
+                        }
+                    }
+
+                    Text(themeSubtitle)
+                        .font(ActionType.uiBody)
+                        .foregroundStyle(StageHUDTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(14)
+
+                ActionSettingsDivider()
+
+                ActionSettingsRow(
+                    icon: "folder",
+                    title: "Themes folder",
+                    subtitle: "~/Library/Application Support/Action/Themes"
+                ) {
+                    Button("Reveal") {
+                        try? FileManager.default.createDirectory(
+                            at: themeStore.directory,
+                            withIntermediateDirectories: true
+                        )
+                        NSWorkspace.shared.activateFileViewerSelecting([themeStore.directory])
+                    }
+                    .buttonStyle(ActionSettingsPillButtonStyle())
+                }
+
+                if !themeStore.issues.isEmpty {
+                    ActionSettingsDivider()
+                    themeIssues
+                }
             }
         }
+    }
+
+    /// Errors are shown; advisories are folded away.
+    ///
+    /// The whole point of validating a theme is that the reason is visible to
+    /// whoever wrote it — an agent that iterates on a file for ten minutes
+    /// without learning its ink is unreadable is the failure mode. But an
+    /// advisory is not a fault, and the house theme carries a few of them; printed
+    /// open on every visit they read as "this app is broken" rather than as
+    /// "here is a judgement call somebody made".
+    @ViewBuilder
+    private var themeIssues: some View {
+        let errors = themeStore.issues.filter { $0.severity == .error }
+        let notes = themeStore.issues.filter { $0.severity != .error }
+
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(Array(errors.enumerated()), id: \.offset) { _, issue in
+                themeIssueRow(issue)
+            }
+
+            if !notes.isEmpty {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        showThemeNotes.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: showThemeNotes ? "chevron.down" : "chevron.right")
+                            .font(ActionIcon.micro)
+                        Text(notes.count == 1 ? "1 note" : "\(notes.count) notes")
+                            .font(ActionType.label)
+                            .tracking(ActionType.labelTracking)
+                    }
+                    .foregroundStyle(StageHUDTheme.textMuted)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if showThemeNotes {
+                    ForEach(Array(notes.enumerated()), id: \.offset) { _, issue in
+                        themeIssueRow(issue)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private func themeIssueRow(_ issue: ActionThemeIssue) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: issue.severity == .error ? "exclamationmark.octagon" : "info.circle")
+                .font(ActionIcon.small)
+                .foregroundStyle(issue.severity == .error ? StageHUDTheme.runFailed : StageHUDTheme.textMuted)
+            Text(issue.message)
+                .font(ActionType.uiCaption)
+                .foregroundStyle(StageHUDTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var themeSubtitle: String {
+        guard let entry = themeStore.catalog.first(where: { $0.id == themeStore.selectedID }) else {
+            return "Theme file missing — using the built-in."
+        }
+        if let summary = entry.summary { return summary }
+        return entry.isBuiltin ? "Built in." : "From \(entry.url?.lastPathComponent ?? "a theme file")."
     }
 
     private var settingsAgentPage: some View {
@@ -2273,7 +2605,7 @@ struct ActionLauncherRootView: View {
                     icon: "cpu",
                     iconColor: agentIsHealthy ? Color(nsColor: .systemGreen) : StageHUDTheme.textMuted,
                     title: "Local agent",
-                    subtitle: "Handles automation methods and capture orchestration over a local WebSocket."
+                    subtitle: "Local WebSocket"
                 ) {
                     ActionSettingsStatusBadge(
                         text: humanAgentStatus,
@@ -2292,8 +2624,8 @@ struct ActionLauncherRootView: View {
                 }
             }
 
-            Text("The agent starts with Action. If it shows Offline, restart the app.")
-                .font(.system(size: 12))
+            Text("Starts with Action")
+                .font(ActionType.uiBody)
                 .foregroundStyle(StageHUDTheme.textMuted)
         }
     }
@@ -2393,6 +2725,24 @@ struct ActionLauncherRootView: View {
             )
     }
 
+    /// The filled twin of each nav glyph, shown when the row is selected.
+    /// SF Symbols pairs outline and fill for exactly this, and it is the
+    /// selection cue macOS users already read without being told.
+    private func filledIconName(for section: LauncherSection) -> String {
+        switch section {
+        case .home:
+            return "house.fill"
+        case .scenarios:
+            return "list.bullet.rectangle.fill"
+        case .runs:
+            return "clock.arrow.circlepath"
+        case .library:
+            return "square.stack.fill"
+        case .settings:
+            return "gearshape.fill"
+        }
+    }
+
     private func iconName(for section: LauncherSection) -> String {
         switch section {
         case .home:
@@ -2441,9 +2791,22 @@ struct ActionLauncherRootView: View {
 private struct ActionLauncherButtonStyle: ButtonStyle {
     let tone: StageHUDViewModel.ButtonTone
 
+    @ViewBuilder
     func makeBody(configuration: Configuration) -> some View {
+        // The primary is the quiet one, and it is the same object as the one on
+        // the Scenarios page. A filled black pill in the header is the loudest
+        // thing on any page it sits on, and the app had two different primary
+        // treatments visible at once.
+        if tone == .primary {
+            ActionQuietButtonLabel(configuration: configuration)
+        } else {
+            toned(configuration)
+        }
+    }
+
+    private func toned(_ configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .medium))
+            .font(ActionType.uiBodyStrong)
             .foregroundStyle(foreground(configuration: configuration))
             .padding(.horizontal, 12)
             .frame(height: 28)

@@ -35,6 +35,7 @@ export default {
       { pattern: 'agent', instruction: 'Read docs/native-runtime.md and native/engine/CoreSources/ActionAgentRuntime.swift for the current app/agent split.' },
       { pattern: 'permission', instruction: 'Check native/engine/Sources/ActionLauncherViewModel.swift and the native wrapper scripts in native/engine/scripts/.' },
       { pattern: 'build', instruction: 'Use bun run native:doctor or native/engine/scripts/build-app.sh to produce a signed app bundle.' },
+      { pattern: 'theme', instruction: 'Read docs/theming.agent.md before changing colour, type or metrics. Views paint through StageHUDTheme, which resolves whichever ActionTheme is installed; themes are patches authored as JSON.' },
     ],
 
     sections: ['overview', 'getting-started', 'native-runtime', 'recording'],

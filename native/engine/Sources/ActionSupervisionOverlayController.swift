@@ -83,11 +83,11 @@ struct ActionSupervisionView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Action")
-                    .font(.system(size: 11, weight: .semibold, design: .default))
+                    .font(ActionType.uiCaptionStrong)
                     .foregroundStyle(StageHUDTheme.hudPaper)
 
                 Text(model.countLabel)
-                    .font(.system(size: 9, weight: .medium, design: .default))
+                    .font(ActionType.uiMicro)
                     .foregroundStyle(StageHUDTheme.hudMuted)
                     .lineLimit(1)
             }
@@ -117,13 +117,13 @@ struct ActionSupervisionView: View {
         VStack(alignment: .leading, spacing: 7) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.title)
-                    .font(.system(size: 12, weight: .semibold, design: .default))
+                    .font(ActionType.uiBodyStrong)
                     .foregroundStyle(StageHUDTheme.hudPaper.opacity(0.94))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text(model.detail)
-                    .font(.system(size: 10, weight: .regular, design: .default))
+                    .font(ActionType.uiCaption)
                     .foregroundStyle(StageHUDTheme.hudMuted)
                     .lineLimit(2)
             }
@@ -131,7 +131,7 @@ struct ActionSupervisionView: View {
             VStack(alignment: .leading, spacing: 4) {
                 if model.lines.isEmpty {
                     Text("Waiting for the next beat.")
-                        .font(.system(size: 11, weight: .regular, design: .default))
+                        .font(ActionType.uiCaption)
                         .foregroundStyle(StageHUDTheme.hudPaper.opacity(0.38))
                 } else {
                     ForEach(Array(model.lines.enumerated()), id: \.offset) { index, line in
@@ -196,11 +196,11 @@ struct ActionSupervisionView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Action")
-                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .font(ActionType.uiMicro)
                     .foregroundStyle(StageHUDTheme.hudPaper)
 
                 Text(model.countLabel)
-                    .font(.system(size: 9, weight: .regular, design: .default))
+                    .font(ActionType.uiCaption)
                     .foregroundStyle(StageHUDTheme.hudMuted)
                     .lineLimit(1)
             }
@@ -293,7 +293,7 @@ private struct ActionSupervisionStopLabel: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "stop.fill")
-                .font(.system(size: 7, weight: .bold))
+                .font(ActionIcon.micro)
             Text(title.uppercased())
                 .lineLimit(1)
         }
@@ -304,7 +304,7 @@ private struct ActionSupervisionStopLabel: View {
 struct ActionSupervisionSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 10, weight: .semibold, design: .default))
+            .font(ActionType.uiMicro)
             .foregroundStyle(StageHUDTheme.hudPaper.opacity(configuration.isPressed ? 0.62 : 0.86))
             .padding(.horizontal, 11)
             .frame(height: 28)
@@ -349,7 +349,7 @@ struct ActionSupervisionButtonStyle: ButtonStyle {
 struct ActionSupervisionIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 9, weight: .semibold))
+            .font(ActionType.uiMicro)
             .foregroundStyle(StageHUDTheme.hudPaper.opacity(configuration.isPressed ? 0.66 : 0.82))
             .frame(width: 28, height: 28)
             .background(

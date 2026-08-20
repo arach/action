@@ -167,6 +167,13 @@ cp "$HOST_EXECUTABLE" "$APP_EXECUTABLE"
 cp "$AGENT_EXECUTABLE" "$APP_AGENT_EXECUTABLE"
 cp "$PLIST_TEMPLATE" "$CONTENTS_DIR/Info.plist"
 cp "$AGENT_PLIST_TEMPLATE" "$AGENT_HELPER_CONTENTS_DIR/Info.plist"
+if [[ -d "$ROOT_DIR/themes" ]]; then
+  mkdir -p "$RESOURCES_DIR/Themes"
+  theme_files=("$ROOT_DIR"/themes/*.json(N))
+  if (( ${#theme_files[@]} )); then
+    cp "${theme_files[@]}" "$RESOURCES_DIR/Themes/"
+  fi
+fi
 if [[ -f "$ROOT_DIR/assets/pets/mira/pet.json" && -f "$ROOT_DIR/assets/pets/explorer-cat/sprites/explorer-cat.sheet.webp" ]]; then
   mkdir -p "$RESOURCES_DIR/Pets/mira"
   cp "$ROOT_DIR/assets/pets/mira/pet.json" "$RESOURCES_DIR/Pets/mira/pet.json"

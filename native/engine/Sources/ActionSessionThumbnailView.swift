@@ -30,11 +30,20 @@ struct ActionSessionThumbnailView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            // Fit, not fill.
+            //
+            // Filling a landscape tile from a portrait capture — a Calculator
+            // window, an inspector panel — crops away everything but a band
+            // across the middle, and the thumbnail for a Calculator demo ends
+            // up showing two rows of buttons and no window. In an app whose
+            // whole job is producing demo recordings, the library not being
+            // able to show you what a take is of is the wrong trade for a tidy
+            // grid. Letterboxed on the deep ground the player already uses.
             Group {
                 if let image {
                     Image(nsImage: image)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .aspectRatio(contentMode: .fit)
                 } else {
                     thumbnailPlaceholder
                 }
@@ -44,7 +53,7 @@ struct ActionSessionThumbnailView: View {
 
             if showCaption {
                 Text(caption)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(ActionType.uiMicro)
                     .foregroundStyle(StageHUDTheme.textPrimary)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
@@ -68,7 +77,7 @@ struct ActionSessionThumbnailView: View {
         }
         .frame(width: width, height: height)
         .frame(maxWidth: width == nil ? .infinity : nil)
-        .background(StageHUDTheme.appBackground)
+        .background(StageHUDTheme.fieldDeep)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay {
             if showBorder {
@@ -83,7 +92,7 @@ struct ActionSessionThumbnailView: View {
 
     private func badge(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .font(ActionType.mono(10, weight: .semibold))
             .foregroundStyle(Color.white.opacity(0.95))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -107,7 +116,7 @@ struct ActionSessionThumbnailView: View {
                     .foregroundStyle(StageHUDTheme.textMuted)
                 if placeholderFitsLabel {
                     Text(session.isCalculatorTake ? session.actualResult : session.kind.rawValue)
-                        .font(.system(size: 14, weight: .semibold, design: session.isCalculatorTake ? .monospaced : .default))
+                        .font(session.isCalculatorTake ? ActionType.bodyMono : ActionType.uiBodyStrong)
                         .foregroundStyle(StageHUDTheme.textSecondary)
                 }
             }

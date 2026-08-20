@@ -103,9 +103,9 @@ enum ActionScenarioPresets {
     static func calculatorDemoSteps() -> [ActionScenarioStep] {
         [
             step(1, action: "type", description: "Enter 12", target: "keyboard"),
-            step(2, action: "click", description: "Click plus", target: "calculator.operator.plus · +"),
+            step(2, action: "click", description: "Click plus", target: "calculator.operator.plus"),
             step(3, action: "type", description: "Enter 30", target: "keyboard"),
-            step(4, action: "press-key", description: "Press equals", target: "calculator.operator.equals · ="),
+            step(4, action: "press-key", description: "Press equals", target: "calculator.operator.equals"),
         ]
     }
 
@@ -113,7 +113,7 @@ enum ActionScenarioPresets {
         let now = ISO8601DateFormatter().string(from: Date())
         let id = "scenario-\(Int(Date().timeIntervalSince1970))-\(String(UUID().uuidString.prefix(6)).lowercased())"
         let resolvedGoal = (goal?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-            ?? "Show a short Calculator demo with keyboard and click input"
+            ?? "Calculator, keyboard and click"
 
         return ActionScenarioDocument(
             id: id,

@@ -4,28 +4,25 @@ import SwiftUI
 /// The in-app Settings pane lives in `ActionLauncherRootView`.
 struct ActionSettingsRootView: View {
     @Binding var appearanceMode: ActionAppearanceMode
+    @ObservedObject private var themeStore = ActionThemeStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             ActionSettingsPageHeader(
-                icon: "paintpalette",
                 title: "Appearance",
-                subtitle: "How Action looks on this Mac."
+                subtitle: "Theme, light and dark"
             )
 
-            ActionSettingsSection(title: "Theme") {
+            ActionSettingsSection(title: "Mode") {
                 ActionSettingsControlRow(
-                    title: "Appearance",
-                    subtitle: "System follows macOS. Light and Dark force the theme.",
+                    title: "Light and dark",
+                    subtitle: nil,
                     icon: "circle.lefthalf.filled"
                 ) {
-                    Picker("Appearance", selection: $appearanceMode) {
-                        ForEach(ActionAppearanceMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    ActionSegmentedControl(
+                        options: ActionAppearanceMode.allCases.map { ($0, $0.title) },
+                        selection: $appearanceMode
+                    )
                     .frame(width: 220)
                 }
             }
@@ -35,5 +32,6 @@ struct ActionSettingsRootView: View {
         .padding(24)
         .frame(width: 480, height: 260, alignment: .topLeading)
         .background(StageHUDTheme.appBackground)
+        .id(themeStore.revision)
     }
 }
