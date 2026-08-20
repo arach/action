@@ -38,12 +38,23 @@ final class ActionAgentProcessController {
         self.process = nil
     }
 
+    /// The bundled helper comes first, and the app's own executable is the
+    /// fallback — not the other way round.
+    ///
+    /// Re-running `Contents/MacOS/Action` with `agent` works, but it puts a
+    /// second process named `Action`, inside the `Action.app` bundle, in the
+    /// process table. macOS then counts it as a second instance of the app, so
+    /// a quit Apple Event is addressed to it as well; it has no run loop to
+    /// answer one, and every caller that waits for "all instances of
+    /// dev.action.Action to go away" times out and reports that the app
+    /// refused to quit — when in fact the window had closed immediately. That
+    /// is what made `pkill` look like the only reliable way to stop Action.
+    ///
+    /// `ActionAgent.app` has its own bundle id and `LSUIElement`, so the same
+    /// child is unambiguous both to LaunchServices and to `pgrep`. The main
+    /// executable stays as the fallback for running out of a bare build
+    /// directory, where the helper bundle does not exist.
     private func resolveAgentExecutableURL() throws -> URL {
-        if let mainExecutableURL = Bundle.main.executableURL,
-           FileManager.default.isExecutableFile(atPath: mainExecutableURL.path(percentEncoded: false)) {
-            return mainExecutableURL
-        }
-
         let helperExecutable = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Helpers/ActionAgent.app", isDirectory: true)
             .appendingPathComponent("Contents/MacOS/ActionAgent", isDirectory: false)
@@ -63,6 +74,14 @@ final class ActionAgentProcessController {
             .appendingPathComponent("ActionAgent", isDirectory: false)
         if FileManager.default.isExecutableFile(atPath: sibling.path(percentEncoded: false)) {
             return sibling
+        }
+
+        // Bare build directory: no helper bundle, so the host binary serves as
+        // its own agent. Safe here because there is no .app for the second
+        // process to be mistaken for an instance of.
+        if let mainExecutableURL = Bundle.main.executableURL,
+           FileManager.default.isExecutableFile(atPath: mainExecutableURL.path(percentEncoded: false)) {
+            return mainExecutableURL
         }
 
         throw NSError(
