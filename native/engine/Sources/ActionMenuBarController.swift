@@ -48,6 +48,13 @@ final class ActionMenuBarController: NSObject, NSPopoverDelegate {
         _ = popover.contentViewController?.view
     }
 
+    func themeDidChange() {
+        let wasShown = popover?.isShown == true
+        popover?.performClose(nil)
+        popover = nil
+        if wasShown { showPopover() }
+    }
+
     @objc
     private func statusItemClicked(_ sender: Any?) {
         guard let event = NSApp.currentEvent,
@@ -196,10 +203,10 @@ struct ActionMenuBarPopoverView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Action")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(ActionType.uiBodyStrong)
                     .foregroundStyle(StageHUDTheme.hudPaper)
                 Text(headerDetail)
-                    .font(.system(size: 11))
+                    .font(ActionType.uiCaption)
                     .foregroundStyle(StageHUDTheme.hudMuted)
                     .lineLimit(1)
             }
@@ -242,11 +249,11 @@ struct ActionMenuBarPopoverView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(scenario.title)
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(ActionType.uiBodyStrong)
                                 .foregroundStyle(StageHUDTheme.hudPaper)
                                 .lineLimit(1)
                             Text("\(scenario.steps.count) steps · \(scenario.targetAppName)")
-                                .font(.system(size: 10))
+                                .font(ActionType.uiCaption)
                                 .foregroundStyle(StageHUDTheme.hudMuted)
                                 .lineLimit(1)
                         }
@@ -277,17 +284,17 @@ struct ActionMenuBarPopoverView: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(session.displayTitle)
-                                            .font(.system(size: 12, weight: .semibold))
+                                            .font(ActionType.uiBodyStrong)
                                             .foregroundStyle(StageHUDTheme.hudPaper)
                                             .lineLimit(1)
                                         Text(takeSubtitle(session))
-                                            .font(.system(size: 10))
+                                            .font(ActionType.uiCaption)
                                             .foregroundStyle(StageHUDTheme.hudMuted)
                                             .lineLimit(1)
                                     }
                                     Spacer(minLength: 6)
                                     Image(systemName: "chevron.right")
-                                        .font(.system(size: 9, weight: .semibold))
+                                        .font(ActionIcon.micro)
                                         .foregroundStyle(StageHUDTheme.hudMuted)
                                 }
                             }
@@ -321,7 +328,7 @@ struct ActionMenuBarPopoverView: View {
 
     private func sectionLabel(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 10, weight: .semibold))
+            .font(ActionType.uiMicro)
             .foregroundStyle(StageHUDTheme.hudMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
@@ -331,7 +338,7 @@ struct ActionMenuBarPopoverView: View {
 
     private func emptyRow(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 12))
+            .font(ActionType.uiBody)
             .foregroundStyle(StageHUDTheme.hudMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8)

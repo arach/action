@@ -246,7 +246,10 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var accessibilityStatus: String = "Unknown"
     @Published var screenRecordingStatus: String = "Unknown"
     @Published var notes: [String] = []
-    @Published var guidedDemoStatus: String = "Ready"
+    /// The status line before anything has happened. Surfaces compare against
+    /// it so they can stay silent rather than print it.
+    static let idleStatus = "Ready"
+    @Published var guidedDemoStatus: String = ActionLauncherViewModel.idleStatus
     @Published var recentSessions: [ActionSessionSummary] = []
     @Published var isRunningGuidedDemo: Bool = false
     @Published var selectedSessionID: String?
@@ -258,7 +261,7 @@ final class ActionLauncherViewModel: ObservableObject {
     @Published var scenarios: [ActionScenarioDocument] = []
     @Published var selectedScenarioID: String?
     @Published var selectedScenarioStepID: String?
-    @Published var scenarioDraftGoal: String = "Show a short Calculator demo with keyboard and click input"
+    @Published var scenarioDraftGoal: String = "Calculator, keyboard and click"
     @Published var scenarioStepFeedbackDraft: String = ""
     @Published private(set) var workspaceNavigationRequestID = UUID()
     @Published private(set) var launcherDestination: ActionLauncherDestination = .home

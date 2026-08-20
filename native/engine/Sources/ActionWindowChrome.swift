@@ -19,13 +19,8 @@ enum ActionWindowChrome {
     /// The window ground. It is the rail colour, not the canvas: the title bar
     /// continues the sidebar's band across the top, so the two read as one piece
     /// of chrome rather than as a lid over the page.
-    static let windowBackground = NSColor(name: nil) { appearance in
-        switch appearance.bestMatch(from: [.darkAqua, .aqua]) {
-        case .darkAqua:
-            return NSColor(calibratedRed: 0.055, green: 0.071, blue: 0.074, alpha: 1)
-        default:
-            return NSColor(calibratedRed: 0.925, green: 0.886, blue: 0.812, alpha: 1)
-        }
+    static var windowBackground: NSColor {
+        ActionThemePalette.nsColor(.railBackground)
     }
 
     /// Height reserved at the top of the content for the title bar band.

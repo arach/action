@@ -30,7 +30,7 @@ struct ActionBrandLockup: View {
             ActionLatticeLogoMark(size: 26)
 
             Text("Action")
-                .font(.system(size: 15, weight: .semibold))
+                .font(ActionType.uiSubhead)
                 .foregroundStyle(StageHUDTheme.textPrimary)
         }
     }
@@ -74,6 +74,12 @@ struct ActionCharacterSpriteView: View {
     }
 }
 
+/// Mira, at the foot of the rail.
+///
+/// No card. A filled, bordered, rounded box around a sprite and two words made
+/// the quietest thing in the app into the heaviest object in the chrome — a
+/// raised panel sitting in a rail that has no other panels in it. She stands on
+/// the rail like the nav items do, and a hairline marks the foot of the list.
 struct MiraCompanionBadge: View {
     var body: some View {
         HStack(spacing: 10) {
@@ -81,25 +87,16 @@ struct MiraCompanionBadge: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Mira")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(ActionType.uiNav)
                     .foregroundStyle(StageHUDTheme.textPrimary)
-                Text("Companion")
-                    .font(.system(size: 11))
+                Text("COMPANION")
+                    .font(ActionType.label)
+                    .tracking(ActionType.labelTracking)
                     .foregroundStyle(StageHUDTheme.textMuted)
             }
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(StageHUDTheme.cardFill.opacity(0.7))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-        )
     }
 }
 

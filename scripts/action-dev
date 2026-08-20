@@ -66,9 +66,42 @@ ensure_built_if_needed() {
   fi
 }
 
+# Ask Action to quit, and only kill what refuses.
+#
+# `pkill` alone is a SIGTERM: the app never runs applicationWillTerminate, so it
+# never stops its agent child, and anything mid-write is cut off. The host's
+# quit-app command sends the quit Apple Event, waits, and escalates on its own;
+# a healthy instance is gone in well under a second. The pkill afterwards is the
+# backstop for a wedged process and for a build that predates this command.
+quit_action_processes() {
+  if [[ -x "$APP_EXECUTABLE" ]]; then
+    "$ENGINE_SCRIPTS_DIR/run-app-host.sh" quit-app >/dev/null 2>&1 || true
+  fi
+
+  if pgrep -x Action >/dev/null 2>&1 || pgrep -x ActionAgent >/dev/null 2>&1; then
+    pkill -x Action 2>/dev/null || true
+    pkill -x ActionAgent 2>/dev/null || true
+  fi
+}
+
+# Wait for the process table to be clear before anything relaunches, so a new
+# instance never comes up beside a dying one.
+wait_for_action_exit() {
+  local waited=0
+  while (( waited < 60 )); do
+    if ! pgrep -x Action >/dev/null 2>&1 && ! pgrep -x ActionAgent >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  echo "action-dev: Action is still running after 6s" >&2
+  return 1
+}
+
 kill_action_processes() {
-  pkill -x Action 2>/dev/null || true
-  pkill -x ActionAgent 2>/dev/null || true
+  quit_action_processes
+  wait_for_action_exit || true
 }
 
 open_launcher() {
@@ -111,7 +144,6 @@ case "$cmd" in
       shift
     fi
     kill_action_processes
-    sleep 0.5
     open_launcher
     ;;
   quit)

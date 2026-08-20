@@ -3560,27 +3560,54 @@ func waitForFinishedSignal(at path: String) throws {
     }
 }
 
-func terminateRunningActionApps(timeout: TimeInterval = 2.5) -> Bool {
+/// Quit every running copy of Action and wait for it to actually be gone.
+///
+/// Asks first with `terminate()` — the quit Apple Event, which lets the app run
+/// `applicationWillTerminate` and stop its agent child — and escalates to
+/// `forceTerminate()` only for whatever is still standing when the grace period
+/// runs out. A single healthy instance answers in about 0.15s; the long tail is
+/// an instance that is wedged, and forcing that one is the point.
+func terminateRunningActionApps(timeout: TimeInterval = 6) -> Bool {
     let bundleId = "dev.action.Action"
-    let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
-    guard !running.isEmpty else {
+
+    // Everything except this process. `action-dev host quit-app` runs the same
+    // executable out of the same bundle, so it is itself an instance of
+    // dev.action.Action: without this filter the command terminates itself
+    // before it can write its reply, and the caller sees a hang followed by
+    // "ActionHost did not write a reply file".
+    let selfPid = ProcessInfo.processInfo.processIdentifier
+    func running() -> [NSRunningApplication] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+            .filter { $0.processIdentifier != selfPid }
+    }
+
+    guard !running().isEmpty else {
         return true
     }
 
-    for app in running {
+    for app in running() {
         _ = app.terminate()
     }
 
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
-        let remaining = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
-        if remaining.isEmpty {
-            return true
+    func waitForExit(until deadline: Date) -> Bool {
+        while Date() < deadline {
+            if running().isEmpty {
+                return true
+            }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
         }
-        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.08))
+        return running().isEmpty
     }
 
-    return NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
+    if waitForExit(until: Date().addingTimeInterval(timeout)) {
+        return true
+    }
+
+    for app in running() {
+        _ = app.forceTerminate()
+    }
+
+    return waitForExit(until: Date().addingTimeInterval(2))
 }
 
 @MainActor
@@ -3614,7 +3641,9 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             ActionHostResponse(
                 status: didQuit ? "quit" : "error",
                 outputPath: nil,
-                detail: didQuit ? "terminated-running-action-apps" : "unable-to-quit-within-timeout"
+                detail: didQuit
+                    ? "terminated-running-action-apps"
+                    : "action-still-running-after-force-terminate"
             )
         )
     case .status:

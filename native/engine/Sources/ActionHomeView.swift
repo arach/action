@@ -28,6 +28,9 @@ struct ActionHomeView: View {
     @State private var counts: ActionToolCounts = .empty
     @State private var didCopyCommand = false
     @State private var copyResetTask: Task<Void, Never>?
+    /// The run whose row is showing its context. One at a time — the panel is
+    /// four rows tall by design, and two open rows would push it past the fold.
+    @State private var expandedSessionID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -73,7 +76,7 @@ struct ActionHomeView: View {
                         .font(ActionType.panelLead)
                         .foregroundStyle(StageHUDTheme.fieldDeepText)
                     Text(lease.task)
-                        .font(ActionType.body)
+                        .font(ActionType.uiBodyStrong)
                         .foregroundStyle(StageHUDTheme.fieldDeepMeta)
                         .lineLimit(1)
                 }
@@ -121,7 +124,7 @@ struct ActionHomeView: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .help("Signal every active drive to stop and hand the Mac back")
+                .help("Stop every active drive")
             }
         }
         .padding(.horizontal, 18)
@@ -147,12 +150,18 @@ struct ActionHomeView: View {
                         .frame(width: 14, height: 14)
                     eyebrow("IDLE", tint: StageHUDTheme.fieldInkMuted)
                 }
-                Text("Nobody is driving. You have the Mac.")
+                // The lead slot answers one question — who has this Mac — and
+                // the driving panel answers it with the agent's name. So this
+                // one answers it the same way, with a word.
+                //
+                // "You", not "Nobody". The panel is not reporting a vacancy; it
+                // is naming whoever currently holds the machine, and when no
+                // lease is out that is the person reading the line. An absence
+                // where the driving state puts a name reads as the feature
+                // being off rather than as the machine being yours.
+                Text("You")
                     .font(ActionType.panelLead)
                     .foregroundStyle(StageHUDTheme.fieldInk)
-                Text("An agent takes control with drive.begin and gives it back with drive.release.")
-                    .font(ActionType.bodySmall)
-                    .foregroundStyle(StageHUDTheme.fieldInkSecondary)
             }
 
             Spacer(minLength: 8)
@@ -181,9 +190,6 @@ struct ActionHomeView: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 eyebrow("CONNECT AN AGENT", tint: StageHUDTheme.fieldInkSecondary)
-                Text("hand this to the agent once — the tools appear on its next task")
-                    .font(ActionType.subtitle)
-                    .foregroundStyle(StageHUDTheme.fieldInkMuted)
                 Spacer(minLength: 8)
                 Text("MCP · STDIO")
                     .font(ActionType.labelRegular)
@@ -252,18 +258,28 @@ struct ActionHomeView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: didCopyCommand ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 9, weight: .semibold))  // SF Symbol: sized to the label beside it
+                    .font(ActionIcon.micro)  // SF Symbol: sized to the label beside it
                 Text(didCopyCommand ? "COPIED" : "COPY")
                     .font(ActionType.label)
                     .tracking(ActionType.labelTracking)
             }
-            .foregroundStyle(StageHUDTheme.fieldAccent)
+            // Ink, not coral. Coral means a drive is live; a clipboard button
+            // wearing it borrows the one signal the app cannot afford to spend
+            // on chrome. It turns coral for the two seconds it says COPIED,
+            // where the colour is a change of state rather than a decoration.
+            .foregroundStyle(didCopyCommand ? StageHUDTheme.fieldAccent : StageHUDTheme.fieldInkSecondary)
             .padding(.horizontal, 11)
             .frame(height: 24)
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(StageHUDTheme.fieldAccent, lineWidth: 1)
+                    .strokeBorder(
+                        didCopyCommand
+                            ? StageHUDTheme.fieldAccent
+                            : StageHUDTheme.fieldInk.opacity(0.22),
+                        lineWidth: StageHUDTheme.hairline
+                    )
             )
+            .animation(.easeOut(duration: 0.15), value: didCopyCommand)
         }
         .buttonStyle(.plain)
         .help("Copy the MCP setup command")
@@ -276,14 +292,14 @@ struct ActionHomeView: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 eyebrow("ACTIONS", tint: StageHUDTheme.fieldInkSecondary)
                 Text(actionsSubtitle)
-                    .font(ActionType.subtitle)
+                    .font(ActionType.uiBody)
                     .foregroundStyle(StageHUDTheme.fieldInkMuted)
                 Spacer(minLength: 8)
             }
 
             HStack(alignment: .top, spacing: 26) {
-                ForEach(Array(counts.groups.enumerated()), id: \.element.id) { index, group in
-                    actionColumn(group, tint: columnTint(index))
+                ForEach(counts.groups) { group in
+                    actionColumn(group)
                 }
             }
         }
@@ -294,35 +310,25 @@ struct ActionHomeView: View {
     }
 
     /// With an empty ledger the counts column would be a wall of zeros reading
-    /// as "this does not work". The list is still the point, so the subtitle
-    /// changes rather than the panel.
+    /// as "this does not work", so the label says the counts are the week's
+    /// rather than leaving them to be read as all-time.
     private var actionsSubtitle: String {
-        counts.hasData
-            ? "what an agent can ask this Mac to do — and how often it has, this week"
-            : "what an agent can ask this Mac to do — nothing called yet this week"
+        counts.hasData ? "this week" : "none this week"
     }
 
-    private func columnTint(_ index: Int) -> Color {
-        switch index {
-        case 0: return StageHUDTheme.fieldAccent
-        case 1: return StageHUDTheme.fieldSignal
-        case 2: return StageHUDTheme.fieldInkSecondary
-        default: return StageHUDTheme.fieldInkMuted
-        }
-    }
-
-    private func actionColumn(_ group: ActionToolGroup, tint: Color) -> some View {
+    /// The four columns had four different coloured ticks beside their names —
+    /// coral, cyan, tan, ink — and the colours encoded nothing: the group's
+    /// name is right there, and no other surface in the app uses those hues to
+    /// mean those families. Four hues in one panel, for decoration, on a page
+    /// whose one meaningful colour is the coral that means a live drive. The
+    /// name over its rule is the header.
+    private func actionColumn(_ group: ActionToolGroup) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 7) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(tint)
-                    .frame(width: 3, height: 10)
-                Text(group.title.uppercased())
-                    .font(ActionType.label)
-                    .tracking(ActionType.labelTracking)
-                    .foregroundStyle(StageHUDTheme.fieldInkSecondary)
-            }
-            .padding(.bottom, 6)
+            Text(group.title.uppercased())
+                .font(ActionType.label)
+                .tracking(ActionType.labelTracking)
+                .foregroundStyle(StageHUDTheme.fieldInkSecondary)
+                .padding(.bottom, 6)
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(StageHUDTheme.fieldPanelEdge)
@@ -407,8 +413,8 @@ struct ActionHomeView: View {
 
     private var emptyLedger: some View {
         HStack {
-            Text("Nothing has run yet. Connect an agent above, or start a scenario.")
-                .font(ActionType.subtitle)
+            Text("Nothing yet")
+                .font(ActionType.uiBody)
                 .foregroundStyle(StageHUDTheme.fieldInkMuted)
             Spacer(minLength: 8)
             Button(action: onNewScenario) {
@@ -423,15 +429,22 @@ struct ActionHomeView: View {
         .frame(height: 56)
     }
 
+    /// Clicking a row opens the row, not a window.
+    ///
+    /// A single click used to navigate straight out of Home — into Scenarios,
+    /// or into Finder — which is a lot to happen from one click on a line of
+    /// history you were only reading. The click now expands the row into what
+    /// it is: when it ran, how long it took, who drove it, where it landed.
+    /// Leaving is an explicit button, and a double-click still does what a
+    /// double-click does everywhere on macOS.
     private func ledgerRow(_ session: ActionSessionSummary, isLast: Bool) -> some View {
-        Button {
-            onOpenSession(session)
-        } label: {
+        let expanded = expandedSessionID == session.id
+        return VStack(spacing: 0) {
             HStack(spacing: 12) {
                 outcomeDot(session.outcome)
 
                 Text(session.displayTitle)
-                    .font(session.isCalculatorTake ? ActionType.bodyMono : ActionType.body)
+                    .font(session.isCalculatorTake ? ActionType.bodyMono : ActionType.uiBodyStrong)
                     .foregroundStyle(StageHUDTheme.fieldInkRow)
                     .lineLimit(1)
                     .frame(width: 300, alignment: .leading)
@@ -460,7 +473,10 @@ struct ActionHomeView: View {
                     .font(ActionType.meta)
                     .foregroundStyle(StageHUDTheme.fieldInkMeta)
 
-                Text(destination(for: session))
+                // Hidden once the row is open: the same word is a button in
+                // the detail strip below, and printing it twice makes the
+                // static label look like the thing you are meant to click.
+                Text(expanded ? "" : destination(for: session))
                     .font(ActionType.label)
                     .tracking(ActionType.labelTracking)
                     .foregroundStyle(StageHUDTheme.fieldInkSecondary)
@@ -468,9 +484,21 @@ struct ActionHomeView: View {
             }
             .padding(.horizontal, 16)
             .frame(height: 40)
+            .background(expanded ? StageHUDTheme.fieldInk.opacity(0.035) : .clear)
             .contentShape(Rectangle())
+            .onTapGesture(count: 2) { onOpenSession(session) }
+            // Local state only. Expanding a row to read it is not the same as
+            // choosing it, and calling selectSession here left the Scenarios
+            // page showing whichever take you had last glanced at on Home.
+            .onTapGesture {
+                expandedSessionID = expanded ? nil : session.id
+            }
+
+            if expanded {
+                ledgerRowDetail(session)
+            }
         }
-        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.14), value: expanded)
         .overlay(alignment: .bottom) {
             // The card already draws a bottom edge; a row border under the last
             // row doubles it into a visibly thicker line.
@@ -481,6 +509,82 @@ struct ActionHomeView: View {
             }
         }
     }
+
+    /// The context the click earns: the facts that are not on the row, and the
+    /// two places this run can be opened.
+    private func ledgerRowDetail(_ session: ActionSessionSummary) -> some View {
+        HStack(alignment: .center, spacing: 18) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(session.sessionId)
+                    .font(ActionType.monoCaption)
+                    .foregroundStyle(StageHUDTheme.fieldInkMeta)
+                    .textSelection(.enabled)
+
+                HStack(spacing: 14) {
+                    detailFact("WHEN", absoluteTimestamp(session))
+                    detailFact("BY", session.agent.isEmpty ? "—" : session.agent)
+                    detailFact("OUTCOME", session.outcome.title)
+                    if session.feedbackCount > 0 {
+                        detailFact("NOTES", "\(session.feedbackCount)")
+                    }
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 8) {
+                fieldChipButton(destination(for: session)) { onOpenSession(session) }
+                fieldChipButton("FINDER") { model.revealSession(session) }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 2)
+        .padding(.bottom, 13)
+        .transition(.opacity)
+    }
+
+    private func detailFact(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 5) {
+            Text(label)
+                .font(ActionType.label)
+                .tracking(ActionType.labelTracking)
+                .foregroundStyle(StageHUDTheme.fieldInkMeta)
+            Text(value)
+                .font(ActionType.uiCaption)
+                .foregroundStyle(StageHUDTheme.fieldInkRow)
+                .lineLimit(1)
+        }
+    }
+
+    /// The COPY button's shape, reused: mono label, hairline border, ink.
+    private func fieldChipButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(ActionType.label)
+                .tracking(ActionType.labelTracking)
+                .foregroundStyle(StageHUDTheme.fieldInkSecondary)
+                .padding(.horizontal, 10)
+                .frame(height: 22)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(StageHUDTheme.fieldInk.opacity(0.22), lineWidth: StageHUDTheme.hairline)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func absoluteTimestamp(_ session: ActionSessionSummary) -> String {
+        guard let date = session.ledgerDate else {
+            return "—"
+        }
+        return Self.absoluteFormatter.string(from: date)
+    }
+
+    private static let absoluteFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEE d MMM HH:mm")
+        return formatter
+    }()
 
     /// Mirrors the Runs ledger: an unfinished run is the one outcome nobody ever
     /// wrote down, so it reads as an open ring rather than spending a colour.

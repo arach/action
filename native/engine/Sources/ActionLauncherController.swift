@@ -14,6 +14,15 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
     }
 
     func run() {
+        // The window's background colour is a resolved value AppKit holds onto,
+        // so a theme swap has to hand it a new one; SwiftUI's side of the window
+        // repaints itself.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(themeDidChange),
+            name: ActionThemePalette.didChangeNotification,
+            object: nil
+        )
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
         app.delegate = self
@@ -24,6 +33,14 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         ActionMenuBarController.shared.warmUpPopover()
         app.activate(ignoringOtherApps: true)
         app.run()
+    }
+
+    @objc private func themeDidChange() {
+        for window in [window, settingsWindow].compactMap({ $0 }) {
+            window.backgroundColor = ActionWindowChrome.windowBackground
+        }
+        ActionMenuBarController.shared.themeDidChange()
+        settingsWindow?.contentView?.needsDisplay = true
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

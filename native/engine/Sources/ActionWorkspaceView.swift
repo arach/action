@@ -1,413 +1,520 @@
 import SwiftUI
 
-/// Scenarios workspace: list + plan / last take.
-/// Start → Edit → Review is inherent — not labeled wizard chrome.
+/// Scenarios: one table, three states.
+///
+/// A scenario is a list of instructions, and it stays a list of instructions
+/// the whole way through. The grid — `#`, `VERB`, `STEP`, `TARGET`, `NOTES` —
+/// is fixed and never rearranges; planning, running and reviewing are three
+/// states of the same object rather than three different objects. So the row
+/// you read before the run is the row you watch during it and the row you
+/// judge after it, in the same place, at the same width, in the same face.
+///
+/// This replaces four nested cards — a list card holding scenario cards, a
+/// header card holding chips, a plan card holding step rows, and a permanently
+/// reserved 280pt notes rail holding a field box and note boxes — with one
+/// ruled table on paper. It is the same table language as the Runs ledger and
+/// the start page, which were the two surfaces that already got this right.
 struct ActionWorkspaceView: View {
     @ObservedObject var model: ActionLauncherViewModel
     var onOpenLibrary: () -> Void
 
+    /// The step whose notes are open. A note belongs to a step, so it opens
+    /// under that step rather than in a rail that is empty most of the time.
+    @State private var openStepID: String?
+
+    // MARK: - Geometry
+    //
+    // Stated once so the header and the rows cannot drift apart. The moment a
+    // column header sits over a different edge than its values, the table stops
+    // being a table.
+
+    private static let indexWidth: CGFloat = 26
+    private static let verbWidth: CGFloat = 86
+    private static let targetWidth: CGFloat = 176
+    private static let notesWidth: CGFloat = 78
+    /// Wide enough for a plan to breathe, narrow enough that the step column is
+    /// not a hundred points of empty paper between the verb and its target.
+    private static let pageWidth: CGFloat = 760
+
+    /// Which of the three states the page is in.
+    private enum PageState {
+        case plan
+        case running
+        case review
+    }
+
     var body: some View {
         Group {
-            if model.scenarios.isEmpty {
-                emptyState
+            if let scenario = model.selectedScenario {
+                scenarioPage(scenario)
+            } else if let first = model.scenarios.first {
+                // The list rail is gone, so "nothing selected" is not a state
+                // the page can sit in — it falls through to the first scenario
+                // the way a switcher does.
+                scenarioPage(first)
             } else {
-                HStack(alignment: .top, spacing: 16) {
-                    scenarioList
-                        .frame(width: 240)
-
-                    detail
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
+                startPage
             }
         }
+        .frame(maxWidth: Self.pageWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: - List
-
-    private var scenarioList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Scenarios")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(StageHUDTheme.textMuted)
-                .textCase(.uppercase)
-
-            VStack(spacing: 4) {
-                ForEach(model.scenarios) { scenario in
-                    scenarioRow(scenario)
-                }
-            }
-
-            Spacer(minLength: 0)
+    private func state(for scenario: ActionScenarioDocument) -> PageState {
+        if model.isRunningGuidedDemo {
+            return .running
         }
+        if hasTake(scenario), scenario.phase == .review {
+            return .review
+        }
+        return .plan
     }
 
-    private func scenarioRow(_ scenario: ActionScenarioDocument) -> some View {
-        let selected = model.selectedScenarioID == scenario.id
-        return Button {
-            model.selectScenario(scenario)
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(scenario.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(StageHUDTheme.textPrimary)
-                    .lineLimit(1)
-                Text(scenario.goal)
-                    .font(.system(size: 11))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-                    .lineLimit(2)
-                HStack(spacing: 6) {
-                    Text("\(scenario.steps.count) steps")
-                    if scenario.latestSessionId != nil {
-                        Text("·")
-                        Text("Has take")
-                    }
-                    if scenario.feedbackCount > 0 {
-                        Text("·")
-                        Text("\(scenario.feedbackCount) notes")
-                    }
-                }
-                .font(.system(size: 10))
-                .foregroundStyle(StageHUDTheme.textMuted)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(selected ? StageHUDTheme.buttonSecondaryHover : StageHUDTheme.cardFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(selected ? StageHUDTheme.reviewAccent.opacity(0.4) : StageHUDTheme.cardBorder, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button("Open plan") {
-                model.selectScenario(scenario)
-                model.setFlowPhase(.edit)
-            }
-            if scenario.latestSessionId != nil || !scenario.sessionIds.isEmpty {
-                Button("Open last take") {
-                    model.selectScenario(scenario, preferTake: true)
-                }
-            }
-            Button("Run") {
-                model.selectScenario(scenario)
-                model.approveAndRunSelectedScenario()
-            }
-            Divider()
-            Button("Delete…", role: .destructive) {
-                model.deleteScenario(scenario)
-            }
-        }
-    }
-
-    // MARK: - Detail
+    // MARK: - The page
 
     @ViewBuilder
-    private var detail: some View {
-        if let scenario = model.selectedScenario {
-            VStack(alignment: .leading, spacing: 14) {
-                detailHeader(for: scenario)
+    private func scenarioPage(_ scenario: ActionScenarioDocument) -> some View {
+        let pageState = state(for: scenario)
 
-                if hasTake(scenario), scenario.phase == .review {
-                    takeDetail(for: scenario)
-                } else {
-                    planDetail(for: scenario)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            pageHeader(scenario, state: pageState)
+
+            if pageState == .review, let session = sessionForScenario(scenario) {
+                takeSlab(session)
+                    .padding(.top, 22)
             }
-        } else if let session = model.selectedSession {
-            orphanTakeReview(session)
-        } else {
-            emptyState
+
+            planTable(scenario.steps, interactive: pageState == .plan)
+                .padding(.top, pageState == .review ? 20 : 26)
+
+            if pageState == .plan {
+                goalField
+                    .padding(.top, 24)
+            }
+
+            actionRow(scenario, state: pageState)
+                .padding(.top, 22)
         }
     }
 
-    private func detailHeader(for scenario: ActionScenarioDocument) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(scenario.title)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(StageHUDTheme.textPrimary)
-                    Text(scenario.goal)
-                        .font(.system(size: 13))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                }
-                Spacer(minLength: 12)
-                HStack(spacing: 8) {
-                    Button {
-                        model.approveAndRunSelectedScenario()
-                    } label: {
-                        Text(model.isRunningGuidedDemo ? "Running…" : "Run")
-                    }
-                    .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
-                    .disabled(model.isRunningGuidedDemo)
+    /// The scenario's name *is* the switcher.
+    ///
+    /// A separate chip beside the title printed the same words twice, and with
+    /// one scenario saved it printed them twice to offer a choice of one. The
+    /// name is the biggest thing on the page and the thing you would reach for
+    /// anyway, so it takes the menu: New, Delete, and every other scenario.
+    private func pageHeader(_ scenario: ActionScenarioDocument, state pageState: PageState) -> some View {
+        let position = (model.scenarios.firstIndex(where: { $0.id == scenario.id }) ?? 0) + 1
 
-                    if hasTake(scenario) {
-                        Button(scenario.phase == .review ? "Plan" : "Last take") {
-                            model.setFlowPhase(scenario.phase == .review ? .edit : .review)
-                        }
-                        .buttonStyle(ActionSettingsPillButtonStyle())
+        return VStack(alignment: .leading, spacing: 3) {
+            // The state is stated. It used to be legible only from a button
+            // offering to leave it — a control labelled "Last take" was the
+            // only way to know you were looking at the plan.
+            Text(eyebrow(for: scenario, state: pageState))
+                .font(ActionType.label)
+                .tracking(ActionType.eyebrowTracking)
+                .foregroundStyle(StageHUDTheme.textMuted)
+
+            Menu {
+                ForEach(model.scenarios) { item in
+                    Button(item.title) {
+                        openStepID = nil
+                        model.selectScenario(item)
                     }
                 }
+                Divider()
+                Button("New scenario") {
+                    openStepID = nil
+                    model.startCalculatorScenario()
+                }
+                if hasTake(scenario) {
+                    Button("Open in Library", action: onOpenLibrary)
+                }
+                Divider()
+                Button("Delete \(scenario.title)…", role: .destructive) {
+                    model.deleteScenario(scenario)
+                }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Text(scenario.title)
+                        .font(ActionType.uiHeadline)
+                        .tracking(ActionType.headlineTracking)
+                        .foregroundStyle(StageHUDTheme.textPrimary)
+                        .lineLimit(1)
+
+                    Image(systemName: "chevron.down")
+                        .font(ActionIcon.micro)
+                        .foregroundStyle(StageHUDTheme.textMuted)
+
+                    if model.scenarios.count > 1 {
+                        Text("\(position) of \(model.scenarios.count)")
+                            .font(ActionType.monoCaption)
+                            .foregroundStyle(StageHUDTheme.textMuted)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+    }
+
+    private func eyebrow(for scenario: ActionScenarioDocument, state pageState: PageState) -> String {
+        switch pageState {
+        case .plan:
+            return "PLAN"
+        case .running:
+            return "RUNNING"
+        case .review:
+            guard let session = sessionForScenario(scenario), let date = session.startedAt else {
+                return "TAKE"
+            }
+            let ago = Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+            return "TAKE · \(ago.uppercased())"
+        }
+    }
+
+    // MARK: - The table
+
+    /// The one table. `interactive` is false while a run is in flight and on
+    /// the start page, where there is nothing yet to annotate.
+    private func planTable(_ steps: [ActionScenarioStep], interactive: Bool) -> some View {
+        // The notes column earns its header only once something has been said.
+        // A column heading over four blank cells is furniture describing an
+        // absence, and on the start page every cell is blank by definition.
+        let showsNotes = steps.contains { !notesColumn($0).isEmpty }
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                ActionColumnHeader(title: "#")
+                    .frame(width: Self.indexWidth)
+                ActionColumnHeader(title: "VERB")
+                    .frame(width: Self.verbWidth)
+                ActionColumnHeader(title: "STEP")
+                    .frame(maxWidth: .infinity)
+                ActionColumnHeader(title: "TARGET", alignment: .trailing)
+                    .frame(width: Self.targetWidth)
+                if showsNotes {
+                    ActionColumnHeader(title: "NOTES", alignment: .trailing)
+                        .frame(width: Self.notesWidth)
+                }
+            }
+            .padding(.bottom, 7)
+
+            ActionRule()
+
+            ForEach(steps) { step in
+                let open = interactive && openStepID == step.id
+
+                VStack(alignment: .leading, spacing: 0) {
+                    stepRow(step, interactive: interactive, showsNotes: showsNotes)
+
+                    if open {
+                        stepNotes(step)
+                    }
+                }
+                // The tint holds the row *and* what it opened, bled past the
+                // table's own edge so the pair reads as one band across the
+                // page rather than as a highlighted row with loose controls
+                // sitting on paper underneath it.
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(open ? StageHUDTheme.textPrimary.opacity(0.035) : Color.clear)
+                        .padding(.horizontal, -10)
+                )
+            }
+
+            ActionRule(opacity: 0.55)
+        }
+        .animation(.easeOut(duration: 0.14), value: openStepID)
+    }
+
+    /// One line of the plan: number, verb, what it does, what it does it to,
+    /// and whether anything has been said about it.
+    ///
+    /// The index is numbered because these genuinely are a sequence — step 3
+    /// types into the total step 2 produced — and not because numbering a list
+    /// looks orderly. Three tones are the whole hierarchy of the row: muted
+    /// number, secondary verb, full-ink step.
+    private func stepRow(_ step: ActionScenarioStep, interactive: Bool, showsNotes: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(String(format: "%02d", step.index))
+                .font(ActionType.monoCaption)
+                .foregroundStyle(StageHUDTheme.textMuted)
+                .frame(width: Self.indexWidth, alignment: .leading)
+
+            Text(step.action)
+                .font(ActionType.monoCaption)
+                .foregroundStyle(StageHUDTheme.textSecondary)
+                .frame(width: Self.verbWidth, alignment: .leading)
+
+            Text(step.description)
+                .font(ActionType.uiRow)
+                .foregroundStyle(step.isSkipped ? StageHUDTheme.textMuted : StageHUDTheme.textPrimary)
+                .strikethrough(step.isSkipped)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(step.targetSummary ?? "—")
+                .font(ActionType.monoCaption)
+                .foregroundStyle(StageHUDTheme.textMuted)
+                .lineLimit(1)
+                .truncationMode(.head)
+                .frame(width: Self.targetWidth, alignment: .trailing)
+
+            if showsNotes {
+                Text(notesColumn(step))
+                    .font(ActionType.monoCaption)
+                    .foregroundStyle(StageHUDTheme.textMuted)
+                    .frame(width: Self.notesWidth, alignment: .trailing)
+            }
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard interactive else { return }
+            if openStepID == step.id {
+                openStepID = nil
+            } else {
+                openStepID = step.id
+                model.selectScenarioStep(step)
+            }
+        }
+    }
+
+    /// Blank unless there is something to say. A column of dashes is furniture.
+    private func notesColumn(_ step: ActionScenarioStep) -> String {
+        if step.isSkipped {
+            return "skipped"
+        }
+        let count = step.feedback.count
+        guard count > 0 else { return "" }
+        return "\(count) note\(count == 1 ? "" : "s")"
+    }
+
+    /// The context the click earns, aligned under the STEP column it belongs
+    /// to. This is what the 280pt rail was for, minus the rail, minus the
+    /// heading that said "Step notes" over a panel that said "Select a step."
+    private func stepNotes(_ step: ActionScenarioStep) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(step.feedback) { item in
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Text("—")
+                        .font(ActionType.monoCaption)
+                        .foregroundStyle(StageHUDTheme.textMuted)
+                    Text(item.instruction)
+                        .font(ActionType.uiRow)
+                        .foregroundStyle(StageHUDTheme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("NOTE")
+                    .font(ActionType.label)
+                    .tracking(ActionType.labelTracking)
+                    .foregroundStyle(StageHUDTheme.textMuted)
+                TextField(
+                    "Wait for Calculator to finish opening",
+                    text: $model.scenarioStepFeedbackDraft,
+                    axis: .vertical
+                )
+                .textFieldStyle(.plain)
+                .font(ActionType.uiRow)
+                .foregroundStyle(StageHUDTheme.textPrimary)
+                .lineLimit(1...3)
+                .padding(.bottom, 8)
+                .overlay(alignment: .bottom) { ActionRule() }
             }
 
             HStack(spacing: 8) {
-                metaChip(scenario.targetAppName)
-                metaChip("\(scenario.steps.count) steps")
-                if let status = scenario.lastRunStatus {
-                    metaChip(status.capitalized)
+                chipButton("ADD NOTE") {
+                    model.addFeedbackToSelectedScenarioStep()
                 }
-                Spacer()
-                Text(model.guidedDemoStatus)
-                    .font(.system(size: 11))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-                    .lineLimit(1)
-            }
-        }
-        .padding(16)
-        .background(cardBackground)
-    }
+                .disabled(model.scenarioStepFeedbackDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-    // MARK: - Plan
-
-    private func planDetail(for scenario: ActionScenarioDocument) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            card {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Plan")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(StageHUDTheme.textMuted)
-                        .padding(.bottom, 8)
-
-                    ForEach(scenario.steps) { step in
-                        stepRow(step, selected: model.selectedScenarioStepID == step.id)
-                        if step.id != scenario.steps.last?.id {
-                            Rectangle()
-                                .fill(StageHUDTheme.cardBorder)
-                                .frame(height: 1)
-                        }
-                    }
+                chipButton(step.isSkipped ? "INCLUDE" : "SKIP") {
+                    model.toggleSkipScenarioStep(step.id)
                 }
             }
-            .frame(maxWidth: .infinity)
-
-            stepDetailRail
-                .frame(width: 280)
         }
+        .padding(.leading, Self.indexWidth + Self.verbWidth)
+        .padding(.top, 2)
+        .padding(.bottom, 16)
+        .transition(.opacity)
     }
 
-    private func stepRow(_ step: ActionScenarioStep, selected: Bool) -> some View {
-        Button {
-            model.selectScenarioStep(step)
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Text("\(step.index)")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-                    .frame(width: 20, alignment: .trailing)
+    // MARK: - The take
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(step.description)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(step.isSkipped ? StageHUDTheme.textMuted : StageHUDTheme.textPrimary)
-                            .strikethrough(step.isSkipped)
-                        if step.isFlagged {
-                            Image(systemName: "flag.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(Color(nsColor: .systemOrange))
-                        }
-                    }
-                    HStack(spacing: 6) {
-                        Text(step.action)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(StageHUDTheme.textMuted)
-                        if let target = step.targetSummary {
-                            Text("· \(target)")
-                                .font(.system(size: 11))
-                                .foregroundStyle(StageHUDTheme.textMuted)
-                                .lineLimit(1)
-                        }
-                    }
+    private func takeSlab(_ session: ActionSessionSummary) -> some View {
+        ActionSessionPreviewView(session: session, model: model)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(StageHUDTheme.cardBorder, lineWidth: StageHUDTheme.hairline)
+            )
+    }
+
+    // MARK: - Actions
+    //
+    // One primary per state, and it is the same quiet button the launcher
+    // header and Settings use. The page used to carry two primaries in its
+    // detail header and a third in the launcher header above it.
+
+    @ViewBuilder
+    private func actionRow(_ scenario: ActionScenarioDocument, state pageState: PageState) -> some View {
+        switch pageState {
+        case .plan:
+            HStack(spacing: 12) {
+                Button("Run") {
+                    model.approveAndRunSelectedScenario()
                 }
+                .buttonStyle(ActionQuietButtonStyle(shortcut: "⏎"))
+
+                if hasTake(scenario) {
+                    chipButton("LAST TAKE") { model.setFlowPhase(.review) }
+                }
+
+                Text("\(scenario.targetAppName) · \(scenario.steps.count) steps")
+                    .font(ActionType.monoCaption)
+                    .foregroundStyle(StageHUDTheme.textMuted)
+
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? StageHUDTheme.buttonSecondaryHover : Color.clear)
-            )
-            .contentShape(Rectangle())
+
+        case .running:
+            HStack(spacing: 12) {
+                // Coral means a drive is live, on Home and here. It is the only
+                // colour on the page while a run is in flight.
+                Circle()
+                    .fill(StageHUDTheme.fieldAccent)
+                    .frame(width: 7, height: 7)
+
+                Text(model.guidedDemoStatus)
+                    .font(ActionType.monoCaption)
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+                    .lineLimit(1)
+
+                chipButton("STOP") { model.stopAllDrives() }
+
+                Spacer(minLength: 0)
+            }
+
+        case .review:
+            HStack(spacing: 12) {
+                Button("Run again") {
+                    model.approveAndRunSelectedScenario()
+                }
+                .buttonStyle(ActionQuietButtonStyle())
+
+                chipButton("PLAN") { model.setFlowPhase(.edit) }
+
+                if let session = sessionForScenario(scenario) {
+                    chipButton("REPLAY") { model.replaySession(session) }
+                    chipButton("FINDER") { model.revealSession(session) }
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    /// The chip: mono, tracked, hairline. The secondary everywhere on this page
+    /// and in the Home ledger's open row.
+    private func chipButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(ActionType.label)
+                .tracking(ActionType.labelTracking)
+                .foregroundStyle(StageHUDTheme.textSecondary)
+                .padding(.horizontal, 10)
+                .frame(height: 24)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(StageHUDTheme.textPrimary.opacity(0.22), lineWidth: StageHUDTheme.hairline)
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private var stepDetailRail: some View {
-        let step = model.selectedScenarioStep
+    // MARK: - Start
 
-        return card {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Step notes")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(StageHUDTheme.textMuted)
+    /// The start page is not an empty state that happens to show a preview. It
+    /// is the same table, in its first state, with nothing yet saved.
+    ///
+    /// It used to say "No scenarios yet", explain in a paragraph what a
+    /// scenario is, and offer a button — the generic three-part empty state
+    /// that could sit in any app, telling you about a thing instead of showing
+    /// it to you. Action ships exactly one preset and it is four steps long.
+    /// Four steps fit on the screen.
+    private var startPage: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("PRESET")
+                .font(ActionType.label)
+                .tracking(ActionType.eyebrowTracking)
+                .foregroundStyle(StageHUDTheme.textMuted)
 
-                if let step {
-                    Text(step.description)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(StageHUDTheme.textPrimary)
-                    Text("Feedback on the plan — not on the video.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
+            Text("Calculator demo")
+                .font(ActionType.uiHeadline)
+                .tracking(ActionType.headlineTracking)
+                .foregroundStyle(StageHUDTheme.textPrimary)
+                .padding(.top, 5)
 
-                    TextField("e.g. Wait for Calculator to finish opening", text: $model.scenarioStepFeedbackDraft, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .lineLimit(3...5)
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(StageHUDTheme.buttonSecondary)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-                        )
+            planTable(ActionScenarioPresets.calculatorDemoSteps(), interactive: false)
+                .padding(.top, 26)
 
-                    HStack(spacing: 8) {
-                        Button("Add note") {
-                            model.addFeedbackToSelectedScenarioStep()
-                        }
-                        .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
-                        .disabled(model.scenarioStepFeedbackDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            goalField
+                .padding(.top, 24)
 
-                        Button(step.isSkipped ? "Include" : "Skip") {
-                            model.toggleSkipScenarioStep(step.id)
-                        }
-                        .buttonStyle(ActionSettingsPillButtonStyle())
-                    }
+            HStack(spacing: 12) {
+                Button("Start") {
+                    model.startCalculatorScenario()
+                }
+                .buttonStyle(ActionQuietButtonStyle(shortcut: "⏎"))
+                .disabled(model.isRunningGuidedDemo)
 
-                    ForEach(step.feedback) { item in
-                        Text(item.instruction)
-                            .font(.system(size: 12))
-                            .foregroundStyle(StageHUDTheme.textPrimary)
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(StageHUDTheme.reviewAccentMuted.opacity(0.55))
-                            )
-                    }
-                } else {
-                    Text("Select a step.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
+                // Only when it has something to say. The initial value of this
+                // status is the word "Ready", and a bare "Ready" beside a
+                // button, before anything has been asked of the app, reads as
+                // debug output rather than as feedback.
+                if model.guidedDemoStatus != ActionLauncherViewModel.idleStatus {
+                    Text(model.guidedDemoStatus)
+                        .font(ActionType.monoCaption)
+                        .foregroundStyle(StageHUDTheme.textMuted)
                 }
 
                 Spacer(minLength: 0)
             }
+            .padding(.top, 22)
         }
     }
 
-    // MARK: - Take
-
-    private func takeDetail(for scenario: ActionScenarioDocument) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let session = sessionForScenario(scenario) {
-                ActionSessionPreviewView(session: session, model: model)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-                    )
-            } else {
-                card {
-                    Text("No take on disk for this scenario yet.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                    Button("Run") {
-                        model.approveAndRunSelectedScenario()
-                    }
-                    .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
-                }
-            }
-        }
-    }
-
-    // MARK: - Empty
-
-    private var emptyState: some View {
-        card {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("No scenarios yet")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(StageHUDTheme.textPrimary)
-
-                Text("A scenario is the plan. Run it to get a take. Leave notes on steps before the next run, or on the video after.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(StageHUDTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                goalField
-
-                Button {
-                    model.startCalculatorScenario()
-                } label: {
-                    Text("New Calculator scenario")
-                }
-                .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
-                .disabled(model.isRunningGuidedDemo)
-
-                Text(model.guidedDemoStatus)
-                    .font(.system(size: 11))
-                    .foregroundStyle(StageHUDTheme.textMuted)
-            }
-        }
-    }
-
+    /// The goal, on a rule rather than in a box.
+    ///
+    /// A filled, bordered, rounded field is four pieces of furniture around one
+    /// line of text. A hairline under the text says the same thing — you can
+    /// type here — and leaves the page made of one kind of mark.
     private var goalField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Goal")
-                .font(.system(size: 11, weight: .semibold))
+        VStack(alignment: .leading, spacing: 7) {
+            Text("GOAL")
+                .font(ActionType.label)
+                .tracking(ActionType.labelTracking)
                 .foregroundStyle(StageHUDTheme.textMuted)
-            TextField("What should this demo show?", text: $model.scenarioDraftGoal, axis: .vertical)
+            // "What this demo is for", not "what should this demo show" — the
+            // goal is saved on the scenario and shown back, but it does not
+            // choose the steps: the preset's Calculator steps are the same
+            // whatever is typed here. A placeholder that asks the operator to
+            // describe the demo they want promises authoring the app cannot do
+            // yet. See the note in ActionScenarioPresets.makeCalculatorScenario.
+            TextField("What this demo is for", text: $model.scenarioDraftGoal, axis: .vertical)
                 .textFieldStyle(.plain)
-                .lineLimit(2...3)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(StageHUDTheme.buttonSecondary)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-                )
-        }
-    }
-
-    private func orphanTakeReview(_ session: ActionSessionSummary) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            card {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(session.displayTitle)
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                    Text("This take isn’t attached to a scenario.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(StageHUDTheme.textSecondary)
-                    Button("New Calculator scenario") {
-                        model.startCalculatorScenario()
-                    }
-                    .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
-                }
-            }
-            ActionSessionPreviewView(session: session, model: model)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-                )
+                .font(ActionType.uiRow)
+                .foregroundStyle(StageHUDTheme.textPrimary)
+                .lineLimit(1...3)
+                .padding(.bottom, 8)
+                .overlay(alignment: .bottom) { ActionRule() }
         }
     }
 
@@ -430,31 +537,9 @@ struct ActionWorkspaceView: View {
         return model.selectedSession
     }
 
-    private func metaChip(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(StageHUDTheme.textSecondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(StageHUDTheme.buttonSecondaryHover)
-            )
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(StageHUDTheme.cardFill)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(StageHUDTheme.cardBorder, lineWidth: 1)
-            )
-    }
-
-    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardBackground)
-    }
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
 }
