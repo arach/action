@@ -79,7 +79,7 @@ struct ActionSupervisionView: View {
 
     private var expandedHeader: some View {
         HStack(spacing: 9) {
-            ActionSupervisionBrandMark(size: 26)
+            ActionBrandTile(size: 26)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Action")
@@ -192,7 +192,7 @@ struct ActionSupervisionView: View {
 
     private var minimizedBody: some View {
         HStack(spacing: 8) {
-            ActionSupervisionBrandMark(size: 24)
+            ActionBrandTile(size: 24)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Action")
@@ -264,26 +264,6 @@ private struct ActionSupervisionGlass: View {
                     .stroke(StageHUDTheme.hudPaper.opacity(0.16), lineWidth: 1)
             )
             .shadow(color: StageHUDTheme.hudShadow.opacity(0.34), radius: 16, x: 0, y: 8)
-    }
-}
-
-struct ActionSupervisionBrandMark: View {
-    let size: CGFloat
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .fill(StageHUDTheme.hudCoral)
-            Text("A")
-                .font(.system(size: size * 0.50, weight: .bold, design: .rounded))
-                .foregroundStyle(StageHUDTheme.hudInk)
-        }
-        .frame(width: size, height: size)
-        .overlay(
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .stroke(StageHUDTheme.hudPaper.opacity(0.16), lineWidth: 1)
-        )
-        .accessibilityHidden(true)
     }
 }
 

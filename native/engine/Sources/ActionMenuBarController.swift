@@ -1,3 +1,4 @@
+import ActionCore
 import AppKit
 import SwiftUI
 
@@ -11,6 +12,8 @@ final class ActionMenuBarController: NSObject, NSPopoverDelegate {
     static let popoverHeight: CGFloat = 372
 
     private var statusItem: NSStatusItem?
+    private var liveStateTimer: Timer?
+    private var isLive = false
     private var popover: NSPopover?
     private var contextMenu: NSMenu?
     private weak var model: ActionLauncherViewModel?
@@ -29,7 +32,7 @@ final class ActionMenuBarController: NSObject, NSPopoverDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
-            button.image = Self.templateIcon
+            button.image = ActionBrandMark.statusItemImage(live: false)
             button.toolTip = "Action"
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -37,6 +40,29 @@ final class ActionMenuBarController: NSObject, NSPopoverDelegate {
         }
 
         contextMenu = buildContextMenu()
+        startWatchingLiveState()
+    }
+
+    /// Polls rather than watches the registrations directory: a lease can lapse
+    /// by running past its TTL, and an expiry writes nothing for a file-system
+    /// watcher to see. Two seconds is well inside how long a drive lasts and the
+    /// read is a handful of small files.
+    private func startWatchingLiveState() {
+        liveStateTimer?.invalidate()
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshLiveState() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        liveStateTimer = timer
+        refreshLiveState()
+    }
+
+    private func refreshLiveState() {
+        let live = !ActionSupervisionRegistry.activeRegistrations().isEmpty
+        guard live != isLive else { return }
+        isLive = live
+        statusItem?.button?.image = ActionBrandMark.statusItemImage(live: live)
+        statusItem?.button?.toolTip = live ? "Action — a drive is running" : "Action"
     }
 
     func dismissPopover() {
@@ -143,30 +169,6 @@ final class ActionMenuBarController: NSObject, NSPopoverDelegate {
         dismissPopover()
         ActionLauncherController.shared.reveal(destination)
     }
-
-    private static let templateIcon: NSImage = {
-        let size: CGFloat = 18
-        let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { _ in
-            let inset = NSRect(x: 2, y: 2, width: size - 4, height: size - 4)
-            let field = NSBezierPath(roundedRect: inset, xRadius: 3.2, yRadius: 3.2)
-            NSColor.black.withAlphaComponent(0.22).setFill()
-            field.fill()
-            field.lineWidth = 1
-            NSColor.black.setStroke()
-            field.stroke()
-
-            let play = NSBezierPath()
-            play.move(to: NSPoint(x: 7.2, y: 5.4))
-            play.line(to: NSPoint(x: 7.2, y: 12.6))
-            play.line(to: NSPoint(x: 13.4, y: 9.0))
-            play.close()
-            NSColor.black.setFill()
-            play.fill()
-            return true
-        }
-        image.isTemplate = true
-        return image
-    }()
 }
 
 struct ActionMenuBarPopoverView: View {
@@ -199,7 +201,7 @@ struct ActionMenuBarPopoverView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            ActionSupervisionBrandMark(size: 26)
+            ActionBrandTile(size: 26)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Action")
