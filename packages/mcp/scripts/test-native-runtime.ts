@@ -65,18 +65,18 @@ try {
 
   const listed = await client.listTools();
   const toolNames = new Set(listed.tools.map((tool) => tool.name));
-  for (const required of ["action.health", "action.observe.ax", "action.drive.begin", "action.act.execute"]) {
+  for (const required of ["health", "observe_ax", "drive_begin", "act_execute"]) {
     assert.ok(toolNames.has(required), `Missing MCP tool ${required}`);
   }
 
-  const health = await call(client, "action.health");
+  const health = await call(client, "health");
   assert.equal(health.ok, true);
   assert.equal(health.nativeAgentPort, agentPort);
   const diagnostics = health.diagnostics as JsonObject;
   assert.equal(diagnostics.accessibility, "granted", "Accessibility must be granted to the signed Action runtime");
   assert.equal(diagnostics.screenRecording, "granted", "Screen Recording must be granted to the signed Action runtime");
 
-  const begun = await call(client, "action.drive.begin", {
+  const begun = await call(client, "drive_begin", {
     agent: "Action MCP regression",
     task: "Verify native MCP lifecycle",
     mode: "background",
@@ -84,12 +84,12 @@ try {
   assert.equal(begun.ok, true);
   leaseId = String(begun.leaseId);
 
-  const observed = await call(client, "action.observe.ax", { leaseId });
+  const observed = await call(client, "observe_ax", { leaseId });
   assert.equal(observed.ok, true);
   assert.ok(Number(observed.nodeCount) > 0, "AX observation should return at least one node");
 
   const accessoryBundleId = process.env.ACTION_MCP_ACCESSORY_BUNDLE_ID ?? "com.apple.systemuiserver";
-  const launchedAccessory = await call(client, "action.act.execute", {
+  const launchedAccessory = await call(client, "act_execute", {
     leaseId,
     action: {
       id: "native_mcp_launch_accessory_app",
@@ -101,7 +101,7 @@ try {
   assert.equal(launchedAccessory.ok, true);
   assert.equal((launchedAccessory.result as JsonObject).status, "succeeded");
 
-  const acted = await call(client, "action.act.execute", {
+  const acted = await call(client, "act_execute", {
     leaseId,
     action: {
       id: "native_mcp_press_escape",
@@ -115,11 +115,11 @@ try {
 
   // This request uses the same persistent native connection. If the direct-launched agent
   // regresses to NSApplication.shared, it aborts and this assertion fails after press-key.
-  const status = await call(client, "action.drive.status", { leaseId });
+  const status = await call(client, "drive_status", { leaseId });
   assert.equal(status.ok, true);
   assert.equal((status.lease as JsonObject).status, "driving");
 
-  await call(client, "action.drive.release", {
+  await call(client, "drive_release", {
     leaseId,
     outcome: "done",
     summary: "Native MCP health, AX observation, and press-key passed",
@@ -138,7 +138,7 @@ try {
   }, null, 2)}\n`);
 } finally {
   if (leaseId) {
-    await call(client, "action.drive.release", {
+    await call(client, "drive_release", {
       leaseId,
       outcome: "cancelled",
       summary: "Native MCP regression interrupted",
