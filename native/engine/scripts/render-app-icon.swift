@@ -66,12 +66,13 @@ func renderIcon(px: Int) -> CGImage? {
         width: markSide,
         height: markSide
     )
-    // Glyph and counter are filled separately: the play triangle carries coral,
-    // which is the one thing the landing system spends colour on — the take.
-    context.addPath(ActionBrandMark.outerPath(in: markRect))
+    // Marks and triangle are filled separately: the play triangle carries
+    // coral, which is the one thing the landing system spends colour on — the
+    // take. The marks are the frame around it, so they stay graphite.
+    context.addPath(ActionBrandMark.marksPath(in: markRect))
     context.setFillColor(ActionBrandMark.graphite)
     context.fillPath()
-    context.addPath(ActionBrandMark.counterPath(in: markRect))
+    context.addPath(ActionBrandMark.playPath(in: markRect))
     context.setFillColor(ActionBrandMark.coral)
     context.fillPath()
 

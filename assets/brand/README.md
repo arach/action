@@ -1,7 +1,17 @@
 # Action's mark
 
-A capital A whose counter is cut as a right-pointing play triangle. One shape,
-both readings: the letter and the take.
+A play triangle breaking out of four capture-corner marks. The marks are the
+frame Action puts around a region; the triangle is the take.
+
+The triangle crosses the right-hand marks rather than sitting politely inside
+them, and the marks are cut away where it passes — a real path subtraction, so
+the same path fills identically in CoreGraphics, in an `NSImage`, and in a
+SwiftUI `Shape`. Without that clearance the crossing reads as a collision, and
+below about four units of it the gap closes up at menu bar size.
+
+An earlier round drew a capital A with the play triangle as its counter. It was
+rejected as too on the nose: a letter A for an app called Action says the name,
+not the job. The frame says the job.
 
 ## Where it comes from
 
@@ -19,8 +29,8 @@ and the mark the app draws at runtime cannot drift apart.
 
 ## Colour
 
-The tile is the landing system's warm paper with a graphite letterform, and the
-play triangle is coral. That split is deliberate: the landing brief reserves
+The tile is the landing system's warm paper, the capture marks are graphite, and
+the play triangle is coral. That split is deliberate: the landing brief reserves
 coral for runtime truth — recording state, selected trace event, current target,
 primary CTA — so it lands on the take and nowhere else.
 
@@ -28,7 +38,7 @@ primary CTA — so it lands on the take and nowhere else.
 | --- | --- | --- |
 | Tile | paper | `#F3EBDD` |
 | Tile foot wash | paper shadow | `#DCCFB9` at 45% |
-| Letterform | graphite | `#20282B` |
+| Capture marks | graphite | `#20282B` |
 | Play triangle | coral | `#EF6A47` |
 
 The in-app chip reads `StageHUDTheme` instead of these constants, so it follows a
@@ -59,6 +69,7 @@ an ordinary app build stays fast.
 
 ## Earlier work
 
-`explorations/` holds the first round of mark studies, including
-`01-capture-a.svg` — the capture-corner ticks and cursor-negative-space ideas
-that fed this one. `landing/` holds the landing-page art and its palette.
+`explorations/` holds the first round of mark studies. `02-stage-frame.svg` is
+this mark's direct ancestor — viewport corner brackets around a play triangle,
+with a coral record dot. `01-capture-a.svg` is the letter-A branch that was not
+taken. `landing/` holds the landing-page art and its palette.

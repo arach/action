@@ -1,20 +1,18 @@
 import CoreGraphics
 import Foundation
 
-/// Action's mark: a capital A whose counter is cut as a right-pointing play
-/// triangle. One shape carries both readings — the letter and the take.
+/// Action's mark: a play triangle breaking out of four capture-corner marks.
+///
+/// The marks are the frame Action puts around a region; the triangle is the
+/// take. It crosses the right-hand marks rather than sitting politely inside
+/// them, and the marks are cut away where it passes so the crossing reads as
+/// deliberate instead of as a collision.
 ///
 /// The geometry lives here, in Core, because three places draw it and they must
 /// not drift apart: the menu bar status item, the in-app brand tile, and the
 /// `.icns` the build stamps into `Action.app`. Everything is expressed in a
 /// 100 x 100 design box with **y pointing down**, then mapped onto whatever
 /// rect the caller hands in, so the mark is resolution-independent.
-///
-/// The counter's back edge is deliberately vertical. A slanted back edge (one
-/// parallel to the A's left leg, which is what a type designer would draw)
-/// evens out the left stem but stops reading as a play button — the triangle
-/// just looks like an ordinary counter. The vertical edge is what buys the
-/// second reading, and it is worth the slightly heavier lower-left stem.
 public enum ActionBrandMark {
     /// The design box every coordinate below is expressed in. y points down.
     public static let designBox = CGSize(width: 100, height: 100)
@@ -23,7 +21,7 @@ public enum ActionBrandMark {
     ///
     /// CoreGraphics contexts and unflipped `NSImage` drawing put y at the
     /// bottom; SwiftUI and flipped AppKit views put it at the top. The mark is
-    /// authored y-down, so getting this wrong renders the A upside down rather
+    /// authored y-down, so getting this wrong renders it upside down rather
     /// than failing loudly — hence an explicit argument instead of a default
     /// that silently suits one caller.
     public enum YAxis: Sendable {
@@ -31,142 +29,115 @@ public enum ActionBrandMark {
         case down
     }
 
-    /// The letterform's proportions. These were tuned by rendering, not derived:
-    /// the counter is the tightest constraint, and stroke weights had to give
-    /// way to it before the triangle read as a triangle at menu bar size.
+    /// Proportions of the frame and the triangle. Tuned by rendering at both
+    /// 512 and 18 points, because the knockout gap is the first thing to close
+    /// up when the mark is scaled down to the menu bar.
     public struct Metrics: Sendable {
-        /// Top edge of the flat apex, and the baseline the legs stand on.
-        public var apexY: Double = 9
-        public var footY: Double = 91
-        /// The flat apex spans `apexL ... apexR`; the legs splay to `footOuter*`.
-        public var apexL: Double = 39
-        public var apexR: Double = 61
-        public var footOuterL: Double = 2
-        public var footOuterR: Double = 98
-        /// Leg thickness, measured horizontally (so the perpendicular stroke is
-        /// slightly lighter — about 16.4 at the default splay).
-        public var legT: Double = 18
-        /// Crossbar thickness, measured vertically. Matched by eye to `legT`'s
-        /// perpendicular weight rather than to `legT` itself.
-        public var crossbarT: Double = 15
-        /// Top of the notch between the legs. The crossbar is the band from the
-        /// counter's bottom down to here.
-        public var notchY: Double = 71
+        /// How far the corner marks sit in from the mark's box.
+        public var inset = 12.0
+        /// Stroke weight of the corner marks.
+        public var weight = 5.5
+        /// Length of each arm. Long enough that the right-hand marks actually
+        /// stand where the triangle wants to go — with short arms the triangle
+        /// slips through the gap between the corners and never crosses anything.
+        public var arm = 34.0
 
-        /// Counter (the play triangle).
-        public var counterTop: Double = 29
-        /// Horizontal clearance from the left leg's outer edge to the triangle's
-        /// back edge, taken at `counterTop` — the tightest point.
-        public var backGap: Double = 12
-        /// Horizontal clearance from the triangle's tip to the right leg's outer
-        /// edge. This is the thinnest part of the right leg, so it is the number
-        /// to watch when making the triangle bigger.
-        public var apexGap: Double = 13
-        /// Where the tip sits between `counterTop` and the counter's bottom.
-        /// Biased low: the right leg's outer edge moves right as it descends, so
-        /// a lower tip gets more room without thinning the stroke.
-        public var apexBias: Double = 0.6
+        /// The triangle. Its tip runs past the marks on the right.
+        public var playLeft = 30.0
+        public var playTop = 26.0
+        public var playBottom = 74.0
+        public var playTip = 95.0
+        public var playRadius = 3.0
 
-        /// Corner softening. Small on purpose — past roughly 4 the triangle
-        /// rounds into a blob and loses the play reading.
-        public var outerRadius: Double = 2.5
-        public var counterRadius: Double = 2.0
+        /// Clearance cut out of the marks where the triangle crosses them.
+        /// Below about 4 the gap closes up at menu bar size and the crossing
+        /// looks like a mistake; above about 8 it eats the right-hand arms.
+        public var knockout = 6.0
 
         public init() {}
-
-        public var slopeL: Double { (footOuterL - apexL) / (footY - apexY) }
-        public var slopeR: Double { (footOuterR - apexR) / (footY - apexY) }
-        /// x of the left leg's outer edge at a given y.
-        public func outerLeft(_ y: Double) -> Double { apexL + slopeL * (y - apexY) }
-        /// x of the right leg's outer edge at a given y.
-        public func outerRight(_ y: Double) -> Double { apexR + slopeR * (y - apexY) }
-        public var counterBottom: Double { notchY - crossbarT }
     }
 
     public static let metrics = Metrics()
 
-    /// The mark, scaled to fit `rect`. Fill it with the even-odd rule: the
-    /// counter is a second subpath, not a separate shape.
-    ///
-    /// The two subpaths are wound in opposite directions, so a non-zero fill
-    /// also produces the hole — but even-odd is what the drawing was checked
-    /// against, and it survives anyone reordering the points later.
+    /// The whole mark as one path — marks and triangle together. This is the
+    /// single-colour form the menu bar uses; the knockout keeps the triangle
+    /// legible against the marks even when everything is the same black.
     public static func markPath(
         in rect: CGRect,
         yAxis: YAxis = .up,
         metrics m: Metrics = metrics
     ) -> CGPath {
         let path = CGMutablePath()
-        path.addPath(outerPath(in: rect, yAxis: yAxis, metrics: m))
-        path.addPath(counterPath(in: rect, yAxis: yAxis, metrics: m))
+        path.addPath(marksPath(in: rect, yAxis: yAxis, metrics: m))
+        path.addPath(playPath(in: rect, yAxis: yAxis, metrics: m))
         return path
     }
 
-    /// The A's silhouette alone, with no counter cut out of it. Draw this and
-    /// `counterPath` separately when the play triangle carries its own colour
-    /// rather than showing the surface behind the mark.
-    public static func outerPath(
-        in rect: CGRect,
-        yAxis: YAxis = .up,
-        metrics m: Metrics = metrics
-    ) -> CGPath {
-        let points: [CGPoint] = [
-            CGPoint(x: m.apexL, y: m.apexY),
-            CGPoint(x: m.apexR, y: m.apexY),
-            CGPoint(x: m.outerRight(m.footY), y: m.footY),
-            CGPoint(x: m.outerRight(m.footY) - m.legT, y: m.footY),
-            CGPoint(x: m.outerRight(m.notchY) - m.legT, y: m.notchY),
-            CGPoint(x: m.outerLeft(m.notchY) + m.legT, y: m.notchY),
-            CGPoint(x: m.outerLeft(m.footY) + m.legT, y: m.footY),
-            CGPoint(x: m.outerLeft(m.footY), y: m.footY),
-        ]
-        return place(roundedPolygon(points, radius: m.outerRadius), in: rect, yAxis: yAxis)
-    }
-
-    /// The counter: the play triangle.
-    public static func counterPath(
-        in rect: CGRect,
-        yAxis: YAxis = .up,
-        metrics m: Metrics = metrics
-    ) -> CGPath {
-        let top = m.counterTop
-        let bottom = m.counterBottom
-        let tipY = top + (bottom - top) * m.apexBias
-        let backX = m.outerLeft(top) + m.backGap
-        let points: [CGPoint] = [
-            CGPoint(x: backX, y: top),
-            CGPoint(x: backX, y: bottom),
-            CGPoint(x: m.outerRight(tipY) - m.apexGap, y: tipY),
-        ]
-        return place(roundedPolygon(points, radius: m.counterRadius), in: rect, yAxis: yAxis)
-    }
-
-    /// Four capture-corner ticks — the crop marks that run through Action's
-    /// landing art and its earlier mark explorations. They say what the app is
-    /// about (framing a region and recording it) in a way a bare letter cannot.
+    /// The four capture-corner marks, already cut away where the triangle
+    /// crosses them.
     ///
-    /// `reach` and `weight` are fractions of `rect`'s shorter side; `inset` is
-    /// how far in from its edges the corners sit.
-    public static func captureTicksPath(
+    /// The cut is a real path subtraction rather than a drawing-time trick, so
+    /// the result is one plain path that fills identically in CoreGraphics, in
+    /// an `NSImage`, and in a SwiftUI `Shape`. A compositing trick like
+    /// `destinationOut` needs a transparency layer and would not survive being
+    /// handed to SwiftUI as a shape.
+    public static func marksPath(
         in rect: CGRect,
-        inset: Double = 0.14,
-        reach: Double = 0.11,
-        weight: Double = 0.028
+        yAxis: YAxis = .up,
+        metrics m: Metrics = metrics
     ) -> CGPath {
-        let side = Double(min(rect.width, rect.height))
-        let d = side * inset, r = side * reach, w = side * weight
-        let x0 = Double(rect.minX) + d, x1 = Double(rect.maxX) - d
-        let y0 = Double(rect.minY) + d, y1 = Double(rect.maxY) - d
-        let path = CGMutablePath()
-        for (cx, cy, sx, sy) in [(x0, y0, 1.0, 1.0), (x1, y0, -1.0, 1.0),
-                                 (x0, y1, 1.0, -1.0), (x1, y1, -1.0, -1.0)] {
-            // One L per corner, drawn as two overlapping bars so the elbow is solid.
-            path.addRect(CGRect(x: min(cx, cx + sx * r), y: min(cy, cy + sy * w),
-                                width: r, height: w))
-            path.addRect(CGRect(x: min(cx, cx + sx * w), y: min(cy, cy + sy * r),
-                                width: w, height: r))
+        let marks = CGMutablePath()
+        let lo = m.inset
+        let hi = 100 - m.inset
+        let r = m.weight / 2
+        for (cx, cy, sx, sy) in [(lo, lo, 1.0, 1.0), (hi, lo, -1.0, 1.0),
+                                 (lo, hi, 1.0, -1.0), (hi, hi, -1.0, -1.0)] {
+            marks.addPath(bar(cx, cy, sx * m.arm, sy * m.weight, r))
+            marks.addPath(bar(cx, cy, sx * m.weight, sy * m.arm, r))
         }
-        return path
+
+        let play = rawPlay(m)
+        let cut: CGPath
+        if m.knockout > 0 {
+            let halo = play.copy(
+                strokingWithWidth: CGFloat(m.knockout * 2),
+                lineCap: .round,
+                lineJoin: .round,
+                miterLimit: 10
+            )
+            cut = marks.subtracting(halo.union(play))
+        } else {
+            cut = marks
+        }
+        return place(cut, in: rect, yAxis: yAxis)
+    }
+
+    /// The triangle on its own, so it can carry its own colour.
+    public static func playPath(
+        in rect: CGRect,
+        yAxis: YAxis = .up,
+        metrics m: Metrics = metrics
+    ) -> CGPath {
+        place(rawPlay(m), in: rect, yAxis: yAxis)
+    }
+
+    /// A rounded bar reaching out from a corner, in design space. Negative
+    /// extents run back toward the origin, which is how the four corners share
+    /// one description.
+    private static func bar(_ x: Double, _ y: Double, _ dx: Double, _ dy: Double, _ r: Double) -> CGPath {
+        let rect = CGRect(x: min(x, x + dx), y: min(y, y + dy), width: abs(dx), height: abs(dy))
+        return CGPath(roundedRect: rect, cornerWidth: CGFloat(r), cornerHeight: CGFloat(r), transform: nil)
+    }
+
+    private static func rawPlay(_ m: Metrics) -> CGPath {
+        roundedPolygon(
+            [
+                CGPoint(x: m.playLeft, y: m.playTop),
+                CGPoint(x: m.playLeft, y: m.playBottom),
+                CGPoint(x: m.playTip, y: (m.playTop + m.playBottom) / 2),
+            ],
+            radius: m.playRadius
+        )
     }
 
     private static func place(_ path: CGPath, in rect: CGRect, yAxis: YAxis) -> CGPath {
@@ -196,10 +167,10 @@ public enum ActionBrandMark {
     /// Apple's icon grid: the tile is 824 of a 1024 canvas, leaving the margin
     /// the system expects for shadow and for optical alignment in the Dock.
     public static let iconBodyInsetRatio = 100.0 / 1024.0
-    /// The mark's share of the tile, and a small upward nudge — the A is
-    /// bottom-heavy, so geometric centring reads as sitting too low.
-    public static let iconMarkScale = 0.58
-    public static let iconMarkOffsetY = -1.0
+    /// The mark's share of the tile. No optical nudge: unlike a letterform the
+    /// frame is symmetric top to bottom, so geometric centring is correct.
+    public static let iconMarkScale = 0.74
+    public static let iconMarkOffsetY = 0.0
 
     /// Where the mark sits inside a tile: centred, scaled to `iconMarkScale`,
     /// nudged up because the A is bottom-heavy. Shared by the `.icns` renderer
