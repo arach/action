@@ -59,7 +59,7 @@ Instructions:
 
 1. read [docs/api.md](api.md#drive-lease-contract) and [docs/native-runtime.md](native-runtime.md)
 2. keep lease authority in the agent runtime, not in harness memory or AppKit
-3. preserve connection-owned cleanup, 90s idle expiry, 30-minute max duration, and 8s terminal HUD lifetime
+3. preserve connection-owned cleanup, 5-minute idle expiry, 30-minute max duration, and 8s terminal HUD lifetime
 4. keep background as the supported default; attention remains approval-gated / denied until that path exists
 5. confirm observe/act still heartbeat leases and persist drive session artifacts
 

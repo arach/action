@@ -186,7 +186,7 @@ These values are defined by `ActionDriveLeaseStore`:
 
 | Timer | Value | Effect |
 |---|---|---|
-| Idle expiry | 90 seconds | No `touch` / act activity → lease becomes `expired` |
+| Idle expiry | 5 minutes | No `touch` / act activity → lease becomes `expired` |
 | Maximum duration | 30 minutes | Lease cannot outlive this wall-clock span |
 | Terminal HUD lifetime | 8 seconds | Done / failed / cancelled / expired chip remains visible, then presence is removed |
 | Active presence refresh | about 2.5 seconds | Active HUD registrations expire quickly unless renewed by activity |
@@ -196,7 +196,7 @@ These values are defined by `ActionDriveLeaseStore`:
 Active leases are terminalized when any of the following happens:
 
 - explicit `drive.release`
-- idle silence past 90 seconds
+- idle silence past 5 minutes
 - maximum duration exceeded
 - supervision stop-file appears for that lease
 - driving WebSocket client disconnects
@@ -205,13 +205,18 @@ Active leases are terminalized when any of the following happens:
 
 ### MCP Surface
 
-The MCP package exposes the same product contract with prefixed names:
+The MCP package keeps dotted handler keys internally, but its default tool list
+uses MCP-spec-safe public names without dots:
 
-| MCP tool | Agent method |
-|---|---|
-| `action.drive.begin` | `drive.begin` |
-| `action.drive.release` | `drive.release` |
-| `action.drive.status` | `drive.status` |
+| Public MCP tool | Internal handler | Agent method |
+|---|---|---|
+| `drive_begin` | `action.drive.begin` | `drive.begin` |
+| `drive_release` | `action.drive.release` | `drive.release` |
+| `drive_status` | `action.drive.status` | `drive.status` |
+
+Set `ACTION_MCP_TOOL_NAMES=legacy` only for a client that still requires the
+dotted handler names. `both` advertises both forms and is unsuitable for MCP
+clients that reject dots.
 
 `drive.touch` is not a separate MCP tool. Observe and act tools accept an
 optional `leaseId` and heartbeat through the persistent MCP agent socket.
@@ -220,9 +225,9 @@ so presence still lights up.
 
 Recommended harness flow:
 
-1. `action.drive.begin` with `agent` and `task`
+1. `drive_begin` with `agent` and `task`
 2. pass the returned `leaseId` on observe / act calls
-3. `action.drive.release` with an honest outcome when the work ends
+3. `drive_release` with an honest outcome when the work ends
 
 ### Session Artifacts
 
