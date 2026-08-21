@@ -39,7 +39,9 @@ run_via_open() {
   fi
   open "${open_flags[@]}" "$APP_DIR" --args "$@" --reply-file "$reply_file" >/dev/null
 
-  for attempt in {1..100}; do
+  # Host commands can spend up to 10 seconds in their own bounded launch/activation wait.
+  # Keep a separate grace period for LaunchServices startup and reply-file serialization.
+  for attempt in {1..200}; do
     if [[ -s "$reply_file" ]]; then
       break
     fi

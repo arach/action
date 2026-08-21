@@ -3898,14 +3898,24 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             // insist on frontmost; otherwise activation races the launch and reports a false failure.
             try await waitForRunningApplication(bundleId: bundleId, timeoutMilliseconds: timeoutMilliseconds)
         }
-        // An already-running app is activated below, never through openApplication: that call
-        // leaves an activation request in flight that outlives this process and blocks the
-        // accessibility activation from taking effect while we are still waiting on it.
-        try await activateApplicationAndWait(
-            bundleId: bundleId,
-            timeoutMilliseconds: timeoutMilliseconds,
-            logger: logger
-        )
+        let application = try runningApplication(bundleId: bundleId)
+        if application.activationPolicy == .regular {
+            // An already-running regular app is activated below, never through openApplication:
+            // that call leaves an activation request in flight that outlives this process and
+            // blocks the accessibility activation from taking effect while we are still waiting.
+            try await activateApplicationAndWait(
+                bundleId: bundleId,
+                timeoutMilliseconds: timeoutMilliseconds,
+                logger: logger
+            )
+        } else {
+            // LSUIElement/accessory agents and prohibited background services do not have a
+            // dependable frontmost-app state. For them, a finished running process is the launch
+            // contract; waiting for NSWorkspace.frontmostApplication creates a false failure.
+            logger.log(
+                "launch-app: process-ready bundle=\(bundleId) activation-policy=\(application.activationPolicy.rawValue)"
+            )
+        }
         try writer.write(ActionHostResponse(status: "launched", outputPath: nil, detail: bundleId))
     case .prepareNotesNote:
         let noteName = try prepareNotesNote()
@@ -4241,9 +4251,7 @@ struct ActionHostMain {
         let command = options.command ?? .launcher
 
         if command == .agent {
-            MainActor.assumeIsolated {
-                ActionAgentRuntime.run(arguments: CommandLine.arguments)
-            }
+            ActionAgentRuntime.run(arguments: CommandLine.arguments)
         }
 
         if runUICommandIfNeeded(command: command, options: options) {
