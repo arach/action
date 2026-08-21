@@ -81,7 +81,14 @@ const actionRoot = resolve(process.env.ACTION_ROOT ?? defaultActionRoot);
 const nativeHostPath = resolve(
   process.env.ACTION_NATIVE_HOST ?? resolve(actionRoot, "native/engine/scripts/run-app-host.sh"),
 );
-const driveClient = new DriveAgentClient({ launcherPath: nativeHostPath });
+const configuredAgentPort = Number(process.env.ACTION_AGENT_PORT ?? "4319");
+if (!Number.isInteger(configuredAgentPort) || configuredAgentPort < 1 || configuredAgentPort > 65_535) {
+  throw new Error(`ACTION_AGENT_PORT must be an integer from 1 through 65535; received ${process.env.ACTION_AGENT_PORT}`);
+}
+const driveClient = new DriveAgentClient({
+  launcherPath: nativeHostPath,
+  port: configuredAgentPort,
+});
 const activeRecordings = new Map<string, RecordingEntry>();
 
 function now(): string {
@@ -792,13 +799,13 @@ async function runCompanionJobIfAvailable(kind: string, payload: JsonObject, dir
 
 const handlers: Record<string, ToolHandler> = {
   async "action.health"() {
-    const engine = newEngine();
-    const diagnostics = await engine.diagnostics();
+    const diagnostics = await driveClient.diagnostics();
 
     return {
       ok: true,
       actionRoot,
       nativeHostPath,
+      nativeAgentPort: configuredAgentPort,
       diagnostics,
       toolFamilies,
     };

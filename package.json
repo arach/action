@@ -87,7 +87,8 @@
     "native:midjourney:bg": "native/engine/scripts/test-midjourney-background-create.sh",
     "native:typing:sounds:install": "native/engine/scripts/install-typing-sounds.sh",
     "native:test:screenshot": "native/engine/scripts/test-screenshot.sh",
-    "native:test:record": "native/engine/scripts/test-record.sh"
+    "native:test:record": "native/engine/scripts/test-record.sh",
+    "native:test:mcp": "bun packages/mcp/scripts/test-native-runtime.ts"
   },
   "devDependencies": {
     "@arach/dewey": "^0.3.6",
