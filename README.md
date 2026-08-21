@@ -78,9 +78,14 @@ brew trust arach/tap
 brew install --cask action
 ```
 
-Homebrew refuses to load casks from a third-party tap until you trust it, so the
-`brew trust` line is required. Action needs Accessibility and Screen Recording
-permission; macOS prompts on first use.
+All three lines, in that order. `brew install --cask action` on its own fails
+with "No Cask with this name exists", because a short cask name only resolves
+against Homebrew's own catalogue and the taps you have already added. `brew
+trust` is required too: Homebrew refuses to load a cask from a third-party tap
+until it is trusted.
+
+Action needs Accessibility and Screen Recording permission; macOS prompts on
+first use.
 
 To build from source instead, read on.
 
