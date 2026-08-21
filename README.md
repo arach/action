@@ -68,6 +68,22 @@ That boundary matters. WebKit and `ScreenCaptureKit` are reliable when they run 
 
 The inspection path uses Action Companion when it is reachable and falls back to direct execution otherwise.
 
+## Install
+
+If you just want to run Action, install the released app with Homebrew:
+
+```bash
+brew tap arach/tap
+brew trust arach/tap
+brew install --cask action
+```
+
+Homebrew refuses to load casks from a third-party tap until you trust it, so the
+`brew trust` line is required. Action needs Accessibility and Screen Recording
+permission; macOS prompts on first use.
+
+To build from source instead, read on.
+
 ## Quick Start
 
 Requirements:
@@ -253,6 +269,12 @@ Ship a public GitHub release from `main`:
 ```bash
 bun run release:ship -- 0.1.0 --watch
 ```
+
+The release workflow also bumps the Homebrew cask in
+[arach/homebrew-tap](https://github.com/arach/homebrew-tap) to the new version
+and checksum. That step needs a `TAP_TOKEN` repository secret with write access
+to the tap; without it the release still succeeds and the workflow logs a
+warning that the cask is stale.
 
 The release workflow builds, signs, notarizes, verifies, and uploads generic and versioned DMG assets. It creates the `vX.Y.Z` tag only after verification passes. Add `--no-publish` for an artifact-only run.
 
