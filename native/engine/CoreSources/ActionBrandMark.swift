@@ -35,24 +35,28 @@ public enum ActionBrandMark {
     public struct Metrics: Sendable {
         /// How far the corner marks sit in from the mark's box.
         public var inset = 12.0
-        /// Stroke weight of the corner marks.
-        public var weight = 5.5
+        /// Stroke weight of the corner marks. Kept light on purpose: these are
+        /// crop marks, not a border, and the triangle is the only solid mass the
+        /// mark needs. Thinning the marks alone unbalances it, so the triangle
+        /// was pulled in to match.
+        public var weight = 3.75
         /// Length of each arm. Long enough that the right-hand marks actually
         /// stand where the triangle wants to go — with short arms the triangle
         /// slips through the gap between the corners and never crosses anything.
         public var arm = 34.0
 
         /// The triangle. Its tip runs past the marks on the right.
-        public var playLeft = 30.0
-        public var playTop = 26.0
-        public var playBottom = 74.0
-        public var playTip = 95.0
+        public var playLeft = 33.0
+        public var playTop = 30.0
+        public var playBottom = 70.0
+        public var playTip = 93.0
         public var playRadius = 3.0
 
         /// Clearance cut out of the marks where the triangle crosses them.
         /// Below about 4 the gap closes up at menu bar size and the crossing
-        /// looks like a mistake; above about 8 it eats the right-hand arms.
-        public var knockout = 6.0
+        /// looks like a mistake; much above the mark's own weight it eats the
+        /// right-hand arms.
+        public var knockout = 5.0
 
         public init() {}
     }
