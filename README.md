@@ -17,6 +17,7 @@ Working today:
 - asynchronous recording with explicit stop and finished markers
 - guided capture sessions with trace, screenshots, manifests, replay, and in-app review
 - current-surface inspection that can persist a screenshot, AX snapshot, and Apple Vision OCR
+- agent-owned drive leases (`drive.begin` / `drive.release` / `drive.status`) with supervision HUD presence, idle expiry, and disconnect cleanup
 - deterministic runtime actions exposed through local CLI and MCP entrypoints
 - a local HUD / console and repo-local native developer CLI
 
@@ -39,8 +40,8 @@ Still mostly contract or roadmap work:
 
 Action separates macOS lifecycle work from automation orchestration:
 
-- `Action.app` owns AppKit, WebKit, permission UX, launcher and review UI, and the recording-probe lifecycle.
-- `ActionAgent` owns local transport, native automation methods, and capture orchestration.
+- `Action.app` owns AppKit, WebKit, permission UX, launcher and review UI, the recording-probe lifecycle, and supervision HUD presentation.
+- `ActionAgent` owns local transport, native automation methods, drive lease truth, and capture orchestration.
 - the TypeScript runtime owns sessions, observations, targets, actions, traces, and artifact manifests.
 - CLI and MCP are thin frontends over the same runtime concepts.
 - compiler and composer packages consume runtime truth; they do not own live app control.
