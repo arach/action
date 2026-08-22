@@ -958,7 +958,7 @@ struct ActionSessionPreviewView: View {
     private func statusPill(_ text: String, accent: Bool) -> some View {
         Text(text)
             .font(ActionType.mono(10, weight: .semibold))
-            .foregroundStyle(accent ? Color.white : StageHUDTheme.textSecondary)
+            .foregroundStyle(accent ? StageHUDTheme.buttonPrimaryText : StageHUDTheme.textSecondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
@@ -1706,7 +1706,7 @@ private struct ReviewSurfaceButtonStyle: ButtonStyle {
     private func foregroundColor(configuration: Configuration) -> Color {
         switch tone {
         case .primary:
-            return Color.white.opacity(configuration.isPressed ? 0.86 : 1)
+            return StageHUDTheme.buttonPrimaryText.opacity(configuration.isPressed ? 0.86 : 1)
         case .secondary, .destructive:
             return StageHUDTheme.textPrimary.opacity(configuration.isPressed ? 0.85 : 1)
         }

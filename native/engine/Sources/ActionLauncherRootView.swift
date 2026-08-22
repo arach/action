@@ -1070,7 +1070,7 @@ struct ActionLauncherRootView: View {
     private func footerChip(label: String, value: String, ok: Bool) -> some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(ok ? Color(nsColor: NSColor.systemGreen) : StageHUDTheme.textMuted.opacity(0.5))
+                .fill(ok ? StageHUDTheme.runOk : StageHUDTheme.textMuted.opacity(0.5))
                 .frame(width: 6, height: 6)
             Text(label)
                 .font(ActionType.uiCaption)
@@ -1229,15 +1229,15 @@ struct ActionLauncherRootView: View {
             }
         }
         .padding(.horizontal, 9)
-        .frame(height: 24)
+        .frame(height: Self.runStripControlHeight)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: Self.runStripControlRadius, style: .continuous)
                 .fill(StageHUDTheme.railBackground)
         )
         // The focus ring is drawn inside the field's own footprint so taking
         // focus cannot nudge the strip's layout by a hairline.
         .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: Self.runStripControlRadius, style: .continuous)
                 .stroke(
                     runsSearchFocused ? StageHUDTheme.reviewAccent : StageHUDTheme.cardBorder,
                     lineWidth: 1
@@ -2409,7 +2409,7 @@ struct ActionLauncherRootView: View {
                 ActionSettingsSection(title: "Needs attention") {
                     ActionSettingsRow(
                         icon: "exclamationmark.triangle.fill",
-                        iconColor: Color(nsColor: .systemOrange),
+                        iconColor: StageHUDTheme.hudAmber,
                         title: "Some permissions are missing",
                         subtitle: "Accessibility and Screen Recording"
                     ) {
@@ -2603,7 +2603,7 @@ struct ActionLauncherRootView: View {
             ActionSettingsSection(title: "Runtime") {
                 ActionSettingsRow(
                     icon: "cpu",
-                    iconColor: agentIsHealthy ? Color(nsColor: .systemGreen) : StageHUDTheme.textMuted,
+                    iconColor: agentIsHealthy ? StageHUDTheme.runOk : StageHUDTheme.textMuted,
                     title: "Local agent",
                     subtitle: "Local WebSocket"
                 ) {
