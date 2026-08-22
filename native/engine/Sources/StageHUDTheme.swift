@@ -100,6 +100,17 @@ enum StageHUDTheme {
     static var reviewAccent: Color { ActionThemePalette.color(.reviewAccent) }
     static var reviewAccentMuted: Color { ActionThemePalette.color(.reviewAccentMuted) }
 
+    // MARK: - Media overlays
+
+    /// Translucent plates and edges composited over captured frames — chips,
+    /// toolbar plates, spotlight veils. Grounded in the footage, not the theme.
+    /// Full-strength black; call sites keep their own `.opacity()`.
+    static var overlayScrim: Color { ActionThemePalette.color(.overlayScrim) }
+    /// Hairline stroke that lifts an overlay plate off the frame beneath it.
+    static var overlayHairline: Color { ActionThemePalette.color(.overlayHairline) }
+    /// Ink that has to read over any footage, themed or not.
+    static var overlayInk: Color { ActionThemePalette.color(.overlayInk) }
+
     // MARK: - Numbers
 
     /// Corner radius for cards and panels.

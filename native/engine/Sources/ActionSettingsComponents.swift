@@ -187,11 +187,11 @@ struct ActionSettingsStatusBadge: View {
     private var color: Color {
         switch kind {
         case .ok:
-            return Color(nsColor: .systemGreen)
+            return StageHUDTheme.runOk
         case .warning:
-            return Color(nsColor: .systemOrange)
+            return StageHUDTheme.hudAmber
         case .offline:
-            return Color(nsColor: .systemRed).opacity(0.85)
+            return StageHUDTheme.runFailed.opacity(0.85)
         case .neutral:
             return StageHUDTheme.textMuted
         }
@@ -233,7 +233,7 @@ struct ActionSettingsPermissionRow: View {
         HStack(alignment: .center, spacing: 12) {
             ActionSettingsLeadingIcon(
                 systemName: granted ? "checkmark.shield.fill" : "exclamationmark.shield.fill",
-                color: granted ? Color(nsColor: .systemGreen) : Color(nsColor: .systemOrange)
+                color: granted ? StageHUDTheme.runOk : StageHUDTheme.hudAmber
             )
 
             VStack(alignment: .leading, spacing: 3) {

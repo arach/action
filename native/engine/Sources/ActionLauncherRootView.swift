@@ -2159,10 +2159,10 @@ struct ActionLauncherRootView: View {
         Button(action: action) {
             Text(title)
                 .font(ActionType.uiMicro)
-                .foregroundStyle(Color.white)
+                .foregroundStyle(StageHUDTheme.overlayInk)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(Color.black.opacity(0.62), in: Capsule(style: .continuous))
+                .background(StageHUDTheme.overlayScrim.opacity(0.62), in: Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
     }

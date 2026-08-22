@@ -415,10 +415,10 @@ struct ActionSessionPreviewView: View {
                     if isComposingFeedback {
                         Text("Anchor: \(anchorMode.rawValue) • \(draftAnchorSummary)")
                             .font(ActionType.uiCaption)
-                            .foregroundStyle(Color.white)
+                            .foregroundStyle(StageHUDTheme.overlayInk)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.36), in: Capsule())
+                            .background(StageHUDTheme.overlayScrim.opacity(0.36), in: Capsule())
                     }
 
                     if isSelectingRegion {
@@ -453,10 +453,10 @@ struct ActionSessionPreviewView: View {
 
     private var toolbarPlate: some View {
         Capsule(style: .continuous)
-            .fill(Color.black.opacity(0.34))
+            .fill(StageHUDTheme.overlayScrim.opacity(0.34))
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(StageHUDTheme.overlayHairline, lineWidth: 1)
             )
     }
 
@@ -1568,7 +1568,7 @@ struct ActionSessionPreviewView: View {
 
             Text(label)
                 .font(ActionType.mono(10, weight: .semibold))
-                .foregroundStyle(Color.white)
+                .foregroundStyle(StageHUDTheme.overlayInk)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(tint.opacity(0.94), in: Capsule())
@@ -1598,13 +1598,13 @@ struct ActionSessionPreviewView: View {
     private func annotationPin(text: String) -> some View {
         Text(text)
             .font(ActionType.mono(10, weight: .bold))
-            .foregroundStyle(Color.white)
+            .foregroundStyle(StageHUDTheme.overlayInk)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
             .background(StageHUDTheme.reviewAccent, in: Capsule())
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    .stroke(StageHUDTheme.overlayInk.opacity(0.2), lineWidth: 1)
             )
     }
 

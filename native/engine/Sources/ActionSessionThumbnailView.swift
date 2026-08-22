@@ -93,10 +93,10 @@ struct ActionSessionThumbnailView: View {
     private func badge(_ text: String) -> some View {
         Text(text)
             .font(ActionType.mono(10, weight: .semibold))
-            .foregroundStyle(Color.white.opacity(0.95))
+            .foregroundStyle(StageHUDTheme.overlayInk.opacity(0.95))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(Color.black.opacity(0.55), in: Capsule(style: .continuous))
+            .background(StageHUDTheme.overlayScrim.opacity(0.55), in: Capsule(style: .continuous))
     }
 
     /// Below this the centred label and the bottom-left duration badge occupy
