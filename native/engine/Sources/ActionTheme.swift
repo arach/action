@@ -108,6 +108,14 @@ enum ActionToken: String, CaseIterable, Sendable {
     case reviewAccent
     case reviewAccentMuted
 
+    // Media overlays — plates, edges and ink floating above captured frames.
+    // They sit over arbitrary footage, not over a themed ground, so the built-in
+    // values are appearance-independent black and white; a theme retints them
+    // here or not at all.
+    case overlayScrim
+    case overlayHairline
+    case overlayInk
+
     /// Dense index into the resolved colour table. `allCases` order.
     var slot: Int {
         Self.slots[self] ?? 0
@@ -681,6 +689,10 @@ struct ActionTheme: Equatable, Sendable {
             .reviewStrokeStrong: review.rule,
             .reviewAccent: review.accent,
             .reviewAccentMuted: review.accentSoft,
+
+            .overlayScrim: flat(ActionRGBA(white: 0)),
+            .overlayHairline: flat(ActionRGBA(white: 1, alpha: 0.08)),
+            .overlayInk: flat(ActionRGBA(white: 1)),
         ]
     }
 }

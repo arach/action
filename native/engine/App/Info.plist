@@ -8,6 +8,10 @@
   <string>Action</string>
   <key>CFBundleExecutable</key>
   <string>Action</string>
+  <key>CFBundleIconFile</key>
+  <string>Action</string>
+  <key>CFBundleIconName</key>
+  <string>Action</string>
   <key>CFBundleIdentifier</key>
   <string>dev.action.Action</string>
   <key>CFBundleInfoDictionaryVersion</key>
