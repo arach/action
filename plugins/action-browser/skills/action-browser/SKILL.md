@@ -16,7 +16,7 @@ you picked.
 | | What it is | How you control it |
 |---|---|---|
 | **The user's regular Chrome** | Their everyday browser — real profiles (`Default`, `Profile 1` / "Work"), their tabs, history, extensions, logins | `browser_open { mode: "regular" }` opens a URL and stops there. **No DOM tools.** Drive that window with Action's native macOS control: `action.observe.snapshot` (screen + accessibility), `action.resolve.target`, `action.act.execute` |
-| **An Action browser** | Real, non-headless Chrome that Action owns, on its own user-data-dir. Default identity `agent-browser` is blank and signed into nothing | Full DOM tools over CDP: `browser_snapshot`, `browser_click`, `browser_fill`, `browser_screenshot` |
+| **An Action browser** | Real, non-headless Chrome that Action owns, on its own user-data-dir. Default identity `agent-browser` is blank and signed into nothing | Full DOM tools over CDP: `browser_snapshot`, `browser_click`, `browser_fill`, `browser_resize`, `browser_screenshot` |
 | **An Action browser identity seeded from a regular Chrome profile** | The same Action-owned Chrome under a name like `work`, carrying cookies copied from one of the user's real profiles for an allowlist of domains | Full DOM tools, on sites the user is already signed in to |
 
 The tradeoff in one line: **regular Chrome gives you their real session but only
@@ -36,10 +36,44 @@ does not attempt to bypass that boundary.
    current tab by default. Leave `background: true` unless the user asks to see
    the Chrome window, and set `newTab: true` only when parallel page state is
    intentional.
-3. Call `browser_screenshot` and show the returned image to the user.
+3. Call `browser_screenshot` and show the returned image to the user. To check a
+   responsive layout, call `browser_resize` with an explicit width and height first.
 4. Call `browser_snapshot` before interacting with unfamiliar pages.
 5. Use selectors returned by the snapshot for `browser_click` and `browser_fill`.
 6. Take another screenshot after an action when visual confirmation matters.
+
+## Responsive checks: resize, then screenshot
+
+`browser_resize` sets an already-open tab to an explicit width and height, so a
+breakpoint can be captured rather than guessed at.
+
+```text
+browser_open   { url: "http://localhost:3000" }
+browser_resize { width: 1440, height: 900 }
+browser_screenshot
+
+browser_resize { width: 390, height: 844, mobile: true,
+                 matchMedia: ["(max-width: 767px)"] }
+browser_screenshot
+
+browser_resize { reset: true }
+```
+
+- `target: "tab"` (default) emulates the size for that one tab. It is exact, it
+  leaves every other tab alone, and `deviceScaleFactor: 1` makes screenshot
+  pixels equal CSS pixels — a 390-wide viewport returns a 390px-wide PNG.
+- `target: "window"` resizes the real Chrome window instead. Use it when
+  emulation is not trustworthy for what is being checked; it moves every tab in
+  that window, the display is a hard ceiling, and it drops the tab's emulated
+  viewport first.
+- The size **sticks to that tab** across later `browser_open`, `browser_snapshot`,
+  and `browser_screenshot` calls until `reset: true`. It is dropped when the tab
+  or the browser closes, and nothing is written to the profile.
+- Pass `matchMedia` to have the breakpoint answered rather than eyeballed, and
+  read `exact` in the reply — a page with a hard `min-width` can refuse to lay
+  out as narrow as requested.
+- `mobile: true` additionally honours the viewport meta tag and enables touch,
+  which is what makes a real phone layout appear instead of a squeezed desktop one.
 
 ## Signed-in work: seed, then drive
 
@@ -100,7 +134,9 @@ switch to Action's native tools rather than the browser tools.
   returns `controlAvailable: false` plus the native control path.
 - `browser_open` creates one working tab per agent session, then navigates that
   tab on later calls. Use `newTab: true` for an intentional additional tab.
-- `browser_screenshot` saves a PNG artifact and returns the image in the tool response.
+- `browser_screenshot` saves a PNG artifact and returns the image in the tool
+  response, and reports the `viewport` it was captured at.
+- `browser_resize` needs a tab already open; it changes size, never navigation.
 - Prefer a stable CSS selector from `browser_snapshot` over text matching.
 - Chrome belongs to the agent session that started it. It quits when that
   session ends, after fifteen idle minutes, or on `browser_close` with

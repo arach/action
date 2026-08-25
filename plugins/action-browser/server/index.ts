@@ -22,9 +22,21 @@ import {
   regularChromeLaunchArgs,
   shouldReuseCurrentTab,
 } from "./navigation.ts";
+import {
+  DEFAULT_WINDOW_SIZE,
+  MAX_DEVICE_SCALE_FACTOR,
+  MAX_VIEWPORT_EDGE,
+  MIN_DEVICE_SCALE_FACTOR,
+  MIN_VIEWPORT_EDGE,
+  measureDrift,
+  parseResizeRequest,
+  widthClass,
+  windowBoundsFor,
+  type ViewportOverride,
+} from "./viewport.ts";
 
 // Keep in step with every plugin manifest. `bun run plugin:version` checks and sets this.
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.3.0";
 
 type JsonObject = Record<string, unknown>;
 
@@ -95,6 +107,14 @@ const companionBridgeHealthURL = process.env.ACTION_CHROME_COMPANION_HEALTH_URL
   ?? "http://127.0.0.1:4321/health";
 const textDecoder = new TextDecoder();
 let currentTargetId: string | undefined;
+/**
+ * Emulated viewports, keyed by tab id. A device-metrics override lives on the CDP
+ * client session, so it would vanish with the socket every tool call closes. Keeping
+ * it here and re-applying it per session is what makes a resize hold across a later
+ * screenshot or snapshot. Nothing is written to the profile: quit Chrome and the
+ * override is gone.
+ */
+const viewportOverrides = new Map<string, ViewportOverride>();
 let claimHeld = false;
 let ownsBrowser = false;
 let shuttingDown = false;
@@ -391,6 +411,55 @@ const tools = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, idempotentHint: false },
+  },
+  {
+    name: "browser_resize",
+    title: "Resize Browser Viewport",
+    description: "Set the viewport of an already-open Action browser tab to an explicit width and height, so responsive breakpoints can be exercised and screenshotted. target=tab (default) emulates the size for that one tab only and is exact, reversible, and invisible to every other tab; target=window resizes the real Chrome window hosting the tab, which moves every tab in it and may be clamped by the display. The size sticks across later browser_open / browser_snapshot / browser_screenshot calls on that tab until reset, and is dropped when the tab or the browser closes -- nothing is written to the profile. Send reset=true to restore the default size. Does not reach pages opened with mode=regular.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        width: {
+          type: "integer",
+          minimum: MIN_VIEWPORT_EDGE,
+          maximum: MAX_VIEWPORT_EDGE,
+          description: `Viewport width in CSS pixels, ${MIN_VIEWPORT_EDGE}-${MAX_VIEWPORT_EDGE}. Required unless reset is true. Example breakpoints: 390 phone, 768 tablet, 1280 laptop, 1920 desktop.`,
+        },
+        height: {
+          type: "integer",
+          minimum: MIN_VIEWPORT_EDGE,
+          maximum: MAX_VIEWPORT_EDGE,
+          description: `Viewport height in CSS pixels, ${MIN_VIEWPORT_EDGE}-${MAX_VIEWPORT_EDGE}. Required unless reset is true.`,
+        },
+        target: {
+          type: "string",
+          enum: ["tab", "window"],
+          description: "tab = emulate the size for this tab only (default, exact, reversible). window = resize the real Chrome window, which affects every tab in it, may be clamped by the display, and drops any emulated viewport on this tab first so the new window size is what the page actually sees.",
+        },
+        tabId: { type: "string", description: "Optional tab id from browser_open or browser_tabs. Defaults to this session's current tab." },
+        deviceScaleFactor: {
+          type: "number",
+          minimum: MIN_DEVICE_SCALE_FACTOR,
+          maximum: MAX_DEVICE_SCALE_FACTOR,
+          description: "target=tab only. Device pixel ratio. Defaults to 1, which makes screenshot pixels equal CSS pixels; use 2 for a retina-density capture.",
+        },
+        mobile: {
+          type: "boolean",
+          description: "target=tab only. Emulate a mobile device: honour the viewport meta tag and enable touch. Defaults to false, which is desktop responsive mode.",
+        },
+        matchMedia: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional media queries to evaluate after the resize, e.g. [\"(max-width: 768px)\"]. Returns which ones match, so a breakpoint can be asserted instead of eyeballed.",
+        },
+        reset: {
+          type: "boolean",
+          description: `When true, drop the override: target=tab returns the tab to the real window viewport, target=window restores the default ${DEFAULT_WINDOW_SIZE.width}x${DEFAULT_WINDOW_SIZE.height} window. Cannot be combined with width or height.`,
+        },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, idempotentHint: true },
   },
   {
     name: "browser_screenshot",
@@ -790,6 +859,7 @@ async function useProfile(nextName: string): Promise<{
     const outcome = await releaseBrowser("profile-switch");
     closedPrevious = outcome.closed;
     currentTargetId = undefined;
+    viewportOverrides.clear();
   }
   profileName = name;
   profileDir = nextDir;
@@ -877,7 +947,7 @@ async function ensureChrome(background = true): Promise<void> {
     "--disable-background-timer-throttling",
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
-    "--window-size=1440,1000",
+    `--window-size=${DEFAULT_WINDOW_SIZE.width},${DEFAULT_WINDOW_SIZE.height}`,
     "about:blank",
   );
 
@@ -901,8 +971,15 @@ async function ensureChrome(background = true): Promise<void> {
 
 async function listTargets(): Promise<ChromeTarget[]> {
   await ensureChrome();
-  return (await fetchJson<ChromeTarget[]>("/json/list"))
+  const targets = (await fetchJson<ChromeTarget[]>("/json/list"))
     .filter((target) => target.type === "page" && Boolean(target.webSocketDebuggerUrl));
+  if (viewportOverrides.size > 0) {
+    const live = new Set(targets.map((target) => target.id));
+    for (const id of viewportOverrides.keys()) {
+      if (!live.has(id)) viewportOverrides.delete(id);
+    }
+  }
+  return targets;
 }
 
 async function targetFor(tabId?: unknown): Promise<ChromeTarget> {
@@ -922,9 +999,156 @@ async function withTarget<T>(tabId: unknown, work: (session: CDPSession, target:
   const target = await targetFor(tabId);
   const session = await CDPSession.connect(target.webSocketDebuggerUrl!);
   try {
+    await applyViewportOverride(session, target.id);
     return await work(session, target);
   } finally {
     session.close();
+  }
+}
+
+/**
+ * Re-apply this tab's emulated viewport on a fresh CDP session. Failure throws
+ * rather than degrading quietly: a screenshot taken at the wrong width would look
+ * like a verified breakpoint when nothing was verified.
+ */
+async function applyViewportOverride(session: CDPSession, targetId: string): Promise<void> {
+  const override = viewportOverrides.get(targetId);
+  if (!override) return;
+  try {
+    await session.call("Emulation.setDeviceMetricsOverride", {
+      width: override.width,
+      height: override.height,
+      deviceScaleFactor: override.deviceScaleFactor,
+      mobile: override.mobile,
+    });
+    await session.call("Emulation.setTouchEmulationEnabled", {
+      enabled: override.mobile,
+      maxTouchPoints: override.mobile ? 5 : 1,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Could not restore the ${override.width}x${override.height} viewport on tab ${targetId}: ${detail}. `
+      + "Call browser_resize again, or browser_resize { reset: true } to drop the override.",
+    );
+  }
+}
+
+/** Read what the page actually got, which is the only number worth reporting. */
+async function measureViewport(session: CDPSession, queries: string[] = []): Promise<JsonObject> {
+  const expression = `(() => {
+    const queries = ${JSON.stringify(queries)};
+    return {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+      documentWidth: document.documentElement.scrollWidth,
+      documentHeight: document.documentElement.scrollHeight,
+      ...(queries.length
+        ? { matchMedia: Object.fromEntries(queries.map((query) => [query, window.matchMedia(query).matches])) }
+        : {}),
+    };
+  })()`;
+  return await evaluateValue(session, expression) as JsonObject;
+}
+
+/** Browser-scope CDP (window bounds, browser close) rather than a single page target. */
+async function withBrowserSession<T>(work: (session: CDPSession) => Promise<T>): Promise<T> {
+  await ensureChrome();
+  const version = await fetchJson<{ webSocketDebuggerUrl?: string }>("/json/version");
+  if (!version.webSocketDebuggerUrl) {
+    throw new Error("Chrome did not expose a browser-level DevTools endpoint.");
+  }
+  const session = await CDPSession.connect(version.webSocketDebuggerUrl);
+  try {
+    return await work(session);
+  } finally {
+    session.close();
+  }
+}
+
+/**
+ * Drop a device-metrics override on a tab, including one left behind by a CDP
+ * session that has already disconnected.
+ *
+ * An override belongs to the session that set it. A later session calling
+ * clearDeviceMetricsOverride is accepted and silently does nothing, so Chrome keeps
+ * serving the stale size forever once the owning socket is gone. Re-setting the
+ * metrics first moves ownership to this session, which can then clear them for real.
+ * Adopting the size already on screen makes the round trip invisible.
+ */
+async function clearViewportOverride(session: CDPSession): Promise<void> {
+  const current = await measureViewport(session);
+  await session.call("Emulation.setDeviceMetricsOverride", {
+    width: Number(current.width) || DEFAULT_WINDOW_SIZE.width,
+    height: Number(current.height) || DEFAULT_WINDOW_SIZE.height,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await session.call("Emulation.clearDeviceMetricsOverride");
+  // Touch emulation has the same session ownership rule, so take it the same way.
+  await session.call("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  await session.call("Emulation.setTouchEmulationEnabled", { enabled: false, maxTouchPoints: 1 });
+}
+
+/** Forget a tab's emulated viewport and put the real one back. */
+async function dropViewportOverride(targetId: string): Promise<void> {
+  viewportOverrides.delete(targetId);
+  await withTarget(targetId, clearViewportOverride);
+}
+
+/**
+ * Resize the real Chrome window hosting a tab.
+ *
+ * sizeIs="viewport" sizes the window so the *page* lands on the requested size:
+ * window bounds carry the tab strip and omnibox, so the chrome inset is measured
+ * live rather than hard-coded per Chrome version. sizeIs="bounds" sets the window
+ * itself, which is what restoring the launch size means.
+ *
+ * Callers must drop any emulated viewport first. Emulation rewrites window.innerWidth,
+ * which would both hide the new window size from the page and inflate the inset by
+ * the difference between the emulated and real widths.
+ */
+async function resizeWindowForTab(
+  targetId: string,
+  size: { width: number; height: number },
+  sizeIs: "viewport" | "bounds",
+): Promise<JsonObject> {
+  let inset = { width: 0, height: 0 };
+  if (sizeIs === "viewport") {
+    inset = await withTarget(targetId, async (session) => {
+      const metrics = await evaluateValue(session, `({
+        width: window.outerWidth - window.innerWidth,
+        height: window.outerHeight - window.innerHeight,
+      })`) as JsonObject;
+      return { width: Number(metrics.width ?? 0) || 0, height: Number(metrics.height ?? 0) || 0 };
+    });
+  }
+  const bounds = sizeIs === "viewport" ? windowBoundsFor(size, inset) : { ...size };
+  await withBrowserSession(async (session) => {
+    const window = await session.call("Browser.getWindowForTarget", { targetId });
+    const windowId = window.windowId;
+    const current = window.bounds as JsonObject | undefined;
+    // Bounds are only writable from the normal window state.
+    if (current?.windowState && current.windowState !== "normal") {
+      await session.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+    }
+    await session.call("Browser.setWindowBounds", {
+      windowId,
+      bounds: { width: bounds.width, height: bounds.height },
+    });
+  });
+  // The window manager applies asynchronously, and the page relayouts after it.
+  await Bun.sleep(250);
+  return { chromeInset: inset, windowBounds: bounds };
+}
+
+/** Let media queries settle and the page repaint before anything screenshots it. */
+async function settleLayout(session: CDPSession): Promise<void> {
+  try {
+    await evaluateValue(session, `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
+  } catch {
+    // A page mid-navigation can drop the evaluation; the measurement below still reports truth.
   }
 }
 
@@ -1173,6 +1397,9 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
       const session = await CDPSession.connect(target.webSocketDebuggerUrl);
       try {
         await session.call("Page.enable");
+        // Restore a sticky viewport before navigating so the first layout, and any
+        // breakpoint-sensitive script the page runs on load, sees the right width.
+        await applyViewportOverride(session, target.id);
         const navigation = await session.call("Page.navigate", { url });
         const navigateErrorText = typeof navigation.errorText === "string"
           ? navigation.errorText
@@ -1338,6 +1565,73 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
         return textResult({ ok: true, tabId: target.id, result });
       });
 
+    case "browser_resize": {
+      const request = parseResizeRequest(args);
+      const target = await targetFor(args.tabId);
+      const hadEmulatedViewport = viewportOverrides.has(target.id);
+
+      let windowDetail: JsonObject = {};
+      // Only a caller-named viewport size can be checked for drift. A reset asks for
+      // "whatever the window is", so there is nothing to have missed.
+      let requestedViewport: { width: number; height: number } | undefined;
+
+      if (request.kind === "set" && request.target === "tab") {
+        viewportOverrides.set(target.id, request.viewport);
+        requestedViewport = { width: request.viewport.width, height: request.viewport.height };
+      } else if (request.kind === "set") {
+        // The window path owns the tab's size outright: an emulated viewport would
+        // mask the resize the caller asked to see.
+        await dropViewportOverride(target.id);
+        requestedViewport = { width: request.viewport.width, height: request.viewport.height };
+        windowDetail = await resizeWindowForTab(target.id, requestedViewport, "viewport");
+      } else if (request.target === "window") {
+        await dropViewportOverride(target.id);
+        windowDetail = await resizeWindowForTab(target.id, DEFAULT_WINDOW_SIZE, "bounds");
+      } else {
+        await dropViewportOverride(target.id);
+      }
+
+      const measured = await withTarget(target.id, async (session) => {
+        await settleLayout(session);
+        return await measureViewport(session, request.matchMedia);
+      });
+      const drift = requestedViewport
+        ? measureDrift(requestedViewport, {
+          width: Number(measured.width ?? 0),
+          height: Number(measured.height ?? 0),
+        })
+        : undefined;
+
+      const result: JsonObject = {
+        ok: true,
+        target: request.target,
+        tabId: target.id,
+        url: target.url,
+        reset: request.kind === "reset",
+        requested: request.kind === "set"
+          ? { ...request.viewport }
+          : {
+            restoredTo: request.target === "window"
+              ? `the default ${DEFAULT_WINDOW_SIZE.width}x${DEFAULT_WINDOW_SIZE.height} window`
+              : "the real window viewport",
+          },
+        viewport: measured,
+        ...(drift ?? {}),
+        widthClass: widthClass(Number(measured.width ?? 0)),
+        emulated: viewportOverrides.has(target.id),
+        ...(request.target === "window" && hadEmulatedViewport
+          ? { clearedEmulatedViewport: true }
+          : {}),
+        ...windowDetail,
+      };
+      if (drift && !drift.exact) {
+        result.note = request.target === "window"
+          ? "The window manager did not grant the exact size; a window cannot exceed its display. Use target=tab for an exact viewport."
+          : "The page did not lay out at the requested size. A hard min-width or a zoom level can hold it wider.";
+      }
+      return textResult(result);
+    }
+
     case "browser_screenshot":
       return await withTarget(args.tabId, async (session, target) => {
         await session.call("Page.enable");
@@ -1383,6 +1677,10 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
           outputPath,
           fullPage,
           mimeType: "image/png",
+          // Say which viewport this frame is evidence of, so a breakpoint screenshot
+          // is self-describing rather than a size the reader has to remember.
+          viewport: await measureViewport(session).catch(() => undefined),
+          emulated: viewportOverrides.has(target.id),
         };
         return {
           content: [
@@ -1397,6 +1695,7 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
       if (args.scope === "browser") {
         const outcome = await releaseBrowser("browser_close");
         currentTargetId = undefined;
+        viewportOverrides.clear();
         return textResult({
           ok: true,
           scope: "browser",
@@ -1410,6 +1709,7 @@ async function callTool(name: string, args: JsonObject): Promise<ToolResult> {
       if (!response.ok) {
         throw new Error(`Chrome could not close tab ${target.id}.`);
       }
+      viewportOverrides.delete(target.id);
       if (currentTargetId === target.id) currentTargetId = undefined;
       return textResult({ ok: true, closed: target.id });
     }
@@ -1440,6 +1740,7 @@ async function handleRequest(request: JsonRpcRequest): Promise<JsonObject | unde
               "Three browsers exist. (1) The user's regular Chrome: browser_open mode=regular opens a URL there and nothing else; control it with Action's native screen + accessibility tools (action.observe.* then action.act.execute). (2) An Action browser: the default agent-browser identity, blank and isolated, with full DOM tools. (3) An Action browser identity seeded from a regular Chrome profile: same DOM tools, already signed in.",
               "To act on a signed-in site, seed rather than hand off: browser_import_cookies { into: \"work\", source: \"Profile 1\", domains: [\"github.com\"] } to preview, again with confirm: true to write, then browser_open { url, profile: \"work\" }.",
               "Fast path for anything public: browser_open → browser_screenshot.",
+              "Responsive checks: browser_open → browser_resize { width, height } → browser_screenshot. The size sticks to that tab until browser_resize { reset: true }.",
               "browser_profiles lists identities and surfaces; browser_companion_status reports the extension bridge.",
             ].join("\n"),
           },
