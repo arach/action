@@ -75,6 +75,7 @@ public struct ActionAccessibilityBounds: Codable, Sendable {
 
 public enum ActionNativeAutomationError: LocalizedError {
     case applicationNotRunning(String)
+    case ambiguousApplication(String)
     case accessibilityLookupFailed(String)
     case accessibilityActionFailed(String)
     /// The app accepted a value write and the value did not end up applied. Distinct from a
@@ -84,8 +85,10 @@ public enum ActionNativeAutomationError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .applicationNotRunning(let bundleId):
-            return "Application with bundle identifier \(bundleId) is not running"
+        case .applicationNotRunning(let target):
+            return "No running application matches \(target)"
+        case .ambiguousApplication(let detail):
+            return detail
         case .accessibilityLookupFailed(let detail):
             return detail
         case .accessibilityActionFailed(let detail):
@@ -112,7 +115,11 @@ public enum ActionNativeAutomation {
 
     public static func activateApplication(bundleId: String) throws {
         let app = try runningApplication(bundleId: bundleId)
-        let application = AXUIElementCreateApplication(app.processIdentifier)
+        try activateApplication(pid: app.processIdentifier)
+    }
+
+    public static func activateApplication(pid: pid_t) throws {
+        let application = AXUIElementCreateApplication(pid)
         let result = AXUIElementSetAttributeValue(
             application,
             kAXFrontmostAttribute as CFString,
@@ -120,7 +127,7 @@ public enum ActionNativeAutomation {
         )
         guard result == .success else {
             throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Failed to activate \(bundleId): \(result.rawValue)"
+                "Failed to activate pid \(pid): \(result.rawValue)"
             )
         }
     }
@@ -131,7 +138,12 @@ public enum ActionNativeAutomation {
     @discardableResult
     public static func raiseWindow(bundleId: String, matching title: String) throws -> String {
         let app = try runningApplication(bundleId: bundleId)
-        let application = AXUIElementCreateApplication(app.processIdentifier)
+        return try raiseWindow(pid: app.processIdentifier, matching: title)
+    }
+
+    @discardableResult
+    public static func raiseWindow(pid: pid_t, matching title: String) throws -> String {
+        let application = AXUIElementCreateApplication(pid)
 
         // AXWindows often fails the Swift `[AXUIElement]` cast (it arrives as a CFArray),
         // and a freshly launched host can see an empty list for a tick. Walk every
@@ -148,7 +160,7 @@ public enum ActionNativeAutomation {
         }
         guard !windows.isEmpty else {
             throw ActionNativeAutomationError.accessibilityLookupFailed(
-                "No accessibility windows found for \(bundleId)"
+                "No accessibility windows found for pid \(pid)"
             )
         }
 
@@ -166,7 +178,7 @@ public enum ActionNativeAutomation {
         guard let match else {
             let available = titles.filter { !$0.isEmpty }.map { "\"\($0)\"" }.joined(separator: ", ")
             throw ActionNativeAutomationError.accessibilityLookupFailed(
-                "No window titled \"\(title)\" in \(bundleId); open windows: \(available.isEmpty ? "none" : available)"
+                "No window titled \"\(title)\" in pid \(pid); open windows: \(available.isEmpty ? "none" : available)"
             )
         }
 
@@ -186,7 +198,7 @@ public enum ActionNativeAutomation {
             )
             guard front == .success else {
                 throw ActionNativeAutomationError.accessibilityActionFailed(
-                    "Failed to raise window \"\(titles[match])\" in \(bundleId): raise=\(raise.rawValue) frontmost=\(front.rawValue)"
+                    "Failed to raise window \"\(titles[match])\" in pid \(pid): raise=\(raise.rawValue) frontmost=\(front.rawValue)"
                 )
             }
         }
@@ -245,12 +257,74 @@ public enum ActionNativeAutomation {
         return CGRect(origin: position, size: size)
     }
 
+    /// Resolves a bundle identifier to exactly one running process. Two processes can share a
+    /// bundle id (a production install and a dev build of the same app), and silently picking
+    /// one targets the wrong instance — the caller must disambiguate with pid or bundle path.
     public static func runningApplication(bundleId: String) throws -> NSRunningApplication {
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else {
-            throw ActionNativeAutomationError.applicationNotRunning(bundleId)
+        let matches = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+        guard let app = matches.first else {
+            throw ActionNativeAutomationError.applicationNotRunning("bundle identifier \(bundleId)")
+        }
+        guard matches.count == 1 else {
+            let candidates = matches
+                .map { "pid=\($0.processIdentifier) path=\($0.bundleURL?.path ?? "unknown")" }
+                .joined(separator: "; ")
+            throw ActionNativeAutomationError.ambiguousApplication(
+                "\(matches.count) running applications share bundle identifier \(bundleId); target one by pid or bundle path: \(candidates)"
+            )
         }
 
         return app
+    }
+
+    public static func runningApplication(pid: pid_t) throws -> NSRunningApplication {
+        guard let app = NSRunningApplication(processIdentifier: pid) else {
+            throw ActionNativeAutomationError.applicationNotRunning("pid \(pid)")
+        }
+
+        return app
+    }
+
+    public static func runningApplication(bundlePath: String) throws -> NSRunningApplication {
+        let expected = URL(fileURLWithPath: bundlePath).standardizedFileURL.resolvingSymlinksInPath().path
+        let matches = NSWorkspace.shared.runningApplications.filter { app in
+            guard let url = app.bundleURL else {
+                return false
+            }
+            return url.standardizedFileURL.resolvingSymlinksInPath().path == expected
+        }
+        guard let app = matches.first else {
+            throw ActionNativeAutomationError.applicationNotRunning("bundle path \(bundlePath)")
+        }
+        guard matches.count == 1 else {
+            let pids = matches.map { String($0.processIdentifier) }.joined(separator: ", ")
+            throw ActionNativeAutomationError.ambiguousApplication(
+                "\(matches.count) running applications share bundle path \(bundlePath) (pids \(pids)); target one by pid"
+            )
+        }
+
+        return app
+    }
+
+    /// Raises every accessibility window the process exposes without activating the app.
+    /// This is the raise path for accessory / LSUIElement apps, whose floating panels must
+    /// come forward for screenshots and clicks even though the app never becomes frontmost.
+    @discardableResult
+    public static func raiseAllWindows(pid: pid_t) -> Int {
+        let application = AXUIElementCreateApplication(pid)
+        guard let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
+              !windows.isEmpty else {
+            return 0
+        }
+
+        var raised = 0
+        for window in windows {
+            _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+            if AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success {
+                raised += 1
+            }
+        }
+        return raised
     }
 
     public static func calculatorButtons() throws -> [ActionCalculatorButtonSnapshot] {
@@ -625,6 +699,96 @@ public enum ActionNativeAutomation {
         )
     }
 
+    /// Resolves the narrow Scout workspace drag semantically. The source is accepted only
+    /// when Finder exposes an AXURL equal to the exact run fixture URL; no filename or
+    /// coordinate fallback is used. The destination is the exact titled Scout-owned window.
+    static func resolveWorkspaceDragFile(
+        _ request: ActionWorkspaceDragFileRequest
+    ) throws -> ActionWorkspaceDragResolution {
+        let finderWindow = try exactWindowElement(
+            bundleID: "com.apple.finder",
+            title: request.finderWindowTitle
+        )
+        let requestedFinderFrame = ActionWorkspaceDragFileOperation.finderFrame(in: request.displayBounds)
+        let positionResult = AXUIElementSetAttributeValue(
+            finderWindow,
+            kAXPositionAttribute as CFString,
+            pointValue(requestedFinderFrame.origin)
+        )
+        let sizeResult = AXUIElementSetAttributeValue(
+            finderWindow,
+            kAXSizeAttribute as CFString,
+            sizeValue(requestedFinderFrame.size)
+        )
+        guard positionResult == .success, sizeResult == .success else {
+            throw ActionWorkspaceDragFileError.sourceNotFound
+        }
+        usleep(120_000)
+        guard let finderFrame = cgBounds(of: finderWindow) else {
+            throw ActionWorkspaceDragFileError.sourceNotFound
+        }
+
+        let expectedURL = request.fixtureURL.resolvingSymlinksInPath().standardizedFileURL
+        var queue = [finderWindow]
+        var visited = 0
+        var sourceFrames: [CGRect] = []
+        while let current = queue.first {
+            queue.removeFirst()
+            visited += 1
+            if visited > 2_000 { break }
+
+            if let candidateURL = accessibilityURL(of: current),
+               candidateURL.resolvingSymlinksInPath().standardizedFileURL == expectedURL,
+               let frame = cgBounds(of: current) {
+                sourceFrames.append(frame)
+            }
+            queue.append(contentsOf: axChildren(of: current))
+        }
+        guard sourceFrames.count == 1, let sourceFrame = sourceFrames.first else {
+            throw ActionWorkspaceDragFileError.sourceNotFound
+        }
+
+        let destinationWindow = try exactWindowElement(
+            bundleID: request.destinationBundleID,
+            title: request.destinationWindowTitle
+        )
+        guard let destinationFrame = cgBounds(of: destinationWindow) else {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+        var destinationQueue = [destinationWindow]
+        var destinationVisited = 0
+        var destinationTargetFrames: [CGRect] = []
+        while let current = destinationQueue.first {
+            destinationQueue.removeFirst()
+            destinationVisited += 1
+            if destinationVisited > 2_000 { break }
+            if (axValue(current, attribute: kAXIdentifierAttribute) as? String)
+                == request.destinationAXIdentifier,
+               let frame = cgBounds(of: current) {
+                destinationTargetFrames.append(frame)
+            }
+            destinationQueue.append(contentsOf: axChildren(of: current))
+        }
+        guard destinationTargetFrames.count == 1, let destinationTargetFrame = destinationTargetFrames.first else {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+
+        return ActionWorkspaceDragResolution(
+            source: CGPoint(x: sourceFrame.midX, y: sourceFrame.midY),
+            destination: CGPoint(x: destinationTargetFrame.midX, y: destinationTargetFrame.midY),
+            finderWindowFrame: finderFrame,
+            destinationWindowFrame: destinationFrame
+        )
+    }
+
+    static func closeWorkspaceFinderWindow(title: String) throws {
+        let window = try exactWindowElement(bundleID: "com.apple.finder", title: title)
+        guard let closeButton = axValue(window, attribute: kAXCloseButtonAttribute) else {
+            return
+        }
+        _ = AXUIElementPerformAction(closeButton as! AXUIElement, kAXPressAction as CFString)
+    }
+
     public static func calculatorDisplayValue() throws -> String {
         let window = try firstWindowElement(for: "com.apple.calculator")
         var queue = [window]
@@ -669,7 +833,16 @@ public enum ActionNativeAutomation {
         maxDepth: Int = 6,
         maxNodes: Int = 250
     ) throws -> [ActionAccessibilityNodeSnapshot] {
-        let window = try firstWindowElement(for: bundleId)
+        let app = try runningApplication(bundleId: bundleId)
+        return try accessibilityNodes(pid: app.processIdentifier, maxDepth: maxDepth, maxNodes: maxNodes)
+    }
+
+    public static func accessibilityNodes(
+        pid: pid_t,
+        maxDepth: Int = 6,
+        maxNodes: Int = 250
+    ) throws -> [ActionAccessibilityNodeSnapshot] {
+        let window = try firstWindowElement(pid: pid)
         var queue: [(AXUIElement, Int)] = [(window, 0)]
         var result: [ActionAccessibilityNodeSnapshot] = []
 
@@ -702,6 +875,47 @@ public enum ActionNativeAutomation {
 
         return result
     }
+}
+
+private func exactWindowElement(bundleID: String, title: String) throws -> AXUIElement {
+    let app: NSRunningApplication
+    do {
+        app = try ActionNativeAutomation.runningApplication(bundleId: bundleID)
+    } catch {
+        if bundleID == ActionWorkspaceDragFileRequest.scoutBundleID {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+        throw ActionWorkspaceDragFileError.sourceNotFound
+    }
+    let application = AXUIElementCreateApplication(app.processIdentifier)
+    guard let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement] else {
+        if bundleID == ActionWorkspaceDragFileRequest.scoutBundleID {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+        throw ActionWorkspaceDragFileError.sourceNotFound
+    }
+    let matches = windows.filter {
+        (axValue($0, attribute: kAXTitleAttribute) as? String) == title
+    }
+    guard matches.count == 1, let window = matches.first else {
+        if bundleID == ActionWorkspaceDragFileRequest.scoutBundleID {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+        throw ActionWorkspaceDragFileError.sourceNotFound
+    }
+    return window
+}
+
+private func accessibilityURL(of element: AXUIElement) -> URL? {
+    let raw = axValue(element, attribute: kAXURLAttribute)
+    if let url = raw as? URL { return url }
+    if let string = raw as? String { return URL(string: string) }
+    return nil
+}
+
+private func cgBounds(of element: AXUIElement) -> CGRect? {
+    guard let bounds = bounds(of: element) else { return nil }
+    return CGRect(x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height)
 }
 
 private struct ActionAccessibilityElementMatch {
@@ -873,7 +1087,11 @@ private func bounds(of element: AXUIElement) -> ActionAccessibilityBounds? {
 
 private func firstWindowElement(for bundleId: String) throws -> AXUIElement {
     let app = try ActionNativeAutomation.runningApplication(bundleId: bundleId)
-    let application = AXUIElementCreateApplication(app.processIdentifier)
+    return try firstWindowElement(pid: app.processIdentifier)
+}
+
+private func firstWindowElement(pid: pid_t) throws -> AXUIElement {
+    let application = AXUIElementCreateApplication(pid)
 
     if let focusedWindow = axValue(application, attribute: kAXFocusedWindowAttribute),
        CFGetTypeID(focusedWindow) == AXUIElementGetTypeID() {
@@ -892,7 +1110,7 @@ private func firstWindowElement(for bundleId: String) throws -> AXUIElement {
         } ?? windows[0]
     }
 
-    throw ActionNativeAutomationError.accessibilityLookupFailed("No accessibility window found for \(bundleId)")
+    throw ActionNativeAutomationError.accessibilityLookupFailed("No accessibility window found for pid \(pid)")
 }
 
 private func windowArea(_ element: AXUIElement) -> Double {

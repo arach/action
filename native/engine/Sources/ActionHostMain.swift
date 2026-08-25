@@ -58,6 +58,7 @@ enum ActionHostCommand: String {
     case screenshotAppWindow = "screenshot-app-window"
     case activateApp = "activate-app"
     case focusWindow = "focus-window"
+    case listAppWindows = "list-app-windows"
     case typeText = "type-text"
     case typeAppText = "type-app-text"
     case pressKey = "press-key"
@@ -97,6 +98,8 @@ enum ActionHostError: LocalizedError {
     case captureFailed(String)
     case appleScriptFailed(String)
     case applicationNotRunning(String)
+    case ambiguousApplication(String)
+    case tooFewWindows(target: String, expected: Int, actual: Int)
     case applicationActivationTimedOut(expected: String, actual: String?)
     case accessibilityLookupFailed(String)
     case accessibilityActionFailed(String)
@@ -121,8 +124,12 @@ enum ActionHostError: LocalizedError {
             return detail
         case .appleScriptFailed(let detail):
             return detail
-        case .applicationNotRunning(let bundleId):
-            return "Application with bundle identifier \(bundleId) is not running"
+        case .applicationNotRunning(let target):
+            return "No running application matches \(target)"
+        case .ambiguousApplication(let detail):
+            return detail
+        case .tooFewWindows(let target, let expected, let actual):
+            return "Expected at least \(expected) window(s) for \(target), found \(actual)"
         case .applicationActivationTimedOut(let expected, let actual):
             let actualBundleId = actual ?? "none"
             return "Timed out activating \(expected); frontmost application is \(actualBundleId)"
@@ -151,12 +158,22 @@ struct CommandOptions {
         }
 
         var parsed: [String: String] = [:]
-        var iterator = arguments.dropFirst(2).makeIterator()
-        while let key = iterator.next() {
-            guard key.hasPrefix("--"), let value = iterator.next() else {
+        let rest = Array(arguments.dropFirst(2))
+        var index = 0
+        while index < rest.count {
+            let key = rest[index]
+            index += 1
+            guard key.hasPrefix("--") else {
                 continue
             }
-            parsed[String(key.dropFirst(2))] = value
+            // A bare flag — followed by another option or the end of the argument list —
+            // reads as boolean true, so callers can write `--raise` instead of `--raise true`.
+            if index < rest.count, !rest[index].hasPrefix("--") {
+                parsed[String(key.dropFirst(2))] = rest[index]
+                index += 1
+            } else {
+                parsed[String(key.dropFirst(2))] = "true"
+            }
         }
 
         self.options = parsed
@@ -176,9 +193,25 @@ struct CommandOptions {
         return number
     }
 
+    func int(_ key: String, default defaultValue: Int) -> Int {
+        guard let value = options[key], let number = Int(value) else {
+            return defaultValue
+        }
+        return number
+    }
+
     func bool(_ key: String, default defaultValue: Bool) -> Bool {
-        guard let value = options[key]?.lowercased() else { return defaultValue }
-        return value == "true" || value == "1" || value == "yes"
+        guard let value = options[key] else {
+            return defaultValue
+        }
+        switch value.lowercased() {
+        case "true", "1", "yes":
+            return true
+        case "false", "0", "no":
+            return false
+        default:
+            return defaultValue
+        }
     }
 }
 
@@ -289,20 +322,66 @@ func openSettingsPane(anchor: String) {
     NSWorkspace.shared.open(url)
 }
 
+/// Resolves a bundle identifier to exactly one running process. Two processes can share a
+/// bundle id (a production install and a dev build), and silently picking one targets the
+/// wrong instance — callers must disambiguate with --pid or --bundle-path.
 func runningApplication(bundleId: String) throws -> NSRunningApplication {
-    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else {
-        throw ActionHostError.applicationNotRunning(bundleId)
+    let matches = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+    guard let app = matches.first else {
+        throw ActionHostError.applicationNotRunning("bundle identifier \(bundleId)")
+    }
+    guard matches.count == 1 else {
+        let candidates = matches
+            .map { "pid=\($0.processIdentifier) path=\($0.bundleURL?.path ?? "unknown")" }
+            .joined(separator: "; ")
+        throw ActionHostError.ambiguousApplication(
+            "\(matches.count) running applications share bundle identifier \(bundleId); target one with --pid or --bundle-path: \(candidates)"
+        )
     }
 
     return app
 }
 
-func activateApplication(bundleId: String) throws {
-    _ = try runningApplication(bundleId: bundleId)
+/// Resolves the target application for app-scoped commands from --pid, --bundle-path, or
+/// --bundle-id, in that order. Pid and bundle path each name exactly one process; bundle id
+/// resolution fails closed when more than one process shares the identifier.
+func resolveTargetApplication(from options: CommandOptions) throws -> NSRunningApplication {
+    if let pidOption = options.options["pid"] {
+        guard let pid = Int32(pidOption) else {
+            throw ActionHostError.missingOption("--pid (must be a process id)")
+        }
+        return try ActionNativeAutomation.runningApplication(pid: pid)
+    }
 
+    if let bundlePath = options.options["bundle-path"], !bundlePath.isEmpty {
+        return try ActionNativeAutomation.runningApplication(bundlePath: bundlePath)
+    }
+
+    return try runningApplication(bundleId: try options.required("bundle-id"))
+}
+
+func targetLabel(for app: NSRunningApplication) -> String {
+    app.bundleIdentifier ?? app.bundleURL?.path ?? "pid \(app.processIdentifier)"
+}
+
+func activationPolicyLabel(_ policy: NSApplication.ActivationPolicy) -> String {
+    switch policy {
+    case .regular:
+        return "regular"
+    case .accessory:
+        return "accessory"
+    case .prohibited:
+        return "prohibited"
+    @unknown default:
+        return "unknown"
+    }
+}
+
+func activateApplication(app: NSRunningApplication) throws {
+    let label = targetLabel(for: app)
     guard let executableURL = Bundle.main.executableURL else {
         throw ActionHostError.applicationActivationTimedOut(
-            expected: bundleId,
+            expected: label,
             actual: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         )
     }
@@ -311,8 +390,8 @@ func activateApplication(bundleId: String) throws {
     process.executableURL = executableURL
     process.arguments = [
         ActionHostCommand.requestApplicationActivation.rawValue,
-        "--bundle-id",
-        bundleId,
+        "--pid",
+        String(app.processIdentifier),
     ]
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
@@ -321,7 +400,7 @@ func activateApplication(bundleId: String) throws {
 
     guard process.terminationStatus == 0 else {
         throw ActionHostError.applicationActivationTimedOut(
-            expected: bundleId,
+            expected: label,
             actual: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         )
     }
@@ -349,8 +428,34 @@ func activateApplicationAndWait(
     timeoutMilliseconds: Double,
     logger: DebugLogger
 ) async throws {
+    try await activateApplicationAndWait(
+        app: try runningApplication(bundleId: bundleId),
+        timeoutMilliseconds: timeoutMilliseconds,
+        logger: logger
+    )
+}
+
+@MainActor
+func activateApplicationAndWait(
+    app: NSRunningApplication,
+    timeoutMilliseconds: Double,
+    logger: DebugLogger
+) async throws {
+    let label = targetLabel(for: app)
+
+    // Only regular apps ever become NSWorkspace.frontmostApplication. Accessory /
+    // LSUIElement apps (menubar apps, floating panels) would time that wait out every
+    // time, so they get their windows raised in place instead.
+    guard app.activationPolicy == .regular else {
+        let raised = ActionNativeAutomation.raiseAllWindows(pid: app.processIdentifier)
+        logger.log(
+            "activate-app: requested=\(label) policy=\(activationPolicyLabel(app.activationPolicy)) raised-windows=\(raised) (no frontmost wait for non-regular apps)"
+        )
+        return
+    }
+
     let frontmostBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
-    logger.log("activate-app: requested=\(bundleId) frontmost-before=\(frontmostBefore)")
+    logger.log("activate-app: requested=\(label) frontmost-before=\(frontmostBefore)")
 
     let boundedTimeout = max(100, timeoutMilliseconds)
     let deadline = Date().addingTimeInterval(boundedTimeout / 1_000)
@@ -363,31 +468,31 @@ func activateApplicationAndWait(
         attempts += 1
         let requestError: Error?
         do {
-            try activateApplication(bundleId: bundleId)
+            try activateApplication(app: app)
             requestError = nil
         } catch {
             requestError = error
         }
 
         let settleDeadline = min(deadline, Date().addingTimeInterval(0.5))
-        var frontmostAfter = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        while frontmostAfter != bundleId, Date() < settleDeadline {
+        var frontmostAfter = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        while frontmostAfter != app.processIdentifier, Date() < settleDeadline {
             try await Task.sleep(for: .milliseconds(50))
-            frontmostAfter = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            frontmostAfter = NSWorkspace.shared.frontmostApplication?.processIdentifier
         }
 
-        if frontmostAfter == bundleId {
-            logger.log("activate-app: confirmed requested=\(bundleId) attempts=\(attempts)")
+        if frontmostAfter == app.processIdentifier {
+            logger.log("activate-app: confirmed requested=\(label) attempts=\(attempts)")
             return
         }
 
         if Date() >= deadline {
-            let frontmostBundleId = frontmostAfter ?? "none"
+            let frontmostBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
             let requestDetail = requestError.map { " last-error=\($0.localizedDescription)" } ?? ""
             logger.log(
-                "activate-app: timed-out requested=\(bundleId) frontmost=\(frontmostBundleId) attempts=\(attempts) timeout-ms=\(Int(boundedTimeout))\(requestDetail)"
+                "activate-app: timed-out requested=\(label) frontmost=\(frontmostBundleId) attempts=\(attempts) timeout-ms=\(Int(boundedTimeout))\(requestDetail)"
             )
-            throw ActionHostError.applicationActivationTimedOut(expected: bundleId, actual: frontmostAfter)
+            throw ActionHostError.applicationActivationTimedOut(expected: label, actual: frontmostBundleId)
         }
 
         try await Task.sleep(for: .milliseconds(100))
@@ -870,6 +975,170 @@ func getWindowFrame(bundleId: String) throws -> CGRect {
         throw ActionHostError.accessibilityLookupFailed("Failed to read window frame for \(bundleId)")
     }
     return CGRect(origin: position, size: size)
+}
+
+struct AppWindowSnapshot: Encodable {
+    let id: Int?
+    let title: String?
+    let role: String?
+    let subrole: String?
+    let layer: Int?
+    let frame: OverlayBounds?
+    let isOnScreen: Bool?
+    let source: String
+    let raised: Bool
+}
+
+struct AppWindowsResponse: Encodable {
+    let status: String
+    let pid: Int
+    let bundleId: String?
+    let bundlePath: String?
+    let activationPolicy: String
+    let windowCount: Int
+    let raisedCount: Int
+    let windows: [AppWindowSnapshot]
+}
+
+private struct AXListedWindow {
+    let title: String?
+    let role: String?
+    let subrole: String?
+    let frame: CGRect?
+    let raised: Bool
+}
+
+/// Lists every window-server and accessibility window one process owns, with no layer or
+/// size filtering: floating note panels, detached chrome, and status items all count as
+/// windows. `raise` orders each accessibility window front (AXMain + AXRaise) without
+/// activating the app, so an accessory / LSUIElement target comes forward for screenshots
+/// and clicks without ever needing to become the frontmost application.
+func listAppWindows(
+    app: NSRunningApplication,
+    raise: Bool,
+    minWindows: Int,
+    logger: DebugLogger
+) throws -> AppWindowsResponse {
+    let pid = app.processIdentifier
+    let application = AXUIElementCreateApplication(pid)
+    let axWindows = (axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement]) ?? []
+
+    var axListed: [AXListedWindow] = []
+    for window in axWindows {
+        var raised = false
+        if raise {
+            _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+            raised = AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success
+        }
+        let position = point(from: axValue(window, attribute: kAXPositionAttribute))
+        let size = size(from: axValue(window, attribute: kAXSizeAttribute))
+        var frame: CGRect?
+        if let position, let size {
+            frame = CGRect(origin: position, size: size)
+        }
+        axListed.append(
+            AXListedWindow(
+                title: axValue(window, attribute: kAXTitleAttribute) as? String,
+                role: axValue(window, attribute: kAXRoleAttribute) as? String,
+                subrole: axValue(window, attribute: kAXSubroleAttribute) as? String,
+                frame: frame,
+                raised: raised
+            )
+        )
+    }
+
+    // The window server list is authoritative for existence, ids, and layers; the AX list
+    // carries titles, roles, and the raise handle. Entries are matched by frame and merged
+    // so a window missing from either side is still reported rather than dropped.
+    let windowList = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    var snapshots: [AppWindowSnapshot] = []
+    var matchedAXIndices = Set<Int>()
+
+    for info in windowList {
+        guard (info[kCGWindowOwnerPID as String] as? pid_t) == pid else {
+            continue
+        }
+
+        let windowFrame = rect(from: info)
+        let axIndex = axListed.indices.first { index in
+            guard !matchedAXIndices.contains(index),
+                  let axFrame = axListed[index].frame,
+                  let windowFrame else {
+                return false
+            }
+            return abs(axFrame.origin.x - windowFrame.origin.x) <= 2
+                && abs(axFrame.origin.y - windowFrame.origin.y) <= 2
+                && abs(axFrame.width - windowFrame.width) <= 2
+                && abs(axFrame.height - windowFrame.height) <= 2
+        }
+
+        var title = info[kCGWindowName as String] as? String
+        var role: String?
+        var subrole: String?
+        var raised = false
+        var source = "cg"
+        if let axIndex {
+            matchedAXIndices.insert(axIndex)
+            let ax = axListed[axIndex]
+            if let axTitle = ax.title, !axTitle.isEmpty {
+                title = axTitle
+            }
+            role = ax.role
+            subrole = ax.subrole
+            raised = ax.raised
+            source = "cg+ax"
+        }
+
+        snapshots.append(
+            AppWindowSnapshot(
+                id: info[kCGWindowNumber as String] as? Int,
+                title: title,
+                role: role,
+                subrole: subrole,
+                layer: info[kCGWindowLayer as String] as? Int,
+                frame: windowFrame.map(overlayBounds(from:)),
+                isOnScreen: (info[kCGWindowIsOnscreen as String] as? Bool) ?? false,
+                source: source,
+                raised: raised
+            )
+        )
+    }
+
+    for (index, ax) in axListed.enumerated() where !matchedAXIndices.contains(index) {
+        snapshots.append(
+            AppWindowSnapshot(
+                id: nil,
+                title: ax.title,
+                role: ax.role,
+                subrole: ax.subrole,
+                layer: nil,
+                frame: ax.frame.map(overlayBounds(from:)),
+                isOnScreen: nil,
+                source: "ax",
+                raised: ax.raised
+            )
+        )
+    }
+
+    let label = targetLabel(for: app)
+    logger.log(
+        "list-app-windows: target=\(label) pid=\(pid) windows=\(snapshots.count) ax=\(axListed.count) raise=\(raise)"
+    )
+
+    guard snapshots.count >= minWindows else {
+        throw ActionHostError.tooFewWindows(target: label, expected: minWindows, actual: snapshots.count)
+    }
+
+    return AppWindowsResponse(
+        status: "app-windows",
+        pid: Int(pid),
+        bundleId: app.bundleIdentifier,
+        bundlePath: app.bundleURL?.path,
+        activationPolicy: activationPolicyLabel(app.activationPolicy),
+        windowCount: snapshots.count,
+        raisedCount: snapshots.filter(\.raised).count,
+        windows: snapshots
+    )
 }
 
 func findButton(in root: AXUIElement, label: String) -> AXUIElement? {
@@ -3775,14 +4044,18 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             throw ActionHostError.unsupportedOS("Window screenshots require macOS 14.0 or newer.")
         }
 
-        let bundleId = try options.required("bundle-id")
+        let app = try resolveTargetApplication(from: options)
         let outputPath = try options.required("output")
+        var params: [String: String] = [
+            "pid": String(app.processIdentifier),
+            "output": outputPath,
+        ]
+        if let bundleId = app.bundleIdentifier {
+            params["bundleId"] = bundleId
+        }
         let response = try await agentBridge.send(
             method: .screenshotAppWindow,
-            params: [
-                "bundleId": bundleId,
-                "output": outputPath,
-            ]
+            params: params
         )
         try writer.write(
             ActionHostResponse(
@@ -3825,25 +4098,26 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             )
         )
     case .activateApp:
-        let bundleId = try options.required("bundle-id")
+        let app = try resolveTargetApplication(from: options)
         try await activateApplicationAndWait(
-            bundleId: bundleId,
+            app: app,
             timeoutMilliseconds: options.double("timeout-ms", default: 3_000),
             logger: logger
         )
-        try writer.write(ActionHostResponse(status: "activated", outputPath: nil, detail: bundleId))
+        try writer.write(ActionHostResponse(status: "activated", outputPath: nil, detail: targetLabel(for: app)))
     case .focusWindow:
-        let bundleId = try options.required("bundle-id")
+        let app = try resolveTargetApplication(from: options)
+        let label = targetLabel(for: app)
         let requestedTitle = options.options["title"].flatMap { $0.isEmpty ? nil : $0 }
         var focusedTitle: String?
         if let requestedTitle {
             // Raise before activating so the app comes forward with the requested window on top.
             // A title that matches nothing throws here rather than quietly focusing some other window.
-            focusedTitle = try ActionNativeAutomation.raiseWindow(bundleId: bundleId, matching: requestedTitle)
-            logger.log("focus-window: raised bundle=\(bundleId) title=\(focusedTitle ?? requestedTitle)")
+            focusedTitle = try ActionNativeAutomation.raiseWindow(pid: app.processIdentifier, matching: requestedTitle)
+            logger.log("focus-window: raised target=\(label) title=\(focusedTitle ?? requestedTitle)")
         }
         try await activateApplicationAndWait(
-            bundleId: bundleId,
+            app: app,
             timeoutMilliseconds: options.double("timeout-ms", default: 3_000),
             logger: logger
         )
@@ -3851,7 +4125,7 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             ActionHostResponse(
                 status: "focused",
                 outputPath: nil,
-                detail: focusedTitle.map { "\(bundleId): \($0)" } ?? bundleId
+                detail: focusedTitle.map { "\(label): \($0)" } ?? label
             )
         )
     case .raiseWindow:
@@ -3883,10 +4157,24 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             bounds = nil
         }
         try writer.write(windowOrder(bounds: bounds))
+    case .listAppWindows:
+        let app = try resolveTargetApplication(from: options)
+        let response = try listAppWindows(
+            app: app,
+            raise: options.bool("raise", default: false),
+            minWindows: options.int("min-windows", default: 0),
+            logger: logger
+        )
+        try writer.write(response)
     case .requestApplicationActivation:
-        let bundleId = try options.required("bundle-id")
-        try ActionNativeAutomation.activateApplication(bundleId: bundleId)
-        try writer.write(ActionHostResponse(status: "activation-requested", outputPath: nil, detail: bundleId))
+        if let pidOption = options.options["pid"], let pid = Int32(pidOption) {
+            try ActionNativeAutomation.activateApplication(pid: pid)
+            try writer.write(ActionHostResponse(status: "activation-requested", outputPath: nil, detail: "pid \(pid)"))
+        } else {
+            let bundleId = try options.required("bundle-id")
+            try ActionNativeAutomation.activateApplication(bundleId: bundleId)
+            try writer.write(ActionHostResponse(status: "activation-requested", outputPath: nil, detail: bundleId))
+        }
     case .launchApp:
         let bundleId = try options.required("bundle-id")
         let timeoutMilliseconds = options.double("timeout-ms", default: 10_000)
@@ -4170,12 +4458,12 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
     case .inspectCalculatorUI:
         try writer.write(ActionNativeAutomation.calculatorAccessibilityNodes())
     case .inspectAppUI:
-        let bundleId = try options.required("bundle-id")
+        let app = try resolveTargetApplication(from: options)
         let maxDepth = Int(options.double("max-depth", default: 6))
         let maxNodes = Int(options.double("max-nodes", default: 250))
         try writer.write(
             ActionNativeAutomation.accessibilityNodes(
-                bundleId: bundleId,
+                pid: app.processIdentifier,
                 maxDepth: maxDepth,
                 maxNodes: maxNodes
             )
