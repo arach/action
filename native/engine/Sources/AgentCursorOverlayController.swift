@@ -9,6 +9,8 @@ import Foundation
 struct AgentCursorState: Codable, Equatable {
     var x: Double?
     var y: Double?
+    /// `appkit` (legacy/default) or `quartz`. Quartz input is converted once at the overlay edge.
+    var coordinateSpace: String?
     var agent: String?
     var label: String?
     /// `idle` | `click` | `type` | `key` | `countdown`
@@ -270,6 +272,10 @@ final class AgentCursorOverlayController: NSObject {
 
     private func resolvePoint(from state: AgentCursorState) -> CGPoint {
         if let x = state.x, let y = state.y, x.isFinite, y.isFinite {
+            if state.coordinateSpace?.lowercased() == "quartz" {
+                let mainDisplayHeight = CGDisplayBounds(CGMainDisplayID()).height
+                return CGPoint(x: x, y: mainDisplayHeight - y)
+            }
             return CGPoint(x: x, y: y)
         }
         let screen = NSScreen.main ?? NSScreen.screens.first

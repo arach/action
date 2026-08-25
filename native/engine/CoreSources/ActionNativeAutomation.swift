@@ -526,6 +526,96 @@ public enum ActionNativeAutomation {
         try drag(from: start, to: end, durationMs: durationMs)
     }
 
+    /// Resolves the narrow Scout workspace drag semantically. The source is accepted only
+    /// when Finder exposes an AXURL equal to the exact run fixture URL; no filename or
+    /// coordinate fallback is used. The destination is the exact titled Scout-owned window.
+    static func resolveWorkspaceDragFile(
+        _ request: ActionWorkspaceDragFileRequest
+    ) throws -> ActionWorkspaceDragResolution {
+        let finderWindow = try exactWindowElement(
+            bundleID: "com.apple.finder",
+            title: request.finderWindowTitle
+        )
+        let requestedFinderFrame = ActionWorkspaceDragFileOperation.finderFrame(in: request.displayBounds)
+        let positionResult = AXUIElementSetAttributeValue(
+            finderWindow,
+            kAXPositionAttribute as CFString,
+            pointValue(requestedFinderFrame.origin)
+        )
+        let sizeResult = AXUIElementSetAttributeValue(
+            finderWindow,
+            kAXSizeAttribute as CFString,
+            sizeValue(requestedFinderFrame.size)
+        )
+        guard positionResult == .success, sizeResult == .success else {
+            throw ActionWorkspaceDragFileError.sourceNotFound
+        }
+        usleep(120_000)
+        guard let finderFrame = cgBounds(of: finderWindow) else {
+            throw ActionWorkspaceDragFileError.sourceNotFound
+        }
+
+        let expectedURL = request.fixtureURL.resolvingSymlinksInPath().standardizedFileURL
+        var queue = [finderWindow]
+        var visited = 0
+        var sourceFrames: [CGRect] = []
+        while let current = queue.first {
+            queue.removeFirst()
+            visited += 1
+            if visited > 2_000 { break }
+
+            if let candidateURL = accessibilityURL(of: current),
+               candidateURL.resolvingSymlinksInPath().standardizedFileURL == expectedURL,
+               let frame = cgBounds(of: current) {
+                sourceFrames.append(frame)
+            }
+            queue.append(contentsOf: axChildren(of: current))
+        }
+        guard sourceFrames.count == 1, let sourceFrame = sourceFrames.first else {
+            throw ActionWorkspaceDragFileError.sourceNotFound
+        }
+
+        let destinationWindow = try exactWindowElement(
+            bundleID: request.destinationBundleID,
+            title: request.destinationWindowTitle
+        )
+        guard let destinationFrame = cgBounds(of: destinationWindow) else {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+        var destinationQueue = [destinationWindow]
+        var destinationVisited = 0
+        var destinationTargetFrames: [CGRect] = []
+        while let current = destinationQueue.first {
+            destinationQueue.removeFirst()
+            destinationVisited += 1
+            if destinationVisited > 2_000 { break }
+            if (axValue(current, attribute: kAXIdentifierAttribute) as? String)
+                == request.destinationAXIdentifier,
+               let frame = cgBounds(of: current) {
+                destinationTargetFrames.append(frame)
+            }
+            destinationQueue.append(contentsOf: axChildren(of: current))
+        }
+        guard destinationTargetFrames.count == 1, let destinationTargetFrame = destinationTargetFrames.first else {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+
+        return ActionWorkspaceDragResolution(
+            source: CGPoint(x: sourceFrame.midX, y: sourceFrame.midY),
+            destination: CGPoint(x: destinationTargetFrame.midX, y: destinationTargetFrame.midY),
+            finderWindowFrame: finderFrame,
+            destinationWindowFrame: destinationFrame
+        )
+    }
+
+    static func closeWorkspaceFinderWindow(title: String) throws {
+        let window = try exactWindowElement(bundleID: "com.apple.finder", title: title)
+        guard let closeButton = axValue(window, attribute: kAXCloseButtonAttribute) else {
+            return
+        }
+        _ = AXUIElementPerformAction(closeButton as! AXUIElement, kAXPressAction as CFString)
+    }
+
     public static func calculatorDisplayValue() throws -> String {
         let window = try firstWindowElement(for: "com.apple.calculator")
         var queue = [window]
@@ -603,6 +693,47 @@ public enum ActionNativeAutomation {
 
         return result
     }
+}
+
+private func exactWindowElement(bundleID: String, title: String) throws -> AXUIElement {
+    let app: NSRunningApplication
+    do {
+        app = try ActionNativeAutomation.runningApplication(bundleId: bundleID)
+    } catch {
+        if bundleID == ActionWorkspaceDragFileRequest.scoutBundleID {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+        throw ActionWorkspaceDragFileError.sourceNotFound
+    }
+    let application = AXUIElementCreateApplication(app.processIdentifier)
+    guard let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement] else {
+        if bundleID == ActionWorkspaceDragFileRequest.scoutBundleID {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+        throw ActionWorkspaceDragFileError.sourceNotFound
+    }
+    let matches = windows.filter {
+        (axValue($0, attribute: kAXTitleAttribute) as? String) == title
+    }
+    guard matches.count == 1, let window = matches.first else {
+        if bundleID == ActionWorkspaceDragFileRequest.scoutBundleID {
+            throw ActionWorkspaceDragFileError.destinationNotFound
+        }
+        throw ActionWorkspaceDragFileError.sourceNotFound
+    }
+    return window
+}
+
+private func accessibilityURL(of element: AXUIElement) -> URL? {
+    let raw = axValue(element, attribute: kAXURLAttribute)
+    if let url = raw as? URL { return url }
+    if let string = raw as? String { return URL(string: string) }
+    return nil
+}
+
+private func cgBounds(of element: AXUIElement) -> CGRect? {
+    guard let bounds = bounds(of: element) else { return nil }
+    return CGRect(x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height)
 }
 
 private struct ActionAccessibilityElementMatch {

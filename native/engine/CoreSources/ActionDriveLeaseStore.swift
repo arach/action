@@ -8,6 +8,9 @@ enum ActionDriveLeaseError: LocalizedError {
     case leaseNotActive(String)
     case ambiguousLease
     case attentionApprovalRequired
+    case systemPointerBusy
+    case capabilityUnavailable(String)
+    case runScopeMismatch
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +26,12 @@ enum ActionDriveLeaseError: LocalizedError {
             return "Multiple drive leases are active for this client; pass leaseId explicitly"
         case .attentionApprovalRequired:
             return "Foreground keyboard or pointer control requires an approved attention lease"
+        case .systemPointerBusy:
+            return "The global system-pointer resource is already leased"
+        case .capabilityUnavailable(let capability):
+            return "Drive capability is unavailable or already consumed: \(capability)"
+        case .runScopeMismatch:
+            return "Drive request does not match the lease workflow run and workspace"
         }
     }
 }
@@ -42,6 +51,13 @@ struct ActionDriveLease: Codable, Equatable, Sendable {
     var implicit: Bool?
     var stopFile: String
     var lastAxTier: String?
+    var workflowRunId: String?
+    var workspaceId: String?
+    var capabilities: [String]?
+    var resources: [String]?
+    var consumedCapabilities: [String]?
+    var lastOperationId: String?
+    var operationStopFile: String?
 }
 
 struct ActionDriveBeginResult: Sendable {
@@ -100,6 +116,7 @@ actor ActionDriveLeaseStore {
             loaded[leaseID] = record
             try? Self.persist(record, rootURL: rootURL)
             Self.signalStop(for: record.lease)
+            Self.signalOperationStop(for: record.lease)
             if publishesPresence {
                 ActionDrivePresencePublisher.remove(leaseID: leaseID)
             }
@@ -113,7 +130,12 @@ actor ActionDriveLeaseStore {
         task rawTask: String,
         mode rawMode: String?,
         sessionID rawSessionID: String?,
-        implicit: Bool
+        implicit: Bool,
+        attentionApproval: String? = nil,
+        capability: String? = nil,
+        resource: String? = nil,
+        workflowRunID rawWorkflowRunID: String? = nil,
+        workspaceID rawWorkspaceID: String? = nil
     ) throws -> ActionDriveBeginResult {
         let at = now()
         try sweep(at: at)
@@ -138,28 +160,28 @@ actor ActionDriveLeaseStore {
         try? FileManager.default.removeItem(atPath: stopFile)
         let atString = actionDriveISO8601(at)
 
+        let workflowRunID = rawWorkflowRunID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let workspaceID = rawWorkspaceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var grantedCapabilities: [String]?
+        var grantedResources: [String]?
         if mode == "attention" {
-            let reason = "Attention mode requires operator approval, which is not available yet. Use background mode."
-            let lease = ActionDriveLease(
-                leaseId: leaseID,
-                agent: agent,
-                task: task,
-                mode: mode,
-                status: "denied",
-                sessionId: resolvedSessionID,
-                startedAt: atString,
-                lastActAt: atString,
-                releasedAt: atString,
-                outcome: "cancelled",
-                summary: reason,
-                implicit: implicit ? true : nil,
-                stopFile: stopFile,
-                lastAxTier: nil
-            )
-            let record = ActionStoredDriveLease(ownerID: ownerID, lease: lease)
-            records[leaseID] = record
-            try persist(record)
-            return ActionDriveBeginResult(status: "denied", lease: lease, reason: reason)
+            guard attentionApproval == "approved",
+                  capability == ActionWorkspaceDragFileRequest.capability,
+                  resource == ActionWorkspaceDragFileRequest.systemPointerResource,
+                  let workflowRunID,
+                  actionDriveIsValidIdentifier(workflowRunID),
+                  let workspaceID,
+                  actionDriveIsValidIdentifier(workspaceID) else {
+                throw ActionDriveLeaseError.attentionApprovalRequired
+            }
+            guard !records.values.contains(where: {
+                $0.lease.status == "driving"
+                    && ($0.lease.resources ?? []).contains(ActionWorkspaceDragFileRequest.systemPointerResource)
+            }) else {
+                throw ActionDriveLeaseError.systemPointerBusy
+            }
+            grantedCapabilities = [ActionWorkspaceDragFileRequest.capability]
+            grantedResources = [ActionWorkspaceDragFileRequest.systemPointerResource]
         }
 
         let lease = ActionDriveLease(
@@ -176,7 +198,14 @@ actor ActionDriveLeaseStore {
             summary: nil,
             implicit: implicit ? true : nil,
             stopFile: stopFile,
-            lastAxTier: nil
+            lastAxTier: nil,
+            workflowRunId: workflowRunID,
+            workspaceId: workspaceID,
+            capabilities: grantedCapabilities,
+            resources: grantedResources,
+            consumedCapabilities: nil,
+            lastOperationId: nil,
+            operationStopFile: nil
         )
         let record = ActionStoredDriveLease(ownerID: ownerID, lease: lease)
         records[leaseID] = record
@@ -192,6 +221,68 @@ actor ActionDriveLeaseStore {
             throw error
         }
         return ActionDriveBeginResult(status: "granted", lease: lease, reason: nil)
+    }
+
+    /// Atomically verifies connection ownership and consumes the one-shot pointer capability.
+    /// The actor boundary makes capability consumption and global resource ownership indivisible.
+    func authorizeWorkspaceDrag(
+        ownerID: String,
+        leaseID: String,
+        operationID: String,
+        workflowRunID: String,
+        workspaceID: String
+    ) throws -> ActionDriveLease {
+        let at = now()
+        try sweep(at: at)
+        guard actionDriveIsValidIdentifier(operationID) else {
+            throw ActionDriveLeaseError.invalidInput("workspace.dragFile requires a valid operationId")
+        }
+        guard var record = try resolveActiveRecord(ownerID: ownerID, leaseID: leaseID) else {
+            throw ActionDriveLeaseError.unknownLease(leaseID)
+        }
+        guard record.lease.mode == "attention",
+              (record.lease.resources ?? []).contains(ActionWorkspaceDragFileRequest.systemPointerResource),
+              (record.lease.capabilities ?? []).contains(ActionWorkspaceDragFileRequest.capability) else {
+            throw ActionDriveLeaseError.attentionApprovalRequired
+        }
+        guard record.lease.workflowRunId == workflowRunID,
+              record.lease.workspaceId == workspaceID else {
+            throw ActionDriveLeaseError.runScopeMismatch
+        }
+        guard !(record.lease.consumedCapabilities ?? []).contains(ActionWorkspaceDragFileRequest.capability) else {
+            throw ActionDriveLeaseError.capabilityUnavailable(ActionWorkspaceDragFileRequest.capability)
+        }
+
+        record.lease.consumedCapabilities = [ActionWorkspaceDragFileRequest.capability]
+        record.lease.lastOperationId = operationID
+        let operationStopFile = rootURL.appendingPathComponent(
+            "\(actionDriveSanitize(leaseID)).\(actionDriveSanitize(operationID)).operation.stop"
+        ).path
+        try? FileManager.default.removeItem(atPath: operationStopFile)
+        record.lease.operationStopFile = operationStopFile
+        record.lease.lastAxTier = "attention"
+        record.lease.lastActAt = actionDriveISO8601(at)
+        records[leaseID] = record
+        try persist(record)
+        try publishPresence(for: record.lease, at: at)
+        return record.lease
+    }
+
+    func cancelWorkspaceOperation(
+        ownerID: String,
+        leaseID: String,
+        operationID: String
+    ) throws -> ActionDriveLease {
+        try sweep(at: now())
+        guard let record = try resolveActiveRecord(ownerID: ownerID, leaseID: leaseID) else {
+            throw ActionDriveLeaseError.unknownLease(leaseID)
+        }
+        guard record.lease.lastOperationId == operationID,
+              let operationStopFile = record.lease.operationStopFile else {
+            throw ActionDriveLeaseError.runScopeMismatch
+        }
+        Self.signalStop(atPath: operationStopFile)
+        return record.lease
     }
 
     func touch(
@@ -223,6 +314,8 @@ actor ActionDriveLeaseStore {
             record.lease.summary = "Supervision presence became unavailable"
             records[record.lease.leaseId] = record
             try? persist(record)
+            Self.signalStop(for: record.lease)
+            Self.signalOperationStop(for: record.lease)
             if publishesPresence {
                 ActionDrivePresencePublisher.remove(leaseID: record.lease.leaseId)
             }
@@ -261,6 +354,7 @@ actor ActionDriveLeaseStore {
         records[leaseID] = record
         try persist(record)
         Self.signalStop(for: record.lease)
+        Self.signalOperationStop(for: record.lease)
         try publishPresence(for: record.lease, at: at)
         return record.lease
     }
@@ -278,6 +372,7 @@ actor ActionDriveLeaseStore {
             records[leaseID] = record
             try? persist(record)
             Self.signalStop(for: record.lease)
+            Self.signalOperationStop(for: record.lease)
             try? publishPresence(for: record.lease, at: at)
         }
     }
@@ -330,6 +425,7 @@ actor ActionDriveLeaseStore {
                     records[leaseID] = record
                     try persist(record)
                     Self.signalStop(for: record.lease)
+                    Self.signalOperationStop(for: record.lease)
                     try publishPresence(for: record.lease, at: at)
                 } else {
                     try publishPresence(for: record.lease, at: at)
@@ -344,6 +440,9 @@ actor ActionDriveLeaseStore {
             records.removeValue(forKey: leaseID)
             try? FileManager.default.removeItem(at: recordURL(for: leaseID))
             try? FileManager.default.removeItem(atPath: record.lease.stopFile)
+            if let operationStopFile = record.lease.operationStopFile {
+                try? FileManager.default.removeItem(atPath: operationStopFile)
+            }
             if publishesPresence {
                 ActionDrivePresencePublisher.remove(leaseID: leaseID)
             }
@@ -390,7 +489,16 @@ actor ActionDriveLeaseStore {
     }
 
     private static func signalStop(for lease: ActionDriveLease) {
-        let url = URL(fileURLWithPath: lease.stopFile)
+        signalStop(atPath: lease.stopFile)
+    }
+
+    private static func signalOperationStop(for lease: ActionDriveLease) {
+        guard let operationStopFile = lease.operationStopFile else { return }
+        signalStop(atPath: operationStopFile)
+    }
+
+    private static func signalStop(atPath path: String) {
+        let url = URL(fileURLWithPath: path)
         try? FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -634,6 +742,13 @@ private func actionDriveSanitize(_ raw: String) -> String {
         with: "_",
         options: .regularExpression
     )
+}
+
+private func actionDriveIsValidIdentifier(_ raw: String) -> Bool {
+    guard !raw.isEmpty, raw.count <= 200 else {
+        return false
+    }
+    return raw.range(of: #"^[A-Za-z0-9._:@-]+$"#, options: .regularExpression) != nil
 }
 
 private extension String {
