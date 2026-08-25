@@ -45,11 +45,40 @@ public func actionShareableContent() async throws -> SCShareableContent {
 
 public func actionBestWindowSelection(for bundleId: String) async throws -> ActionWindowSelection {
     let content = try await actionShareableContent()
-
     let candidates = content.windows.filter { window in
         window.owningApplication?.bundleIdentifier == bundleId && window.isOnScreen && window.windowLayer == 0
     }
+    return try actionSelectWindow(from: candidates, content: content, target: bundleId)
+}
 
+/// Pid targeting names one process exactly, so it takes any window that process owns:
+/// accessory-app panels live above layer 0 and would vanish behind the layer filter that
+/// bundle-id targeting keeps for regular apps. The largest window wins outright — an
+/// accessory app's detached chrome (title rails, toolbars) can report as active, and the
+/// panel it belongs to is the surface worth capturing.
+public func actionBestWindowSelection(pid: pid_t) async throws -> ActionWindowSelection {
+    let content = try await actionShareableContent()
+    let candidates = content.windows.filter { window in
+        window.owningApplication?.processID == pid && window.isOnScreen
+    }
+
+    guard let largest = candidates.max(by: { lhs, rhs in
+        lhs.frame.width * lhs.frame.height < rhs.frame.width * rhs.frame.height
+    }) else {
+        throw ActionCaptureError.windowNotFound("pid \(pid)")
+    }
+    guard let display = actionDisplayContaining(window: largest, displays: content.displays) else {
+        throw ActionCaptureError.windowNotFound("pid \(pid)")
+    }
+
+    return ActionWindowSelection(content: content, window: largest, display: display)
+}
+
+private func actionSelectWindow(
+    from candidates: [SCWindow],
+    content: SCShareableContent,
+    target: String
+) throws -> ActionWindowSelection {
     let selectedWindow: SCWindow
 
     if let active = candidates.first(where: \.isActive) {
@@ -59,11 +88,11 @@ public func actionBestWindowSelection(for bundleId: String) async throws -> Acti
     }) {
         selectedWindow = largest
     } else {
-        throw ActionCaptureError.windowNotFound(bundleId)
+        throw ActionCaptureError.windowNotFound(target)
     }
 
     guard let display = actionDisplayContaining(window: selectedWindow, displays: content.displays) else {
-        throw ActionCaptureError.windowNotFound(bundleId)
+        throw ActionCaptureError.windowNotFound(target)
     }
 
     return ActionWindowSelection(content: content, window: selectedWindow, display: display)
@@ -86,13 +115,22 @@ public func actionRegionSelection(for rect: CGRect, displays: [SCDisplay]) -> Ac
 }
 
 public func actionCaptureAppWindowScreenshot(bundleId: String, outputPath: String) async throws {
+    let selection = try await actionBestWindowSelection(for: bundleId)
+    try actionWriteWindowScreenshot(selection: selection, outputPath: outputPath)
+}
+
+public func actionCaptureAppWindowScreenshot(pid: pid_t, outputPath: String) async throws {
+    let selection = try await actionBestWindowSelection(pid: pid)
+    try actionWriteWindowScreenshot(selection: selection, outputPath: outputPath)
+}
+
+private func actionWriteWindowScreenshot(selection: ActionWindowSelection, outputPath: String) throws {
     let outputURL = URL(fileURLWithPath: outputPath)
     try FileManager.default.createDirectory(
         at: outputURL.deletingLastPathComponent(),
         withIntermediateDirectories: true
     )
 
-    let selection = try await actionBestWindowSelection(for: bundleId)
     let window = selection.window
     guard let image = CGWindowListCreateImage(
         .null,

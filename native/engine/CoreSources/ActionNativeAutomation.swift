@@ -75,14 +75,17 @@ public struct ActionAccessibilityBounds: Codable, Sendable {
 
 public enum ActionNativeAutomationError: LocalizedError {
     case applicationNotRunning(String)
+    case ambiguousApplication(String)
     case accessibilityLookupFailed(String)
     case accessibilityActionFailed(String)
     case dragPathNotFound(String)
 
     public var errorDescription: String? {
         switch self {
-        case .applicationNotRunning(let bundleId):
-            return "Application with bundle identifier \(bundleId) is not running"
+        case .applicationNotRunning(let target):
+            return "No running application matches \(target)"
+        case .ambiguousApplication(let detail):
+            return detail
         case .accessibilityLookupFailed(let detail):
             return detail
         case .accessibilityActionFailed(let detail):
@@ -107,7 +110,11 @@ public enum ActionNativeAutomation {
 
     public static func activateApplication(bundleId: String) throws {
         let app = try runningApplication(bundleId: bundleId)
-        let application = AXUIElementCreateApplication(app.processIdentifier)
+        try activateApplication(pid: app.processIdentifier)
+    }
+
+    public static func activateApplication(pid: pid_t) throws {
+        let application = AXUIElementCreateApplication(pid)
         let result = AXUIElementSetAttributeValue(
             application,
             kAXFrontmostAttribute as CFString,
@@ -115,7 +122,7 @@ public enum ActionNativeAutomation {
         )
         guard result == .success else {
             throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Failed to activate \(bundleId): \(result.rawValue)"
+                "Failed to activate pid \(pid): \(result.rawValue)"
             )
         }
     }
@@ -126,12 +133,17 @@ public enum ActionNativeAutomation {
     @discardableResult
     public static func raiseWindow(bundleId: String, matching title: String) throws -> String {
         let app = try runningApplication(bundleId: bundleId)
-        let application = AXUIElementCreateApplication(app.processIdentifier)
+        return try raiseWindow(pid: app.processIdentifier, matching: title)
+    }
+
+    @discardableResult
+    public static func raiseWindow(pid: pid_t, matching title: String) throws -> String {
+        let application = AXUIElementCreateApplication(pid)
 
         guard let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
               !windows.isEmpty else {
             throw ActionNativeAutomationError.accessibilityLookupFailed(
-                "No accessibility windows found for \(bundleId)"
+                "No accessibility windows found for pid \(pid)"
             )
         }
 
@@ -144,7 +156,7 @@ public enum ActionNativeAutomation {
         guard let match else {
             let available = titles.filter { !$0.isEmpty }.map { "\"\($0)\"" }.joined(separator: ", ")
             throw ActionNativeAutomationError.accessibilityLookupFailed(
-                "No window titled \"\(title)\" in \(bundleId); open windows: \(available.isEmpty ? "none" : available)"
+                "No window titled \"\(title)\" in pid \(pid); open windows: \(available.isEmpty ? "none" : available)"
             )
         }
 
@@ -153,7 +165,7 @@ public enum ActionNativeAutomation {
         let raise = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
         guard raise == .success else {
             throw ActionNativeAutomationError.accessibilityActionFailed(
-                "Failed to raise window \"\(titles[match])\" in \(bundleId): \(raise.rawValue)"
+                "Failed to raise window \"\(titles[match])\" in pid \(pid): \(raise.rawValue)"
             )
         }
 
@@ -211,12 +223,74 @@ public enum ActionNativeAutomation {
         return CGRect(origin: position, size: size)
     }
 
+    /// Resolves a bundle identifier to exactly one running process. Two processes can share a
+    /// bundle id (a production install and a dev build of the same app), and silently picking
+    /// one targets the wrong instance — the caller must disambiguate with pid or bundle path.
     public static func runningApplication(bundleId: String) throws -> NSRunningApplication {
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else {
-            throw ActionNativeAutomationError.applicationNotRunning(bundleId)
+        let matches = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+        guard let app = matches.first else {
+            throw ActionNativeAutomationError.applicationNotRunning("bundle identifier \(bundleId)")
+        }
+        guard matches.count == 1 else {
+            let candidates = matches
+                .map { "pid=\($0.processIdentifier) path=\($0.bundleURL?.path ?? "unknown")" }
+                .joined(separator: "; ")
+            throw ActionNativeAutomationError.ambiguousApplication(
+                "\(matches.count) running applications share bundle identifier \(bundleId); target one by pid or bundle path: \(candidates)"
+            )
         }
 
         return app
+    }
+
+    public static func runningApplication(pid: pid_t) throws -> NSRunningApplication {
+        guard let app = NSRunningApplication(processIdentifier: pid) else {
+            throw ActionNativeAutomationError.applicationNotRunning("pid \(pid)")
+        }
+
+        return app
+    }
+
+    public static func runningApplication(bundlePath: String) throws -> NSRunningApplication {
+        let expected = URL(fileURLWithPath: bundlePath).standardizedFileURL.resolvingSymlinksInPath().path
+        let matches = NSWorkspace.shared.runningApplications.filter { app in
+            guard let url = app.bundleURL else {
+                return false
+            }
+            return url.standardizedFileURL.resolvingSymlinksInPath().path == expected
+        }
+        guard let app = matches.first else {
+            throw ActionNativeAutomationError.applicationNotRunning("bundle path \(bundlePath)")
+        }
+        guard matches.count == 1 else {
+            let pids = matches.map { String($0.processIdentifier) }.joined(separator: ", ")
+            throw ActionNativeAutomationError.ambiguousApplication(
+                "\(matches.count) running applications share bundle path \(bundlePath) (pids \(pids)); target one by pid"
+            )
+        }
+
+        return app
+    }
+
+    /// Raises every accessibility window the process exposes without activating the app.
+    /// This is the raise path for accessory / LSUIElement apps, whose floating panels must
+    /// come forward for screenshots and clicks even though the app never becomes frontmost.
+    @discardableResult
+    public static func raiseAllWindows(pid: pid_t) -> Int {
+        let application = AXUIElementCreateApplication(pid)
+        guard let windows = axValue(application, attribute: kAXWindowsAttribute) as? [AXUIElement],
+              !windows.isEmpty else {
+            return 0
+        }
+
+        var raised = 0
+        for window in windows {
+            _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+            if AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success {
+                raised += 1
+            }
+        }
+        return raised
     }
 
     public static func calculatorButtons() throws -> [ActionCalculatorButtonSnapshot] {
@@ -570,7 +644,16 @@ public enum ActionNativeAutomation {
         maxDepth: Int = 6,
         maxNodes: Int = 250
     ) throws -> [ActionAccessibilityNodeSnapshot] {
-        let window = try firstWindowElement(for: bundleId)
+        let app = try runningApplication(bundleId: bundleId)
+        return try accessibilityNodes(pid: app.processIdentifier, maxDepth: maxDepth, maxNodes: maxNodes)
+    }
+
+    public static func accessibilityNodes(
+        pid: pid_t,
+        maxDepth: Int = 6,
+        maxNodes: Int = 250
+    ) throws -> [ActionAccessibilityNodeSnapshot] {
+        let window = try firstWindowElement(pid: pid)
         var queue: [(AXUIElement, Int)] = [(window, 0)]
         var result: [ActionAccessibilityNodeSnapshot] = []
 
@@ -689,7 +772,11 @@ private func bounds(of element: AXUIElement) -> ActionAccessibilityBounds? {
 
 private func firstWindowElement(for bundleId: String) throws -> AXUIElement {
     let app = try ActionNativeAutomation.runningApplication(bundleId: bundleId)
-    let application = AXUIElementCreateApplication(app.processIdentifier)
+    return try firstWindowElement(pid: app.processIdentifier)
+}
+
+private func firstWindowElement(pid: pid_t) throws -> AXUIElement {
+    let application = AXUIElementCreateApplication(pid)
 
     if let focusedWindow = axValue(application, attribute: kAXFocusedWindowAttribute),
        CFGetTypeID(focusedWindow) == AXUIElementGetTypeID() {
@@ -708,7 +795,7 @@ private func firstWindowElement(for bundleId: String) throws -> AXUIElement {
         } ?? windows[0]
     }
 
-    throw ActionNativeAutomationError.accessibilityLookupFailed("No accessibility window found for \(bundleId)")
+    throw ActionNativeAutomationError.accessibilityLookupFailed("No accessibility window found for pid \(pid)")
 }
 
 private func windowArea(_ element: AXUIElement) -> Double {
