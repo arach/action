@@ -490,11 +490,19 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 scale: request.params["scale"].flatMap(Double.init) ?? 1
             )
         case .screenshotAppWindow:
-            guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
-                throw NSError(domain: "ActionAgent", code: 13, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])
-            }
             guard let outputPath = request.params["output"], !outputPath.isEmpty else {
                 throw NSError(domain: "ActionAgent", code: 14, userInfo: [NSLocalizedDescriptionKey: "Missing output"])
+            }
+
+            // A pid names one process exactly; bundleId targeting stays for callers that
+            // have no pid, but it cannot distinguish two instances of the same bundle.
+            if let pidParam = request.params["pid"], let pid = Int32(pidParam) {
+                try await actionCaptureAppWindowScreenshot(pid: pid, outputPath: outputPath)
+                return ["pid": pidParam, "outputPath": outputPath, "status": "screenshot"]
+            }
+
+            guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 13, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId or pid"])
             }
 
             try await actionCaptureAppWindowScreenshot(bundleId: bundleId, outputPath: outputPath)
