@@ -3979,7 +3979,7 @@ They are not interchangeable.
 | | What it is | What the agent can do |
 |---|---|---|
 | **1. Your regular Chrome** | The browser you use all day. Your real profiles (`Default`, `Profile 1` / "Work"), your tabs, history, extensions, and logins. | **Open a URL, and that's it.** `browser_open { mode: "regular" }` is a visible handoff with no DevTools attachment. To make the agent *act* there, use Action's native macOS control: screen capture + accessibility (`action.observe.snapshot`, `action.resolve.target`, `action.act.execute`). |
-| **2. An Action browser** | A real, non-headless Chrome that Action owns, on its own user-data-dir under `~/Library/Application Support/Action/ChromeProfiles/`. The default identity `agent-browser` is blank and signed into nothing. | **Full DOM control** over CDP: `browser_snapshot`, `browser_click`, `browser_fill`, `browser_screenshot`, `browser_tabs`. |
+| **2. An Action browser** | A real, non-headless Chrome that Action owns, on its own user-data-dir under `~/Library/Application Support/Action/ChromeProfiles/`. The default identity `agent-browser` is blank and signed into nothing. | **Full DOM control** over CDP: `browser_snapshot`, `browser_click`, `browser_fill`, `browser_resize`, `browser_screenshot`, `browser_tabs`. |
 | **3. An Action browser identity seeded from one of your Chrome profiles** | The same Action-owned Chrome under a name you choose (`work`, `mira`, …), carrying cookies copied from one of your real profiles for an explicit allowlist of domains. | **Full DOM control, on sites you're already signed in to.** |
 
 The tradeoff in one line: **your regular Chrome has your session but only
@@ -4151,6 +4151,7 @@ Server: `plugins/action-browser/server/index.ts`
 | `browser_companion_status` | Extension dist + bridge health |
 | `browser_open` | Open in an Action browser, or `mode: "regular"` for an open-only handoff |
 | `browser_tabs` / `browser_snapshot` / `browser_click` / `browser_fill` / `browser_screenshot` / `browser_close` | DOM automation via CDP — Action browsers only |
+| `browser_resize` | Set a tab to an explicit viewport width and height for responsive checks; `target: "window"` resizes the real Chrome window instead |
 
 ### Two MCP surfaces
 

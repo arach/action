@@ -14,11 +14,41 @@ struct ActionAgentRuntimeState {
     let startedAt = Date()
 }
 
+/// Keeps a connection's receive side live while requests execute concurrently. Only response
+/// delivery is serialized, so a later cancellation frame on the same WebSocket can be handled
+/// while an earlier attention-taking operation is still in progress.
+final class ActionAgentRequestScheduler: @unchecked Sendable {
+    private let responseQueue: DispatchQueue
+
+    init(responseQueue: DispatchQueue) {
+        self.responseQueue = responseQueue
+    }
+
+    func dispatch(
+        receiveNext: @escaping @Sendable () -> Void,
+        process: @escaping @Sendable () async -> ActionAgentResponse,
+        send: @escaping @Sendable (ActionAgentResponse) -> Void
+    ) {
+        // Re-arm first. Waiting for `process` here deadlocks same-connection cancellation.
+        receiveNext()
+        Task {
+            let response = await process()
+            responseQueue.async {
+                send(response)
+            }
+        }
+    }
+}
+
 final class ActionAgentRuntimeServer: @unchecked Sendable {
+    private static let protocolVersion = "2"
     private let listener: NWListener
     private let queue = DispatchQueue(label: "dev.action.agent.listener")
     private let runtimeState = ActionAgentRuntimeState()
-    private let driveStore = ActionDriveLeaseStore()
+    private let driveStore: ActionDriveLeaseStore
+    private let workspaceDragFileOperation: ActionWorkspaceDragFileOperation
+    private let authentication: ActionAgentAuthentication
+    private let requestScheduler: ActionAgentRequestScheduler
     private let parentProcessID: pid_t?
     private let idleExitSeconds: TimeInterval?
     private var parentWatchTimer: DispatchSourceTimer?
@@ -30,6 +60,13 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
     init(port: UInt16, parentProcessID: pid_t?, idleExitSeconds: TimeInterval?) throws {
         self.parentProcessID = parentProcessID
         self.idleExitSeconds = idleExitSeconds
+        let driveStore = ActionDriveLeaseStore()
+        self.driveStore = driveStore
+        self.workspaceDragFileOperation = ActionWorkspaceDragFileOperation(driveStore: driveStore)
+        self.authentication = try ActionAgentAuthentication.create()
+        self.requestScheduler = ActionAgentRequestScheduler(
+            responseQueue: DispatchQueue(label: "dev.action.agent.responses")
+        )
         let tcpOptions = NWProtocolTCP.Options()
         let websocketOptions = NWProtocolWebSocket.Options()
         websocketOptions.autoReplyPing = true
@@ -42,7 +79,11 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
             throw NSError(domain: "ActionAgent", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid port \(port)"])
         }
 
-        listener = try NWListener(using: parameters, on: endpointPort)
+        guard let loopbackAddress = IPv4Address(ActionAgentDefaults.host) else {
+            throw NSError(domain: "ActionAgent", code: 31, userInfo: [NSLocalizedDescriptionKey: "Invalid loopback address"])
+        }
+        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(loopbackAddress), port: endpointPort)
+        listener = try NWListener(using: parameters)
     }
 
     @MainActor
@@ -115,18 +156,24 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 return
             }
 
-            Task { [weak self] in
-                guard let self else {
-                    connection.cancel()
-                    return
+            self.requestScheduler.dispatch(
+                receiveNext: { [weak self] in
+                    self?.receiveNextMessage(on: connection, ownerID: ownerID)
+                },
+                process: { [weak self] in
+                    guard let self else {
+                        return ActionAgentResponse(
+                            id: "cancelled",
+                            ok: false,
+                            error: "ActionAgent connection handler stopped"
+                        )
+                    }
+                    return await self.processMessage(data, ownerID: ownerID)
+                },
+                send: { [weak self] response in
+                    self?.send(response: response, on: connection)
                 }
-
-                let response = await self.processMessage(data, ownerID: ownerID)
-                self.queue.async {
-                    self.send(response: response, on: connection)
-                    self.receiveNextMessage(on: connection, ownerID: ownerID)
-                }
-            }
+            )
         }
     }
 
@@ -159,13 +206,20 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
     ) async throws -> [String: String] {
         switch method {
         case .ping:
-            return ["message": "pong", "service": "ActionAgent"]
+            return [
+                "message": "pong",
+                "service": "ActionAgent",
+                "protocolVersion": Self.protocolVersion,
+            ]
         case .status:
             return [
                 "service": "ActionAgent",
                 "pid": String(ProcessInfo.processInfo.processIdentifier),
                 "startedAt": ISO8601DateFormatter().string(from: runtimeState.startedAt),
                 "methods": ActionAgentMethod.allCases.map(\.rawValue).joined(separator: ","),
+                "protocolVersion": Self.protocolVersion,
+                "authentication": "capability-token",
+                "authTokenFile": authentication.tokenFile.path,
             ]
         case .permissionsSnapshot:
             return [
@@ -305,6 +359,9 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
             let value = try ActionNativeAutomation.calculatorDisplayValue()
             return ["status": "calculator-display", "value": value]
         case .driveBegin:
+            if request.params["mode"] == "attention" {
+                try authenticatePrivileged(request)
+            }
             let result = try await driveStore.begin(
                 ownerID: ownerID,
                 agent: request.params["agent"] ?? "",
@@ -313,7 +370,12 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 sessionID: request.params["sessionId"],
                 implicit: request.params["implicit"] == "true",
                 showSupervisionLabel: request.params["showSupervisionLabel"] != "false",
-                pointerControl: request.params["pointerControl"] == "true"
+                pointerControl: request.params["pointerControl"] == "true",
+                attentionApproval: request.params["attentionApproval"],
+                capability: request.params["capability"],
+                resource: request.params["resource"],
+                workflowRunID: request.params["workflowRunId"],
+                workspaceID: request.params["workspaceId"]
             )
             var response = [
                 "status": result.status,
@@ -353,6 +415,39 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         case .driveStatus:
             let snapshot = try await driveStore.status()
             return ["snapshot": try actionAgentJSONString(snapshot)]
+        case .workspaceDragFile:
+            try authenticatePrivileged(request)
+            let semanticRequest = try ActionWorkspaceDragFileRequest(params: request.params)
+            let result = try await workspaceDragFileOperation.execute(
+                request: semanticRequest,
+                ownerID: ownerID
+            )
+            return [
+                "status": "dragged",
+                "operationId": result.operationID,
+                "sourceX": String(describing: result.source.x),
+                "sourceY": String(describing: result.source.y),
+                "destinationX": String(describing: result.destination.x),
+                "destinationY": String(describing: result.destination.y),
+            ]
+        case .workspaceCancelOperation:
+            try authenticatePrivileged(request)
+            guard let leaseID = request.params["leaseId"], !leaseID.isEmpty,
+                  let operationID = request.params["operationId"], !operationID.isEmpty else {
+                throw ActionDriveLeaseError.invalidInput(
+                    "workspace.cancelOperation requires leaseId and operationId"
+                )
+            }
+            let lease = try await driveStore.cancelWorkspaceOperation(
+                ownerID: ownerID,
+                leaseID: leaseID,
+                operationID: operationID
+            )
+            return [
+                "status": "cancelling",
+                "leaseId": lease.leaseId,
+                "operationId": operationID,
+            ]
         case .recordAppWindow:
             guard #available(macOS 15.0, *) else {
                 throw NSError(domain: "ActionAgent", code: 7, userInfo: [NSLocalizedDescriptionKey: "Window recording requires macOS 15.0 or newer."])
@@ -398,11 +493,19 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
                 includeSupervisionOverlay: request.params["includeSupervisionOverlay"] != "false"
             )
         case .screenshotAppWindow:
-            guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
-                throw NSError(domain: "ActionAgent", code: 13, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])
-            }
             guard let outputPath = request.params["output"], !outputPath.isEmpty else {
                 throw NSError(domain: "ActionAgent", code: 14, userInfo: [NSLocalizedDescriptionKey: "Missing output"])
+            }
+
+            // A pid names one process exactly; bundleId targeting stays for callers that
+            // have no pid, but it cannot distinguish two instances of the same bundle.
+            if let pidParam = request.params["pid"], let pid = Int32(pidParam) {
+                try await actionCaptureAppWindowScreenshot(pid: pid, outputPath: outputPath)
+                return ["pid": pidParam, "outputPath": outputPath, "status": "screenshot"]
+            }
+
+            guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 13, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId or pid"])
             }
 
             try await actionCaptureAppWindowScreenshot(bundleId: bundleId, outputPath: outputPath)
@@ -430,6 +533,10 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
             try actionCaptureScreenScreenshot(outputPath: outputPath)
             return ["outputPath": outputPath, "detail": "main-display", "status": "screenshot"]
         }
+    }
+
+    private func authenticatePrivileged(_ request: ActionAgentRequest) throws {
+        try authentication.authorize(params: request.params, protocolVersion: Self.protocolVersion)
     }
 
     private func send(response: ActionAgentResponse, on connection: NWConnection) {
@@ -503,6 +610,61 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         }
         timer.resume()
         idleExitTimer = timer
+    }
+}
+
+enum ActionAgentAuthenticationError: LocalizedError {
+    case protocolVersionRequired(String)
+    case invalidToken
+
+    var errorDescription: String? {
+        switch self {
+        case .protocolVersionRequired(let version):
+            return "Privileged Action methods require protocolVersion \(version)"
+        case .invalidToken:
+            return "Privileged Action methods require the current user-only capability token"
+        }
+    }
+}
+
+struct ActionAgentAuthentication: Sendable {
+    let token: String
+    let tokenFile: URL
+
+    static func create(
+        rootURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Action/runtime/agent", isDirectory: true)
+    ) throws -> ActionAgentAuthentication {
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: rootURL.path)
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let tokenFile = rootURL.appendingPathComponent("capability-token")
+        try Data((token + "\n").utf8).write(to: tokenFile, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenFile.path)
+        return ActionAgentAuthentication(token: token, tokenFile: tokenFile)
+    }
+
+    func matches(_ candidate: String) -> Bool {
+        let lhs = Array(token.utf8)
+        let rhs = Array(candidate.utf8)
+        var difference = lhs.count ^ rhs.count
+        let count = max(lhs.count, rhs.count)
+        for index in 0..<count {
+            let left = index < lhs.count ? lhs[index] : 0
+            let right = index < rhs.count ? rhs[index] : 0
+            difference |= Int(left ^ right)
+        }
+        return difference == 0
+    }
+
+    func authorize(params: [String: String], protocolVersion: String) throws {
+        guard params["protocolVersion"] == protocolVersion else {
+            throw ActionAgentAuthenticationError.protocolVersionRequired(protocolVersion)
+        }
+        guard let candidate = params["authToken"], matches(candidate) else {
+            throw ActionAgentAuthenticationError.invalidToken
+        }
     }
 }
 

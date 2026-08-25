@@ -296,19 +296,126 @@ final class ActionDriveLeaseStoreTests: XCTestCase {
         }
     }
 
-    func testAttentionModeIsDenied() async throws {
+    func testAttentionModeRequiresExplicitOneShotApprovalInputs() async throws {
         try await withStore { store, _ in
-            let result = try await store.begin(
-                ownerID: "client-a",
-                agent: "Agent A",
-                task: "Foreground task",
-                mode: "attention",
-                sessionID: nil,
-                implicit: false
-            )
-            XCTAssertEqual(result.status, "denied")
-            XCTAssertEqual(result.lease.status, "denied")
+            do {
+                _ = try await store.begin(
+                    ownerID: "client-a",
+                    agent: "Agent A",
+                    task: "Foreground task",
+                    mode: "attention",
+                    sessionID: nil,
+                    implicit: false
+                )
+                XCTFail("Expected explicit attention approval")
+            } catch ActionDriveLeaseError.attentionApprovalRequired {
+                // Expected.
+            }
+
+            let result = try await approvedAttentionLease(store: store, ownerID: "client-a")
+            XCTAssertEqual(result.status, "granted")
+            XCTAssertEqual(result.lease.mode, "attention")
+            XCTAssertEqual(result.lease.capabilities, [ActionWorkspaceDragFileRequest.capability])
+            XCTAssertEqual(result.lease.resources, [ActionWorkspaceDragFileRequest.systemPointerResource])
         }
+    }
+
+    func testSystemPointerAcquisitionIsGloballyAtomic() async throws {
+        try await withStore { store, _ in
+            _ = try await approvedAttentionLease(store: store, ownerID: "client-a")
+            do {
+                _ = try await approvedAttentionLease(store: store, ownerID: "client-b")
+                XCTFail("Expected the global pointer to be exclusive")
+            } catch ActionDriveLeaseError.systemPointerBusy {
+                // The actor serialized both acquisitions and granted exactly one.
+            }
+            let snapshot = try await store.status()
+            XCTAssertEqual(
+                snapshot.leases.filter {
+                    $0.status == "driving"
+                        && ($0.resources ?? []).contains(ActionWorkspaceDragFileRequest.systemPointerResource)
+                }.count,
+                1
+            )
+        }
+    }
+
+    func testWorkspaceDragCapabilityIsRunScopedAndConsumedOnce() async throws {
+        try await withStore { store, _ in
+            let begun = try await approvedAttentionLease(store: store, ownerID: "client-a")
+            do {
+                _ = try await store.authorizeWorkspaceDrag(
+                    ownerID: "client-a",
+                    leaseID: begun.lease.leaseId,
+                    operationID: "operation-1",
+                    workflowRunID: "wrong-run",
+                    workspaceID: "agent:grok.main"
+                )
+                XCTFail("Expected run scope mismatch")
+            } catch ActionDriveLeaseError.runScopeMismatch {
+                // A failed scope check does not consume approval.
+            }
+
+            let authorized = try await store.authorizeWorkspaceDrag(
+                ownerID: "client-a",
+                leaseID: begun.lease.leaseId,
+                operationID: "operation-1",
+                workflowRunID: "run-1",
+                workspaceID: "agent:grok.main"
+            )
+            XCTAssertEqual(authorized.lastOperationId, "operation-1")
+            XCTAssertEqual(authorized.consumedCapabilities, [ActionWorkspaceDragFileRequest.capability])
+            XCTAssertNotNil(authorized.operationStopFile)
+
+            do {
+                _ = try await store.cancelWorkspaceOperation(
+                    ownerID: "client-a",
+                    leaseID: begun.lease.leaseId,
+                    operationID: "operation-2"
+                )
+                XCTFail("Expected cancellation to be operation scoped")
+            } catch ActionDriveLeaseError.runScopeMismatch {
+                // Expected.
+            }
+            _ = try await store.cancelWorkspaceOperation(
+                ownerID: "client-a",
+                leaseID: begun.lease.leaseId,
+                operationID: "operation-1"
+            )
+            XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(authorized.operationStopFile)))
+
+            do {
+                _ = try await store.authorizeWorkspaceDrag(
+                    ownerID: "client-a",
+                    leaseID: begun.lease.leaseId,
+                    operationID: "operation-2",
+                    workflowRunID: "run-1",
+                    workspaceID: "agent:grok.main"
+                )
+                XCTFail("Expected one-shot capability consumption")
+            } catch ActionDriveLeaseError.capabilityUnavailable(let capability) {
+                XCTAssertEqual(capability, ActionWorkspaceDragFileRequest.capability)
+            }
+        }
+    }
+
+    private func approvedAttentionLease(
+        store: ActionDriveLeaseStore,
+        ownerID: String
+    ) async throws -> ActionDriveBeginResult {
+        try await store.begin(
+            ownerID: ownerID,
+            agent: "Agent A",
+            task: "action-drag-drop",
+            mode: "attention",
+            sessionID: "session-run-1",
+            implicit: false,
+            attentionApproval: "approved",
+            capability: ActionWorkspaceDragFileRequest.capability,
+            resource: ActionWorkspaceDragFileRequest.systemPointerResource,
+            workflowRunID: "run-1",
+            workspaceID: "agent:grok.main"
+        )
     }
 
     private func withStore(

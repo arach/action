@@ -10,7 +10,7 @@
       "name": "action-browser",
       "source": "./plugins/action-browser",
       "description": "Open pages, inspect them, and capture screenshots in an isolated real Chrome profile.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "author": {
         "name": "Arach",
         "url": "https://github.com/arach"

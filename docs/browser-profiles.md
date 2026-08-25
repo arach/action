@@ -11,7 +11,7 @@ They are not interchangeable.
 | | What it is | What the agent can do |
 |---|---|---|
 | **1. Your regular Chrome** | The browser you use all day. Your real profiles (`Default`, `Profile 1` / "Work"), your tabs, history, extensions, and logins. | **Open a URL, and that's it.** `browser_open { mode: "regular" }` is a visible handoff with no DevTools attachment. To make the agent *act* there, use Action's native macOS control: screen capture + accessibility (`action.observe.snapshot`, `action.resolve.target`, `action.act.execute`). |
-| **2. An Action browser** | A real, non-headless Chrome that Action owns, on its own user-data-dir under `~/Library/Application Support/Action/ChromeProfiles/`. The default identity `agent-browser` is blank and signed into nothing. | **Full DOM control** over CDP: `browser_snapshot`, `browser_click`, `browser_fill`, `browser_screenshot`, `browser_tabs`. |
+| **2. An Action browser** | A real, non-headless Chrome that Action owns, on its own user-data-dir under `~/Library/Application Support/Action/ChromeProfiles/`. The default identity `agent-browser` is blank and signed into nothing. | **Full DOM control** over CDP: `browser_snapshot`, `browser_click`, `browser_fill`, `browser_resize`, `browser_screenshot`, `browser_tabs`. |
 | **3. An Action browser identity seeded from one of your Chrome profiles** | The same Action-owned Chrome under a name you choose (`work`, `mira`, …), carrying cookies copied from one of your real profiles for an explicit allowlist of domains. | **Full DOM control, on sites you're already signed in to.** |
 
 The tradeoff in one line: **your regular Chrome has your session but only
@@ -183,6 +183,7 @@ Server: `plugins/action-browser/server/index.ts`
 | `browser_companion_status` | Extension dist + bridge health |
 | `browser_open` | Open in an Action browser, or `mode: "regular"` for an open-only handoff |
 | `browser_tabs` / `browser_snapshot` / `browser_click` / `browser_fill` / `browser_screenshot` / `browser_close` | DOM automation via CDP — Action browsers only |
+| `browser_resize` | Set a tab to an explicit viewport width and height for responsive checks; `target: "window"` resizes the real Chrome window instead |
 
 ### Two MCP surfaces
 
@@ -230,6 +231,43 @@ browser_open { url: "https://github.com", mode: "regular" }
 Regular mode is deliberately not controllable, and the result says so:
 `controlAvailable: false`, plus the native control path. Snapshot, click, fill,
 and screenshot continue to target the Action browser.
+
+### Responsive breakpoints
+
+`browser_resize` gives an already-open tab an explicit viewport, so a narrow
+layout can be captured instead of assumed.
+
+```text
+browser_open   { url: "http://localhost:3000" }
+browser_resize { width: 1440, height: 900 }
+browser_screenshot
+browser_resize { width: 390, height: 844, mobile: true, matchMedia: ["(max-width: 767px)"] }
+browser_screenshot
+browser_resize { reset: true }
+```
+
+Two targets, deliberately not interchangeable:
+
+| | What moves | Cost |
+|---|---|---|
+| `target: "tab"` (default) | CSS emulation for that one tab | Exact to the pixel, other tabs unaffected, fully reversible |
+| `target: "window"` | The real Chrome window hosting the tab | Every tab in that window moves, the display is a hard ceiling, and the tab's emulated viewport is dropped first |
+
+A device-metrics override belongs to the CDP session that set it, and Action
+Browser opens a fresh session per tool call. Two consequences shape the design:
+
+- The server keeps the requested viewport in memory and re-applies it on every
+  session, so a resize survives the later `browser_screenshot` that is the whole
+  point of it. It is per-tab, in-memory only, and dropped when the tab or the
+  browser closes — nothing is written to the profile.
+- `reset` cannot simply call `clearDeviceMetricsOverride`: a foreign session's
+  clear is accepted and does nothing, leaving Chrome stuck at the stale size. The
+  reset re-sets the metrics to adopt ownership first, then clears them.
+
+`deviceScaleFactor` defaults to `1`, which makes screenshot pixels equal CSS
+pixels — a 390-wide viewport returns a 390px-wide PNG. Read `exact` in the reply
+before trusting a capture: a page with a hard `min-width` can refuse to lay out
+as narrow as it was asked to.
 
 ## Plugin versioning
 
