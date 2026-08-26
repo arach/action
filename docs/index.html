@@ -748,11 +748,20 @@
         <div class="section-heading">
           <p class="section-label">Install</p>
           <h2 id="download-title">Get Action on your Mac.</h2>
-          <p class="lead">A signed, notarized build. Download it, drag it to Applications, and grant the two permissions macOS asks for the first time you record.</p>
+          <p class="lead">A signed, notarized build. Grant the two permissions macOS asks for the first time you record, and you are running.</p>
         </div>
 
-        <div class="actions">
-          <a class="button" href="https://github.com/arach/action/releases/latest/download/Action.dmg">Download for macOS <span aria-hidden="true">↓</span></a>
+        <div class="prompt-block">
+          <pre id="brew-install-command">brew tap arach/tap
+brew trust arach/tap
+brew install --cask action</pre>
+          <button class="copy-button" type="button" data-copy-target="brew-install-command" aria-label="Copy the Homebrew install commands">Copy</button>
+        </div>
+
+        <p class="lead" style="margin-top: 16px;">All three lines, in that order. Homebrew only resolves a short cask name against its own catalogue and the taps you have already added, and it refuses to load a cask from a tap you have not trusted.</p>
+
+        <div class="actions" style="margin-top: 32px;">
+          <a class="button" href="https://github.com/arach/action/releases/latest/download/Action.dmg">Download the DMG <span aria-hidden="true">↓</span></a>
           <a class="button secondary" href="https://github.com/arach/action/releases/latest">All releases</a>
         </div>
 

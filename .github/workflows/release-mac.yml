@@ -241,3 +241,45 @@ jobs:
               --title "Action $VERSION" \
               --notes-file "$notes_path"
           fi
+
+      - name: Update Homebrew cask
+        if: ${{ steps.version.outputs.publish_release == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+          TAP_REPO: arach/homebrew-tap
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The tap lives in another repo, so this needs its own token. Without
+          # one the release still stands; only the cask goes stale, which is a
+          # warning rather than a failed release.
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::warning::TAP_TOKEN is not set, so $TAP_REPO still points at the previous version."
+            exit 0
+          fi
+
+          sha="$(shasum -a 256 Installer/Action-for-Mac.dmg | awk '{print $1}')"
+          work="$RUNNER_TEMP/homebrew-tap"
+          rm -rf "$work"
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" "$work"
+
+          # Rewrite only the two lines a release changes, so anything edited by
+          # hand in the rest of the cask survives. Values go through the
+          # environment rather than the shell so quoting cannot bite.
+          VERSION="$VERSION" SHA="$sha" perl -0pi -e '
+            s/^  version ".*"$/  version "$ENV{VERSION}"/m;
+            s/^  sha256 ".*"$/  sha256 "$ENV{SHA}"/m;
+          ' "$work/Casks/action.rb"
+
+          if git -C "$work" diff --quiet; then
+            echo "Cask is already at $VERSION."
+            exit 0
+          fi
+
+          git -C "$work" \
+            -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qam "🍺 action $VERSION"
+          git -C "$work" push
+          echo "Bumped $TAP_REPO to $VERSION ($sha)."
