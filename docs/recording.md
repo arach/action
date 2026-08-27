@@ -11,6 +11,7 @@ The native recording path now succeeds for:
 
 - bounded region recording
 - app-window recording
+- exact-process app-window recording via `--pid` when multiple running apps share a bundle identifier
 
 The successful path produces:
 

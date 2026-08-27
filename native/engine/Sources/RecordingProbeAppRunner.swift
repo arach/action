@@ -7,6 +7,7 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
     enum Target {
         case region(CGRect)
         case appWindow(String)
+        case appWindowPID(pid_t)
     }
 
     private static var retainedRunner: RecordingProbeAppRunner?
@@ -114,6 +115,13 @@ final class RecordingProbeAppRunner: NSObject, NSApplicationDelegate, NSWindowDe
                 case .appWindow(let bundleId):
                     try await recorder.recordAppWindow(
                         bundleId: bundleId,
+                        outputPath: configuration.outputPath,
+                        stopSignalPath: configuration.stopSignalPath,
+                        finishedSignalPath: configuration.finishedSignalPath
+                    )
+                case .appWindowPID(let pid):
+                    try await recorder.recordAppWindow(
+                        pid: pid,
                         outputPath: configuration.outputPath,
                         stopSignalPath: configuration.stopSignalPath,
                         finishedSignalPath: configuration.finishedSignalPath

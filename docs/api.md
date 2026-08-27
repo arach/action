@@ -82,7 +82,7 @@ Fields:
 | `drive.release` | release a connection-owned drive lease | `leaseId`, `outcome` |
 | `workspace.dragFile` | resolve and drag the exact run fixture into the exact Scout drop zone | lease/run/workspace ids, fixture URL, Finder/Scout window identities, destination AX identifier, display bounds, protocol version, auth token |
 | `workspace.cancelOperation` | cancel one in-flight semantic operation without affecting other clients | exact `leaseId`, `operationId`, protocol version, auth token |
-| `capture.recordAppWindow` | record a target app window | `bundleId`, `output`, optional `stopFile`, `finishedFile`, `debugLog` |
+| `capture.recordAppWindow` | record a target app window | `bundleId` or exact `pid`, `output`, optional `stopFile`, `finishedFile`, `debugLog` |
 | `capture.recordRegion` | record a bounded region | `x`, `y`, `width`, `height`, `output`, optional `fps`, `scale`, `stopFile`, `finishedFile`, `debugLog` |
 | `capture.screenshotAppWindow` | screenshot a target app window | `bundleId`, `output` |
 | `capture.screenshotRegion` | screenshot a bounded region | `x`, `y`, `width`, `height`, `output` |

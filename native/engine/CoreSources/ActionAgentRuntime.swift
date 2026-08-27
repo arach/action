@@ -452,13 +452,22 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
             guard #available(macOS 15.0, *) else {
                 throw NSError(domain: "ActionAgent", code: 7, userInfo: [NSLocalizedDescriptionKey: "Window recording requires macOS 15.0 or newer."])
             }
-            guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
-                throw NSError(domain: "ActionAgent", code: 8, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId"])
-            }
             guard let outputPath = request.params["output"], !outputPath.isEmpty else {
                 throw NSError(domain: "ActionAgent", code: 9, userInfo: [NSLocalizedDescriptionKey: "Missing output"])
             }
 
+            if let pidValue = request.params["pid"], let pid = pid_t(pidValue) {
+                return try await ActionRecordingProbeLauncher.launchAppWindow(
+                    pid: pid,
+                    outputPath: outputPath,
+                    stopSignalPath: request.params["stopFile"],
+                    finishedSignalPath: request.params["finishedFile"],
+                    debugLogPath: request.params["debugLog"]
+                )
+            }
+            guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
+                throw NSError(domain: "ActionAgent", code: 8, userInfo: [NSLocalizedDescriptionKey: "Missing bundleId or pid"])
+            }
             return try await ActionRecordingProbeLauncher.launchAppWindow(
                 bundleId: bundleId,
                 outputPath: outputPath,

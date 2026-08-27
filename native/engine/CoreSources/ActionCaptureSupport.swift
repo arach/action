@@ -292,7 +292,67 @@ public final class ActionCaptureRecorder: NSObject, SCRecordingOutputDelegate, S
         configuration.width = max(Int(window.frame.width), 1)
         configuration.height = max(Int(window.frame.height), 1)
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-        configuration.sourceRect = window.frame
+        configuration.sourceRect = CGRect(
+            x: window.frame.origin.x - selection.display.frame.origin.x,
+            y: window.frame.origin.y - selection.display.frame.origin.y,
+            width: window.frame.width,
+            height: window.frame.height
+        )
+
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleBufferQueue)
+        let recordingConfiguration = SCRecordingOutputConfiguration()
+        recordingConfiguration.outputURL = outputURL
+        recordingConfiguration.outputFileType = .mov
+        recordingConfiguration.videoCodecType = .h264
+
+        let recordingOutput = SCRecordingOutput(configuration: recordingConfiguration, delegate: self)
+        try stream.addRecordingOutput(recordingOutput)
+
+        self.stream = stream
+        self.recordingOutput = recordingOutput
+
+        try await stream.startCapture()
+        try await waitForRecordingStart()
+
+        if let stopSignalPath {
+            try waitForStopSignal(at: stopSignalPath)
+        } else {
+            _ = try FileHandle.standardInput.readToEnd()
+        }
+
+        try await stream.stopCapture()
+        try await waitForRecordingFinish()
+        try writeSignalFile(path: finishedSignalPath, contents: "finished\n")
+    }
+
+    public func recordAppWindow(
+        pid: pid_t,
+        outputPath: String,
+        stopSignalPath: String?,
+        finishedSignalPath: String?
+    ) async throws {
+        logger("record: begin pid=\(pid) outputPath=\(outputPath)")
+        self.finishedSignalPath = finishedSignalPath
+        let outputURL = URL(fileURLWithPath: outputPath)
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let selection = try await actionBestWindowSelection(pid: pid)
+        let window = selection.window
+        let filter = SCContentFilter(display: selection.display, including: [window])
+        let configuration = SCStreamConfiguration()
+        configuration.width = max(Int(window.frame.width), 1)
+        configuration.height = max(Int(window.frame.height), 1)
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        configuration.sourceRect = CGRect(
+            x: window.frame.origin.x - selection.display.frame.origin.x,
+            y: window.frame.origin.y - selection.display.frame.origin.y,
+            width: window.frame.width,
+            height: window.frame.height
+        )
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleBufferQueue)

@@ -1568,7 +1568,12 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         configuration.width = max(Int(window.frame.width), 1)
         configuration.height = max(Int(window.frame.height), 1)
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-        configuration.sourceRect = window.frame
+        configuration.sourceRect = CGRect(
+            x: window.frame.origin.x - selection.display.frame.origin.x,
+            y: window.frame.origin.y - selection.display.frame.origin.y,
+            width: window.frame.width,
+            height: window.frame.height
+        )
         logger.log("record: configuration width=\(configuration.width) height=\(configuration.height)")
 
         logger.log("record: creating stream")
@@ -1608,6 +1613,56 @@ final class WindowRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegat
         try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: nil))
         try writeSignalFile(path: finishedSignalPath, contents: "finished\n")
         logger.log("record: wrote finished reply")
+    }
+
+    func recordAppWindow(pid: pid_t, outputPath: String, stopSignalPath: String?, finishedSignalPath: String?) async throws {
+        logger.log("record: begin pid=\(pid) outputPath=\(outputPath)")
+        self.finishedSignalPath = finishedSignalPath
+        let outputURL = URL(fileURLWithPath: outputPath)
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let selection = try await actionBestWindowSelection(pid: pid)
+        let window = selection.window
+        logger.log("record: window id=\(window.windowID) frame=\(window.frame)")
+        let filter = SCContentFilter(display: selection.display, including: [window])
+        let configuration = SCStreamConfiguration()
+        configuration.width = max(Int(window.frame.width), 1)
+        configuration.height = max(Int(window.frame.height), 1)
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        configuration.sourceRect = CGRect(
+            x: window.frame.origin.x - selection.display.frame.origin.x,
+            y: window.frame.origin.y - selection.display.frame.origin.y,
+            width: window.frame.width,
+            height: window.frame.height
+        )
+
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+        let recordingConfiguration = SCRecordingOutputConfiguration()
+        recordingConfiguration.outputURL = outputURL
+        recordingConfiguration.outputFileType = .mov
+        recordingConfiguration.videoCodecType = .h264
+        let recordingOutput = SCRecordingOutput(configuration: recordingConfiguration, delegate: self)
+        try stream.addRecordingOutput(recordingOutput)
+
+        self.stream = stream
+        self.recordingOutput = recordingOutput
+        try await stream.startCapture()
+        try await waitForRecordingStart()
+        try writer.write(ActionHostResponse(status: "recording", outputPath: outputPath, detail: "pid \(pid)"))
+
+        if let stopSignalPath {
+            try waitForStopSignal(at: stopSignalPath)
+        } else {
+            _ = try FileHandle.standardInput.readToEnd()
+        }
+
+        try await stream.stopCapture()
+        try await waitForRecordingFinish()
+        try writer.write(ActionHostResponse(status: "finished", outputPath: outputPath, detail: "pid \(pid)"))
+        try writeSignalFile(path: finishedSignalPath, contents: "finished\n")
     }
 
     private func waitForStopSignal(at path: String) throws {
@@ -3943,14 +3998,23 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             throw ActionHostError.unsupportedOS("Window recording requires macOS 15.0 or newer.")
         }
 
-        let bundleId = try options.required("bundle-id")
+        let bundleId = options.options["bundle-id"]
+        let pid = options.options["pid"].flatMap(pid_t.init)
+        guard bundleId?.isEmpty == false || pid != nil else {
+            throw ActionHostError.missingOption("bundle-id or pid")
+        }
         let outputPath = try options.required("output")
         let finishedSignalPath = resolvedFinishedSignalPath(from: options)
         var params: [String: String] = [
-            "bundleId": bundleId,
             "output": outputPath,
             "finishedFile": finishedSignalPath,
         ]
+        if let bundleId, !bundleId.isEmpty {
+            params["bundleId"] = bundleId
+        }
+        if let pid {
+            params["pid"] = String(pid)
+        }
         if let debugLog = options.options["debug-log"] {
             params["debugLog"] = debugLog
         }
@@ -4786,7 +4850,9 @@ struct ActionHostMain {
             let writer = ResponseWriter(replyFile: options.options["reply-file"])
             let logger = DebugLogger(path: options.options["debug-log"])
             let target: RecordingProbeAppRunner.Target
-            if let bundleId = options.options["bundle-id"], !bundleId.isEmpty {
+            if let pidValue = options.options["pid"], let pid = pid_t(pidValue) {
+                target = .appWindowPID(pid)
+            } else if let bundleId = options.options["bundle-id"], !bundleId.isEmpty {
                 target = .appWindow(bundleId)
             } else {
                 let rect: CGRect

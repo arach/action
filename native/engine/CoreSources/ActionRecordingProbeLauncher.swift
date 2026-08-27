@@ -73,6 +73,34 @@ public enum ActionRecordingProbeLauncher {
         return try await launch(arguments: arguments, outputPath: outputPath, detail: bundleId)
     }
 
+    public static func launchAppWindow(
+        pid: pid_t,
+        outputPath: String,
+        stopSignalPath: String?,
+        finishedSignalPath: String?,
+        debugLogPath: String?
+    ) async throws -> [String: String] {
+        var arguments = [
+            "recording-probe",
+            "--pid", String(pid),
+            "--output", outputPath,
+        ]
+
+        if let stopSignalPath, !stopSignalPath.isEmpty {
+            arguments.append(contentsOf: ["--stop-file", stopSignalPath])
+        }
+
+        if let finishedSignalPath, !finishedSignalPath.isEmpty {
+            arguments.append(contentsOf: ["--finished-file", finishedSignalPath])
+        }
+
+        if let debugLogPath, !debugLogPath.isEmpty {
+            arguments.append(contentsOf: ["--debug-log", debugLogPath])
+        }
+
+        return try await launch(arguments: arguments, outputPath: outputPath, detail: "pid \(pid)")
+    }
+
     private static func launch(
         arguments: [String],
         outputPath: String,
