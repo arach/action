@@ -658,12 +658,6 @@ struct ActionLauncherRootView: View {
 
             Spacer(minLength: 0)
 
-            if !showsIconsOnly {
-                MiraCompanionBadge()
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 14)
-            }
-
             sidebarItem(.settings, showsIconsOnly: showsIconsOnly)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 12)
