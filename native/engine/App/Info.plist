@@ -69,5 +69,7 @@
   <string>NSApplication</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>Action needs to control target apps during guided capture demos.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Action needs Screen Recording to capture screenshots and record guided demos.</string>
 </dict>
 </plist>

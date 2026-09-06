@@ -5,11 +5,6 @@ import Darwin
 import Foundation
 import Network
 
-enum ActionAgentRuntimePermissionState: String {
-    case granted
-    case denied
-}
-
 struct ActionAgentRuntimeState {
     let startedAt = Date()
 }
@@ -223,21 +218,34 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
             ]
         case .permissionsSnapshot:
             return [
-                "accessibility": actionAgentAccessibilityStatus().rawValue,
-                "screenRecording": actionAgentScreenRecordingStatus().rawValue,
+                "accessibility": actionCurrentProcessAccessibilityStatus().rawValue,
+                "screenRecording": actionCurrentProcessScreenRecordingStatus().rawValue,
                 "bundlePath": Bundle.main.bundlePath,
+                "bundleId": actionCurrentProcessBundleIdentifier(),
+                "process": ActionPermissionProcess.agent.rawValue,
             ]
         case .permissionsRequest:
+            let kind = ActionPermissionKind.parse(request.params["kind"] ?? "all")
+            var accessibility = actionCurrentProcessAccessibilityStatus()
+            var screenRecording = actionCurrentProcessScreenRecordingStatus()
+            if kind == nil || kind == .accessibility {
+                accessibility = actionCurrentProcessAccessibilityStatus(prompt: true)
+            }
+            if kind == nil || kind == .screenRecording {
+                screenRecording = await actionRequestCurrentProcessScreenRecording()
+            }
             return [
-                "accessibility": actionAgentAccessibilityStatus(prompt: true).rawValue,
-                "screenRecording": actionAgentRequestScreenRecording().rawValue,
+                "accessibility": accessibility.rawValue,
+                "screenRecording": screenRecording.rawValue,
                 "bundlePath": Bundle.main.bundlePath,
+                "bundleId": actionCurrentProcessBundleIdentifier(),
+                "process": ActionPermissionProcess.agent.rawValue,
             ]
         case .openAccessibilitySettings:
-            actionAgentOpenSettingsPane(anchor: "Privacy_Accessibility")
+            actionOpenPrivacySettings(for: .accessibility)
             return ["status": "opened"]
         case .openScreenRecordingSettings:
-            actionAgentOpenSettingsPane(anchor: "Privacy_ScreenCapture")
+            actionOpenPrivacySettings(for: .screenRecording)
             return ["status": "opened"]
         case .launchApp:
             guard let bundleId = request.params["bundleId"], !bundleId.isEmpty else {
@@ -683,31 +691,7 @@ private func actionAgentJSONString<T: Encodable>(_ value: T) throws -> String {
     return String(decoding: try encoder.encode(value), as: UTF8.self)
 }
 
-private func actionAgentAccessibilityStatus(prompt: Bool = false) -> ActionAgentRuntimePermissionState {
-    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
-    return AXIsProcessTrustedWithOptions(options) ? .granted : .denied
-}
 
-private func actionAgentScreenRecordingStatus() -> ActionAgentRuntimePermissionState {
-    CGPreflightScreenCaptureAccess() ? .granted : .denied
-}
-
-@discardableResult
-private func actionAgentRequestScreenRecording() -> ActionAgentRuntimePermissionState {
-    if CGPreflightScreenCaptureAccess() {
-        return .granted
-    }
-
-    return CGRequestScreenCaptureAccess() ? .granted : .denied
-}
-
-private func actionAgentOpenSettingsPane(anchor: String) {
-    guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") else {
-        return
-    }
-
-    NSWorkspace.shared.open(url)
-}
 
 public enum ActionAgentRuntime {
     @MainActor

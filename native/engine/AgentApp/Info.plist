@@ -26,5 +26,7 @@
   <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>ActionAgent needs Screen Recording to capture screenshots of the apps it drives.</string>
 </dict>
 </plist>

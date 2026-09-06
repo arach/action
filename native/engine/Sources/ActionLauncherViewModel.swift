@@ -243,9 +243,33 @@ final class ActionLauncherViewModel: ObservableObject {
     private let agentClient = ActionAgentClient()
 
     @Published var agentStatus: String = "Offline"
-    @Published var accessibilityStatus: String = "Unknown"
-    @Published var screenRecordingStatus: String = "Unknown"
+    @Published var hostAccessibilityStatus: String = "Unknown"
+    @Published var hostScreenRecordingStatus: String = "Unknown"
+    @Published var agentAccessibilityStatus: String = "Unknown"
+    @Published var agentScreenRecordingStatus: String = "Unknown"
+    @Published var permissionRefreshInFlight: Bool = false
     @Published var notes: [String] = []
+    private var permissionPollTask: Task<Void, Never>?
+
+    /// Headline Accessibility used by the footer: the helper is what drives UI.
+    var accessibilityStatus: String { agentAccessibilityStatus }
+
+    /// Headline Screen Recording: recording lives in Action.app, screenshots in the helper.
+    var screenRecordingStatus: String {
+        if isGranted(hostScreenRecordingStatus) && isGranted(agentScreenRecordingStatus) {
+            return "Granted"
+        }
+        if isGranted(hostScreenRecordingStatus) {
+            return "Partial"
+        }
+        return hostScreenRecordingStatus
+    }
+
+    var permissionsReady: Bool {
+        isGranted(agentAccessibilityStatus)
+            && isGranted(hostScreenRecordingStatus)
+            && isGranted(agentScreenRecordingStatus)
+    }
     /// The status line before anything has happened. Surfaces compare against
     /// it so they can stay silent rather than print it.
     static let idleStatus = "Ready"
@@ -292,26 +316,33 @@ final class ActionLauncherViewModel: ObservableObject {
 
     func refreshPermissions() {
         Task {
-            await refreshPermissionsViaAgent()
+            await refreshPermissionsNow(showProgress: true)
         }
     }
 
     func requestPermissions() {
         Task {
-            await requestPermissionsViaAgent()
+            await requestMissingPermissions()
         }
+    }
+
+    func requestPermission(_ kind: ActionPermissionKind, process: ActionPermissionProcess) {
+        Task {
+            await requestPermissionNow(kind, process: process)
+        }
+    }
+
+    func showPermissionAssistant(_ kind: ActionPermissionKind, process: ActionPermissionProcess) {
+        presentAssistant(kind, process: process, openSettings: true)
+        startPermissionPolling()
     }
 
     func openAccessibilitySettings() {
-        Task {
-            await openSettingsViaAgent(.openAccessibilitySettings)
-        }
+        showPermissionAssistant(.accessibility, process: .agent)
     }
 
     func openScreenRecordingSettings() {
-        Task {
-            await openSettingsViaAgent(.openScreenRecordingSettings)
-        }
+        showPermissionAssistant(.screenRecording, process: .host)
     }
 
     /// Where this checkout lives. Home builds the MCP setup snippet against it
@@ -702,7 +733,7 @@ final class ActionLauncherViewModel: ObservableObject {
             try agentProcess.startIfNeeded()
             Task {
                 await refreshAgentStatus()
-                await refreshPermissionsViaAgent()
+                await refreshPermissionsNow()
             }
         } catch {
             agentStatus = "Failed to start agent"
@@ -756,20 +787,24 @@ final class ActionLauncherViewModel: ObservableObject {
         }
     }
 
-    private func refreshPermissionsViaAgent() async {
-        await updatePermissions(using: .permissionsSnapshot)
-    }
+    private func refreshPermissionsNow(showProgress: Bool = false) async {
+        if showProgress {
+            permissionRefreshInFlight = true
+        }
+        defer {
+            if showProgress {
+                permissionRefreshInFlight = false
+            }
+        }
 
-    private func requestPermissionsViaAgent() async {
-        await updatePermissions(using: .permissionsRequest)
-    }
+        hostAccessibilityStatus = displayStatus(actionCurrentProcessAccessibilityStatus())
+        hostScreenRecordingStatus = displayStatus(actionCurrentProcessScreenRecordingStatus())
 
-    private func updatePermissions(using method: ActionAgentMethod) async {
         do {
-            let response = try await agentClient.send(method: method)
+            let response = try await agentClient.send(method: .permissionsSnapshot)
             if let result = response.result {
-                accessibilityStatus = (result["accessibility"] ?? "unknown").capitalized
-                screenRecordingStatus = (result["screenRecording"] ?? "unknown").capitalized
+                agentAccessibilityStatus = displayStatus(result["accessibility"])
+                agentScreenRecordingStatus = displayStatus(result["screenRecording"])
                 var updatedNotes = notes.filter { !$0.hasPrefix("agentBundlePath=") }
                 if let bundlePath = result["bundlePath"] {
                     updatedNotes.append("agentBundlePath=\(bundlePath)")
@@ -777,22 +812,139 @@ final class ActionLauncherViewModel: ObservableObject {
                 notes = updatedNotes
                 agentStatus = "Connected"
             } else {
+                agentAccessibilityStatus = "Unknown"
+                agentScreenRecordingStatus = "Unknown"
                 agentStatus = response.error ?? "Agent error"
             }
         } catch {
+            agentAccessibilityStatus = "Unknown"
+            agentScreenRecordingStatus = "Unknown"
             agentStatus = "Disconnected"
             logger.error("Agent permissions call failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    private func openSettingsViaAgent(_ method: ActionAgentMethod) async {
+    private func requestMissingPermissions() async {
+        if !isGranted(hostScreenRecordingStatus) {
+            await requestPermissionNow(.screenRecording, process: .host)
+            return
+        }
+        if !isGranted(agentAccessibilityStatus) {
+            await requestPermissionNow(.accessibility, process: .agent)
+            return
+        }
+        if !isGranted(agentScreenRecordingStatus) {
+            await requestPermissionNow(.screenRecording, process: .agent)
+        }
+    }
+
+    private func requestPermissionNow(_ kind: ActionPermissionKind, process: ActionPermissionProcess) async {
+        switch (kind, process) {
+        case (.accessibility, .host):
+            hostAccessibilityStatus = displayStatus(actionCurrentProcessAccessibilityStatus(prompt: true))
+        case (.screenRecording, .host):
+            hostScreenRecordingStatus = displayStatus(await actionRequestCurrentProcessScreenRecording())
+        case (.accessibility, .agent), (.screenRecording, .agent):
+            await requestAgentPermission(kind)
+        }
+
+        await refreshPermissionsNow()
+        let granted: Bool
+        switch (kind, process) {
+        case (.accessibility, .host):
+            granted = isGranted(hostAccessibilityStatus)
+        case (.screenRecording, .host):
+            granted = isGranted(hostScreenRecordingStatus)
+        case (.accessibility, .agent):
+            granted = isGranted(agentAccessibilityStatus)
+        case (.screenRecording, .agent):
+            granted = isGranted(agentScreenRecordingStatus)
+        }
+        if !granted {
+            presentAssistant(kind, process: process, openSettings: true)
+            startPermissionPolling()
+        }
+    }
+
+    private func requestAgentPermission(_ kind: ActionPermissionKind) async {
         do {
-            _ = try await agentClient.send(method: method)
-            agentStatus = "Connected"
+            let response = try await agentClient.send(
+                method: .permissionsRequest,
+                params: ["kind": kind.rawValue]
+            )
+            if let result = response.result {
+                agentAccessibilityStatus = displayStatus(result["accessibility"])
+                agentScreenRecordingStatus = displayStatus(result["screenRecording"])
+                agentStatus = "Connected"
+            } else {
+                agentStatus = response.error ?? "Agent error"
+            }
         } catch {
             agentStatus = "Disconnected"
-            logger.error("Agent settings call failed: \(error.localizedDescription, privacy: .public)")
+            logger.error("Agent permission request failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    private func presentAssistant(
+        _ kind: ActionPermissionKind,
+        process: ActionPermissionProcess,
+        openSettings: Bool
+    ) {
+        let target: ActionPermissionTarget = process == .host ? .host : .agent
+        ActionPermissionAssistant.shared.present(
+            target: target,
+            permission: kind,
+            isGranted: { [weak self] in
+                await self?.refreshPermissionsNow(showProgress: false)
+                guard let self else { return false }
+                switch (kind, process) {
+                case (.accessibility, .host):
+                    return self.isGranted(self.hostAccessibilityStatus)
+                case (.screenRecording, .host):
+                    return self.isGranted(self.hostScreenRecordingStatus)
+                case (.accessibility, .agent):
+                    return self.isGranted(self.agentAccessibilityStatus)
+                case (.screenRecording, .agent):
+                    return self.isGranted(self.agentScreenRecordingStatus)
+                }
+            },
+            openSettings: openSettings
+        )
+    }
+
+    private func startPermissionPolling() {
+        permissionPollTask?.cancel()
+        permissionPollTask = Task { [weak self] in
+            for _ in 0..<30 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.refreshPermissionsNow(showProgress: false)
+                if self?.permissionsReady == true {
+                    return
+                }
+            }
+        }
+    }
+
+    private func displayStatus(_ state: ActionPermissionGrantState) -> String {
+        state.rawValue.capitalized
+    }
+
+    private func displayStatus(_ raw: String?) -> String {
+        switch (raw ?? "unknown").lowercased() {
+        case "granted":
+            return "Granted"
+        case "denied":
+            return "Denied"
+        case "unknown":
+            return "Unknown"
+        default:
+            return (raw ?? "Unknown").capitalized
+        }
+    }
+
+    private func isGranted(_ status: String) -> Bool {
+        status.lowercased() == "granted"
     }
 
     private func sessionsDirectoryURL() -> URL {

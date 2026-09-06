@@ -48,6 +48,10 @@ final class ActionLauncherController: NSObject, NSApplicationDelegate, NSWindowD
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        viewModel.refreshPermissions()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         viewModel.stopAgent()
     }

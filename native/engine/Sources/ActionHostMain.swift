@@ -279,47 +279,50 @@ final class DebugLogger {
 }
 
 func accessibilityStatus(prompt: Bool) -> PermissionState {
-    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
-    return AXIsProcessTrustedWithOptions(options) ? .granted : .denied
+    actionCurrentProcessAccessibilityStatus(prompt: prompt) == .granted ? .granted : .denied
 }
 
 func screenRecordingStatus() -> PermissionState {
-    CGPreflightScreenCaptureAccess() ? .granted : .denied
+    actionCurrentProcessScreenRecordingStatus() == .granted ? .granted : .denied
 }
 
-@discardableResult
-func requestScreenRecording() -> PermissionState {
-    if CGPreflightScreenCaptureAccess() {
-        return .granted
-    }
-
-    return CGRequestScreenCaptureAccess() ? .granted : .denied
-}
-
-func snapshot(promptAccessibility: Bool, requestScreenRecordingPermission: Bool) -> PermissionSnapshot {
+func snapshot(
+    promptAccessibility: Bool,
+    screenRecording: PermissionState? = nil
+) -> PermissionSnapshot {
     let accessibility = accessibilityStatus(prompt: promptAccessibility)
-    let screenRecording = requestScreenRecordingPermission
-        ? requestScreenRecording()
-        : screenRecordingStatus()
-    let bundleId = Bundle.main.bundleIdentifier ?? "unknown"
-    let bundlePath = Bundle.main.bundlePath
+    let resolvedScreenRecording = screenRecording
+        ?? screenRecordingStatus()
+    let bundleId = actionCurrentProcessBundleIdentifier()
+    let bundlePath = actionCurrentProcessBundleURL().path
 
     return PermissionSnapshot(
         accessibility: accessibility,
-        screenRecording: screenRecording,
+        screenRecording: resolvedScreenRecording,
         notes: [
             "bundleId=\(bundleId)",
-            "bundlePath=\(bundlePath)"
+            "bundlePath=\(bundlePath)",
+            "process=\(ActionPermissionProcess.host.rawValue)",
         ]
     )
 }
 
 func openSettingsPane(anchor: String) {
-    guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") else {
+    if let kind = ActionPermissionKind.parse(anchor) {
+        actionOpenPrivacySettings(for: kind)
         return
     }
-
-    NSWorkspace.shared.open(url)
+    switch anchor {
+    case "Privacy_Accessibility":
+        actionOpenPrivacySettings(for: .accessibility)
+    case "Privacy_ScreenCapture":
+        actionOpenPrivacySettings(for: .screenRecording)
+    default:
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
 }
 
 /// Resolves a bundle identifier to exactly one running process. Two processes can share a
@@ -3971,14 +3974,22 @@ func run(command: ActionHostCommand, options: CommandOptions, writer: ResponseWr
             )
         )
     case .status:
-        try writer.write(snapshot(promptAccessibility: false, requestScreenRecordingPermission: false))
+        try writer.write(snapshot(promptAccessibility: false))
     case .request:
-        try writer.write(snapshot(promptAccessibility: true, requestScreenRecordingPermission: true))
+        let screenRecording = await actionRequestCurrentProcessScreenRecording() == .granted
+            ? PermissionState.granted
+            : .denied
+        try writer.write(
+            snapshot(
+                promptAccessibility: true,
+                screenRecording: screenRecording
+            )
+        )
     case .openAccessibilitySettings:
-        openSettingsPane(anchor: "Privacy_Accessibility")
+        actionOpenPrivacySettings(for: .accessibility)
         try writer.write(ActionHostResponse(status: "opened", outputPath: nil, detail: "accessibility"))
     case .openScreenRecordingSettings:
-        openSettingsPane(anchor: "Privacy_ScreenCapture")
+        actionOpenPrivacySettings(for: .screenRecording)
         try writer.write(ActionHostResponse(status: "opened", outputPath: nil, detail: "screen-recording"))
     case .currentSurface:
         try writer.write(try currentSurface())

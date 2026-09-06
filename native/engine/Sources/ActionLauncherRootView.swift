@@ -1,3 +1,4 @@
+import ActionCore
 import AppKit
 import SwiftUI
 
@@ -152,7 +153,7 @@ struct ActionLauncherRootView: View {
         var subtitle: String {
             switch self {
             case .permissions:
-                return "Accessibility and Screen Recording"
+                return "Action.app and ActionAgent, including Screen Recording"
             case .appearance:
                 return "Theme, light and dark"
             case .agent:
@@ -1097,15 +1098,14 @@ struct ActionLauncherRootView: View {
     }
 
     private var permissionsReady: Bool {
-        model.accessibilityStatus.lowercased() == "granted"
-            && model.screenRecordingStatus.lowercased() == "granted"
+        model.permissionsReady
     }
 
     private var permissionSummary: String {
         if permissionsReady {
             return "Ready"
         }
-        return "AX \(shortPermission(model.accessibilityStatus)) · Screen \(shortPermission(model.screenRecordingStatus))"
+        return "AX \(shortPermission(model.agentAccessibilityStatus)) · Rec \(shortPermission(model.hostScreenRecordingStatus)) · Shot \(shortPermission(model.agentScreenRecordingStatus))"
     }
 
     // MARK: - Takes
@@ -2401,8 +2401,9 @@ struct ActionLauncherRootView: View {
     }
 
     private var settingsPermissionsPage: some View {
-        let axGranted = model.accessibilityStatus.lowercased() == "granted"
-        let screenGranted = model.screenRecordingStatus.lowercased() == "granted"
+        let agentAxGranted = model.agentAccessibilityStatus.lowercased() == "granted"
+        let hostScreenGranted = model.hostScreenRecordingStatus.lowercased() == "granted"
+        let agentScreenGranted = model.agentScreenRecordingStatus.lowercased() == "granted"
 
         return VStack(alignment: .leading, spacing: 18) {
             if !permissionsReady {
@@ -2411,7 +2412,7 @@ struct ActionLauncherRootView: View {
                         icon: "exclamationmark.triangle.fill",
                         iconColor: StageHUDTheme.hudAmber,
                         title: "Some permissions are missing",
-                        subtitle: "Accessibility and Screen Recording"
+                        subtitle: missingPermissionSummary
                     ) {
                         Button("Request access") {
                             model.requestPermissions()
@@ -2421,39 +2422,87 @@ struct ActionLauncherRootView: View {
                 }
             }
 
-            ActionSettingsSection(title: "macOS privacy") {
+            ActionSettingsSection(title: "Action.app") {
+                ActionSettingsPermissionRow(
+                    title: "Screen Recording",
+                    detail: "Records guided captures. macOS applies this to Action.app, then usually needs a relaunch.",
+                    granted: hostScreenGranted,
+                    statusLabel: permissionStatusLabel(model.hostScreenRecordingStatus),
+                    primaryActionTitle: "Grant",
+                    onPrimary: { model.requestPermission(.screenRecording, process: .host) },
+                    onOpenSettings: { model.showPermissionAssistant(.screenRecording, process: .host) }
+                )
+            }
+
+            ActionSettingsSection(title: "ActionAgent") {
                 ActionSettingsPermissionRow(
                     title: "Accessibility",
-                    detail: "Focus, click, type, read UI",
-                    granted: axGranted,
-                    statusLabel: permissionStatusLabel(model.accessibilityStatus),
+                    detail: "Focus, click, type, and read UI in the apps Action drives.",
+                    granted: agentAxGranted,
+                    statusLabel: permissionStatusLabel(model.agentAccessibilityStatus),
                     primaryActionTitle: "Grant",
-                    onPrimary: model.requestPermissions,
-                    onOpenSettings: model.openAccessibilitySettings
+                    onPrimary: { model.requestPermission(.accessibility, process: .agent) },
+                    onOpenSettings: { model.showPermissionAssistant(.accessibility, process: .agent) }
                 )
 
                 ActionSettingsDivider()
 
                 ActionSettingsPermissionRow(
                     title: "Screen Recording",
-                    detail: "Screenshots and recording",
-                    granted: screenGranted,
-                    statusLabel: permissionStatusLabel(model.screenRecordingStatus),
+                    detail: "Screenshots taken by the helper while a drive is running.",
+                    granted: agentScreenGranted,
+                    statusLabel: permissionStatusLabel(model.agentScreenRecordingStatus),
                     primaryActionTitle: "Grant",
-                    onPrimary: model.requestPermissions,
-                    onOpenSettings: model.openScreenRecordingSettings
+                    onPrimary: { model.requestPermission(.screenRecording, process: .agent) },
+                    onOpenSettings: { model.showPermissionAssistant(.screenRecording, process: .agent) }
                 )
             }
 
             HStack(spacing: 8) {
-                Button("Check again", action: model.refreshPermissions)
+                Button(model.permissionRefreshInFlight ? "Checking" : "Check again", action: model.refreshPermissions)
                     .buttonStyle(ActionSettingsPillButtonStyle())
+                    .disabled(model.permissionRefreshInFlight)
                 if !permissionsReady {
-                    Button("Request all", action: model.requestPermissions)
+                    Button("Request missing", action: model.requestPermissions)
                         .buttonStyle(ActionSettingsPillButtonStyle(primary: true))
                 }
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Look for in System Settings")
+                    .font(ActionType.uiCaptionStrong)
+                    .foregroundStyle(StageHUDTheme.textMuted)
+                Text("Action: \(ActionPermissionProcess.host.bundleIdentifier)")
+                    .font(ActionType.mono(10))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+                    .textSelection(.enabled)
+                Text("ActionAgent: \(ActionPermissionProcess.agent.bundleIdentifier)")
+                    .font(ActionType.mono(10))
+                    .foregroundStyle(StageHUDTheme.textSecondary)
+                    .textSelection(.enabled)
+                Text("If an older Action row is listed, remove it and drag the current app in from the helper.")
+                    .font(ActionType.uiCaption)
+                    .foregroundStyle(StageHUDTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .onAppear {
+            model.refreshPermissions()
+        }
+    }
+
+    private var missingPermissionSummary: String {
+        var missing: [String] = []
+        if model.hostScreenRecordingStatus.lowercased() != "granted" {
+            missing.append("Screen Recording for Action.app")
+        }
+        if model.agentAccessibilityStatus.lowercased() != "granted" {
+            missing.append("Accessibility for ActionAgent")
+        }
+        if model.agentScreenRecordingStatus.lowercased() != "granted" {
+            missing.append("Screen Recording for ActionAgent")
+        }
+        return missing.isEmpty ? "Accessibility and Screen Recording" : missing.joined(separator: " · ")
     }
 
     private var settingsAppearancePage: some View {
