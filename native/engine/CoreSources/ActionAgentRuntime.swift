@@ -86,7 +86,6 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         listener = try NWListener(using: parameters)
     }
 
-    @MainActor
     func run() -> Never {
         listener.stateUpdateHandler = { state in
             switch state {
@@ -109,8 +108,7 @@ final class ActionAgentRuntimeServer: @unchecked Sendable {
         startParentWatchIfNeeded()
         startDriveSweep()
         startIdleExitIfNeeded()
-        NSApplication.shared.run()
-        exit(0)
+        dispatchMain()
     }
 
     private func handle(connection: NWConnection) {
@@ -701,16 +699,12 @@ private func actionAgentOpenSettingsPane(anchor: String) {
 }
 
 public enum ActionAgentRuntime {
-    @MainActor
     public static func run(arguments: [String]) -> Never {
         let port = parsePort(arguments: arguments) ?? ActionAgentDefaults.port
         let parentProcessID = parseParentProcessID(arguments: arguments)
         let idleExitSeconds = parseIdleExitSeconds(arguments: arguments)
 
         do {
-            let application = NSApplication.shared
-            application.setActivationPolicy(.accessory)
-
             let server = try ActionAgentRuntimeServer(
                 port: port,
                 parentProcessID: parentProcessID,

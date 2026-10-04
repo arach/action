@@ -7,6 +7,8 @@ import type {
   DriveMode,
   DriveOutcome,
   DriveStatusSnapshot,
+  EngineDiagnostics,
+  PermissionState,
 } from "@action/protocol";
 
 interface ActionAgentResponse {
@@ -74,6 +76,25 @@ export class DriveAgentClient {
 
   get isConnected(): boolean {
     return this.socket?.readyState === WebSocket.OPEN;
+  }
+
+  async diagnostics(): Promise<EngineDiagnostics> {
+    const result = await this.request("permissions.snapshot");
+    const permissionState = (value: string | undefined): PermissionState => {
+      if (value === "granted" || value === "denied") {
+        return value;
+      }
+      return "unknown";
+    };
+    const bundleNote = result.bundlePath
+      ? [`ActionAgent bundle: ${result.bundlePath}`]
+      : undefined;
+
+    return {
+      accessibility: permissionState(result.accessibility),
+      screenRecording: permissionState(result.screenRecording),
+      notes: bundleNote,
+    };
   }
 
   async begin(input: DriveBeginInput): Promise<DriveBeginResult> {
