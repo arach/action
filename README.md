@@ -1,5 +1,22 @@
 # action
 
+> **Action has moved into Lattices.** All ongoing development lives in [arach/lattices](https://github.com/arach/lattices), under [products/action](https://github.com/arach/lattices/tree/main/products/action). This repository preserves the former standalone project.
+
+- [Lattices repository](https://github.com/arach/lattices)
+- [Current Action source and setup](https://github.com/arach/lattices/tree/main/products/action)
+- [Action product page and documentation](https://lattices.dev/action/)
+- [Agent instructions](https://github.com/arach/lattices/blob/main/products/action/AGENTS.md)
+- [Report issues in Lattices](https://github.com/arach/lattices/issues)
+
+The original Action main history was imported on August 27, 2026 ([migration commit](https://github.com/arach/lattices/commit/b1ad511adf509c0c60d7f3edce7cd15257601db2)). Action keeps its own signed `Action.app`, local agent, and recording lifecycle within the Lattices monorepo.
+
+Agents: read the [Lattices workspace instructions](https://github.com/arach/lattices/blob/main/AGENTS.md) and the Action instructions before making changes. Use `arach/lattices` for ongoing work.
+
+<details>
+<summary>Historical standalone documentation</summary>
+
+The instructions below describe the former standalone repository. Use the links above for current setup and development.
+
 **[arach.github.io/action](https://arach.github.io/action/)** · Native-first macOS automation, capture, and review.
 
 `action` is a local runtime for observing a Mac surface, executing deterministic actions, recording what happened, and preserving the result as inspectable session artifacts.
@@ -303,3 +320,5 @@ The milestone is done when an agent can start Action, perform real work on macOS
 - [Live Inspection Runtime](docs/LIVE_INSPECTION_RUNTIME.md)
 - [Surface Adapter Plan](docs/SURFACE_ADAPTER_PLAN.md)
 - [Composition And Scenarios](docs/COMPOSITION_AND_SCENARIOS.md)
+
+</details>
